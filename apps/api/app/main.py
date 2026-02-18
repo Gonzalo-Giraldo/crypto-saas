@@ -15,6 +15,3 @@ app.include_router(users_router)
 def healthz():
     return {"status": "ok"}
 
-
-
-
