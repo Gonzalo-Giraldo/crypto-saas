@@ -1,2 +1,2 @@
-from .user import User
+# Models package
 
