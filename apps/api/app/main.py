@@ -1,6 +1,9 @@
 from apps.api.app.api.signals import router as signals_router
+from apps.api.app.api.positions import router as positions_router
 
 import apps.api.app.models.signal
+import apps.api.app.models.position
+import apps.api.app.models.daily_risk
 
 from fastapi import FastAPI
 
@@ -17,6 +20,7 @@ Base.metadata.create_all(bind=engine)
 app.include_router(ops_router)
 app.include_router(users_router)
 app.include_router(signals_router)
+app.include_router(positions_router)
 
 @app.get("/healthz")
 def healthz():

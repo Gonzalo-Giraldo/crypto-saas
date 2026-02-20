@@ -32,3 +32,30 @@ def list_signals(db: Session = Depends(get_db)):
     rows = db.execute(select(Signal).order_by(Signal.created_at.desc())).scalars().all()
     return rows
 
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+from typing import List
+
+
+@router.post("/claim", response_model=List[SignalOut])
+def claim_signals(user_id: str, limit: int = 10, db: Session = Depends(get_db)):
+
+    # seleccionar señales disponibles
+    rows = (
+        db.query(Signal)
+        .filter(Signal.status == "CREATED", Signal.user_id == user_id)
+        .order_by(Signal.created_at.asc())
+        .limit(limit)
+        .all()
+    )
+
+    claimed = []
+
+    for signal in rows:
+        signal.status = "EXECUTING"
+        claimed.append(signal)
+
+    db.commit()
+
+    return claimed
+
