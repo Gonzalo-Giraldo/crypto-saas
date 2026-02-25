@@ -1,6 +1,36 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
 .env
-db.sqlite
 .env.*
+
+# SQLite
+db.sqlite
+*.sqlite3
+
+# Logs
 *.log
+
+# MacOS
+.DS_Store
+
+# Docker
+*.pid
+
+# VSCode
+.vscode/
+
+# Pytest
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
