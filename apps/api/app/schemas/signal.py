@@ -3,6 +3,7 @@ from typing import Optional
 
 
 class SignalCreate(BaseModel):
+    symbol: str
     module: str
     base_risk_percent: float
     entry_price: float
@@ -24,4 +25,3 @@ class SignalOut(BaseModel):
 
     class Config:
         from_attributes = True
-

@@ -5,6 +5,8 @@ from pydantic import ConfigDict
 class Settings(BaseSettings):
     DATABASE_URL: str
     SECRET_KEY: str
+    ENCRYPTION_KEY: str
+    BINANCE_TESTNET_BASE_URL: str = "https://testnet.binance.vision"
     DAILY_STOP: float
     MAX_TRADES: int
 

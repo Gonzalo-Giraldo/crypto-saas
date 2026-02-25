@@ -1,3 +1,5 @@
+from typing import List
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -8,6 +10,7 @@ from apps.api.app.schemas.signal import SignalCreate, SignalOut
 
 from apps.api.app.api.deps import get_current_user
 from apps.api.app.models.user import User
+from apps.api.app.services.audit import log_audit_event
 
 
 router = APIRouter(prefix="/signals", tags=["signals"])
@@ -30,34 +33,47 @@ def create_signal(
     )
 
     db.add(signal)
+    db.flush()
+    log_audit_event(
+        db,
+        action="signal.create",
+        user_id=current_user.id,
+        entity_type="signal",
+        entity_id=signal.id,
+        details={"symbol": payload.symbol, "module": payload.module},
+    )
     db.commit()
     db.refresh(signal)
-    db.add(s)
-    db.commit()
-    db.refresh(s)
-    return s
+    return signal
 
 
 @router.get("", response_model=list[SignalOut])
-def list_signals(db: Session = Depends(get_db)):
-    rows = db.execute(select(Signal).order_by(Signal.created_at.desc())).scalars().all()
+def list_signals(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        db.execute(
+            select(Signal)
+            .where(Signal.user_id == current_user.id)
+            .order_by(Signal.created_at.desc())
+        )
+        .scalars()
+        .all()
+    )
     return rows
-
-from sqlalchemy import update
-from sqlalchemy.orm import Session
-from typing import List
 
 
 @router.post("/claim", response_model=List[SignalOut])
-def claim_signals(user_id: str, limit: int = 10, db: Session = Depends(get_db)):
-
-
-
-
+def claim_signals(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     # seleccionar señales disponibles
     rows = (
         db.query(Signal)
-        .filter(Signal.status == "CREATED", Signal.user_id == user_id)
+        .filter(Signal.status == "CREATED", Signal.user_id == current_user.id)
         .order_by(Signal.created_at.asc())
         .limit(limit)
         .all()
@@ -69,7 +85,13 @@ def claim_signals(user_id: str, limit: int = 10, db: Session = Depends(get_db)):
         signal.status = "EXECUTING"
         claimed.append(signal)
 
+    log_audit_event(
+        db,
+        action="signal.claim",
+        user_id=current_user.id,
+        entity_type="signal_batch",
+        details={"claimed_count": len(claimed), "limit": limit},
+    )
     db.commit()
 
     return claimed
-

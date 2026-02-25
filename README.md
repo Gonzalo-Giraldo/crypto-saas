@@ -1,146 +1,83 @@
 # crypto-saas
 
-SaaS privado (2 usuarios) para trading spot en Binance con enfoque en control de riesgo y transparencia.
+Backend SaaS (FastAPI + PostgreSQL) for conservative crypto trading operations with:
+- authenticated users (JWT),
+- signal lifecycle,
+- position open/close flow,
+- daily risk tracking.
 
-## Estructura
-- apps/api: FastAPI (endpoints + ops)
-- apps/worker: tareas (scanner/ejecución/reconciliación/snapshots)
-- docs: decisiones, reglas, runbook
-- scripts: utilidades
+## Stack
+- FastAPI
+- SQLAlchemy
+- PostgreSQL
+- Docker Compose
 
-## Fase 1
-- MICRO_LIVE 350 USDT
-- BTC/ETH
-- Riesgo por trade: 1.25 USDT
-- Daily stop: 5 USDT
-- 1 posición, 3 trades/día
+## Quick start
+1. Bootstrap local environment:
+```bash
+scripts/bootstrap_dev.sh
+```
 
-🚀 Crypto SaaS
-📌 Overview
+2. Configure `.env` (created from `.env.example` on bootstrap).
 
-Crypto SaaS es un motor backend para ejecución y gestión de señales de trading con control de riesgo diario integrado.
+3. Start database:
+```bash
+docker compose up -d db
+```
 
-El sistema permite:
-
-Crear señales de trading
-
-Ejecutar posiciones
-
-Cerrar posiciones con cálculo de PnL
-
-Aplicar reglas estrictas de riesgo diario
-
-Persistir estado en base de datos
-
-Bloquear operaciones cuando se exceden límites
-
-Este proyecto representa la base de un SaaS multiusuario para trading automatizado.
-
-🏗 Architecture
-apps/
- └── api/
-      ├── models/
-      ├── services/
-      ├── routes/
-      └── db/
-
-Stack actual:
-
-Python
-
-FastAPI
-
-SQLAlchemy
-
-SQLite
-
-Git Flow simplificado
-
-🛡 Risk Engine
-
-El sistema implementa control de riesgo diario persistente mediante:
-
-Tabla: daily_risk_state
-
-Campos clave:
-
-trades_today
-
-realized_pnl_today
-
-daily_stop
-
-max_trades
-
-Reglas:
-
-❌ Bloqueo si trades_today >= max_trades
-
-❌ Bloqueo si realized_pnl_today <= daily_stop
-
-✅ Reseteo automático por día (UTC)
-
-📡 API Endpoints principales
-
-POST /signals
-
-POST /positions/open
-
-POST /positions/close
-
-GET /positions/risk/today
-
-⚙️ Local Setup
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+4. Start API:
+```bash
+source .venv/bin/activate
 uvicorn apps.api.app.main:app --reload
+```
 
-Base de datos:
+5. Run end-to-end scenario:
+```bash
+scripts/run_scenario.sh
+```
 
-db.sqlite
-🧠 Current Version
+## Main endpoints
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/2fa/setup`
+- `POST /auth/2fa/verify-enable`
+- `POST /auth/2fa/disable`
+- `GET /users/me`
+- `POST /users/exchange-secrets`
+- `GET /users/exchange-secrets`
+- `DELETE /users/exchange-secrets/{exchange}`
+- `GET /ops/audit/me`
+- `GET /ops/audit/all` (admin)
+- `POST /ops/execution/prepare` (dry-run, worker runtime)
+- `POST /ops/execution/binance/test-order` (Binance testnet)
+- `POST /ops/execution/ibkr/paper-check` (IBKR connector check)
+- `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
+- `POST /signals`
+- `GET /signals`
+- `POST /signals/claim`
+- `POST /positions/open_from_signal`
+- `POST /positions/close`
+- `GET /positions`
+- `GET /positions/risk/today`
 
-v1.0.0
+## Notes
+- Current focus is crypto flow.
+- Worker notifications support Telegram via optional env vars.
+- If 2FA is enabled for a user, `/auth/login` requires the `otp` form field.
+- Exchange credentials are stored encrypted at rest with `ENCRYPTION_KEY`.
+- Binance live trading is not enabled here; only testnet `order/test` endpoint is wired.
+- IBKR connector is currently a paper-check path (credential verification workflow scaffold).
 
-Incluye:
+## Runbooks
+- Local/dev operations: `docs/runbook_operativo.md`
+- Staging/production operations: `docs/runbook_produccion.md`
+- Daily one-page checklist: `docs/checklist_operativa_1pagina.md`
 
-Risk engine funcional
-
-Persistencia estable
-
-UTC safe timestamps
-
-Arquitectura organizada
-
-Versionado profesional
-
-🗺 Roadmap
-v1.1
-
-Multi-asset support robusto
-
-Mejor cálculo de fees
-
-Logging estructurado
-
-v1.2
-
-Dockerización
-
-Configuración por entorno
-
-Tests automáticos
-
-v2.0
-
-Multiusuario real con autenticación
-
-Dashboard web
-
-Integración con exchange real
-
-👨‍💻 Author
-
-Gonzalo Giraldo
-Founder – Crypto SaaS
+## Smoke Script
+- Automated production smoke checks: `scripts/smoke_prod.sh`
+- GitHub Actions workflow: `.github/workflows/smoke-prod.yml`
+- Required repository secrets for CI:
+  - `SMOKE_BASE_URL` (used on push to `main`)
+  - `SMOKE_PASSWORD`
+  - `SMOKE_BINANCE_API_KEY`
+  - `SMOKE_BINANCE_API_SECRET`

@@ -5,6 +5,9 @@ from apps.api.app.routes.auth import router as auth_router
 import apps.api.app.models.signal
 import apps.api.app.models.position
 import apps.api.app.models.daily_risk
+import apps.api.app.models.user_2fa
+import apps.api.app.models.audit_log
+import apps.api.app.models.exchange_secret
 
 from fastapi import FastAPI
 

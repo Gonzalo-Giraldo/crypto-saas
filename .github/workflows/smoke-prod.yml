@@ -1,0 +1,91 @@
+name: Smoke Prod
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://api.example.com)"
+        required: true
+        type: string
+      require_ibkr_secret:
+        description: "Fail if IBKR secret is missing"
+        required: false
+        default: false
+        type: boolean
+      allow_binance_test_error:
+        description: "Treat Binance test-order controlled API errors as PASS"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
+      REQUIRE_IBKR_SECRET: ${{ github.event_name == 'workflow_dispatch' && inputs.require_ibkr_secret || 'false' }}
+      ALLOW_BINANCE_TEST_ERROR: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_binance_test_error || 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "BASE_URL is empty. Set workflow input 'base_url' or repository secret 'SMOKE_BASE_URL'."
+            exit 1
+          fi
+
+      - name: Create smoke user and seed Binance secret
+        env:
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+          SMOKE_BINANCE_API_KEY: ${{ secrets.SMOKE_BINANCE_API_KEY }}
+          SMOKE_BINANCE_API_SECRET: ${{ secrets.SMOKE_BINANCE_API_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
+            echo "Missing required secret: SMOKE_PASSWORD"
+            exit 1
+          fi
+          if [[ -z "${SMOKE_BINANCE_API_KEY:-}" || -z "${SMOKE_BINANCE_API_SECRET:-}" ]]; then
+            echo "Missing required secrets: SMOKE_BINANCE_API_KEY / SMOKE_BINANCE_API_SECRET"
+            exit 1
+          fi
+
+          export EMAIL="smoke.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}@example.com"
+          export PASSWORD="$SMOKE_PASSWORD"
+
+          curl -s -X POST "$BASE_URL/auth/register" \
+            -H "Content-Type: application/json" \
+            --data "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" >/dev/null || true
+
+          TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data "username=$EMAIL&password=$PASSWORD" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
+
+          if [[ -z "$TOKEN" ]]; then
+            echo "Failed to login smoke user"
+            exit 1
+          fi
+
+          curl -s -X POST "$BASE_URL/users/exchange-secrets" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"exchange\":\"BINANCE\",\"api_key\":\"$SMOKE_BINANCE_API_KEY\",\"api_secret\":\"$SMOKE_BINANCE_API_SECRET\"}" >/dev/null
+
+          echo "SMOKE_EMAIL=$EMAIL" >> "$GITHUB_ENV"
+
+      - name: Run smoke script
+        env:
+          EMAIL: ${{ env.SMOKE_EMAIL }}
+          PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/smoke_prod.sh
+          scripts/smoke_prod.sh

@@ -1,13 +1,12 @@
 services:
   db:
     image: postgres:15
-    container_name: crypto_saas_db
     environment:
       POSTGRES_USER: crypto
       POSTGRES_PASSWORD: crypto
       POSTGRES_DB: crypto_saas
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +17,6 @@ services:
 
   api:
     build: .
-    container_name: crypto_saas_api
     ports:
       - "8000:8000"
     env_file:

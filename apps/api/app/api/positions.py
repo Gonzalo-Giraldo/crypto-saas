@@ -9,15 +9,25 @@ from apps.api.app.models.signal import Signal
 from apps.api.app.models.position import Position
 from apps.api.app.schemas.position import PositionOut
 from apps.api.app.core.time import today_colombia
+from apps.api.app.api.deps import get_current_user
+from apps.api.app.models.user import User
+from apps.api.app.services.audit import log_audit_event
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
 
 @router.post("/open_from_signal", response_model=PositionOut)
-def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
+def open_from_signal(
+    signal_id: str,
+    qty: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     s = db.execute(select(Signal).where(Signal.id == signal_id)).scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Signal not found")
+    if s.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot open another user's signal")
     if s.status != "EXECUTING":
         raise HTTPException(status_code=409, detail=f"Signal status must be EXECUTING (got {s.status})")
 
@@ -63,6 +73,7 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
         status="OPEN",
     )
     db.add(p)
+    db.flush()
 
     # avanzamos el estado de la señal
     s.status = "OPENED"
@@ -82,6 +93,14 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
         db.add(dr)
         db.flush()
 
+    log_audit_event(
+        db,
+        action="position.open",
+        user_id=current_user.id,
+        entity_type="position",
+        entity_id=p.id,
+        details={"signal_id": s.id, "symbol": p.symbol, "qty": p.qty},
+    )
 
     db.commit()
     db.refresh(p)
@@ -89,15 +108,34 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[PositionOut])
-def list_positions(db: Session = Depends(get_db)):
-    rows = db.execute(select(Position).order_by(Position.opened_at.desc())).scalars().all()
+def list_positions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        db.execute(
+            select(Position)
+            .where(Position.user_id == current_user.id)
+            .order_by(Position.opened_at.desc())
+        )
+        .scalars()
+        .all()
+    )
     return rows
 
 @router.post("/close", response_model=PositionOut)
-def close_position(position_id: str, exit_price: float, fees: float = 0.0, db: Session = Depends(get_db)):
+def close_position(
+    position_id: str,
+    exit_price: float,
+    fees: float = 0.0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     p = db.execute(select(Position).where(Position.id == position_id)).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Position not found")
+    if p.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot close another user's position")
 
     if p.status != "OPEN":
         raise HTTPException(status_code=409, detail=f"Position status must be OPEN (got {p.status})")
@@ -107,6 +145,7 @@ def close_position(position_id: str, exit_price: float, fees: float = 0.0, db: S
 
     p.fees = float(fees)
     p.realized_pnl = float(realized_pnl)
+    p.status = "CLOSED"
 
     p.closed_at = datetime.now(timezone.utc)
 
@@ -135,12 +174,23 @@ def close_position(position_id: str, exit_price: float, fees: float = 0.0, db: S
     dr.trades_today += 1
     dr.realized_pnl_today += realized_pnl
 
+    log_audit_event(
+        db,
+        action="position.close",
+        user_id=current_user.id,
+        entity_type="position",
+        entity_id=p.id,
+        details={"realized_pnl": realized_pnl, "fees": fees},
+    )
     db.commit()
     db.refresh(p)
     return p
 
 @router.get("/risk/today")
-def get_today_risk(user_id: str, db: Session = Depends(get_db)):
+def get_today_risk(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     from apps.api.app.models.daily_risk import DailyRiskState
     from apps.api.app.core.time import today_colombia
     today = today_colombia()
@@ -148,7 +198,7 @@ def get_today_risk(user_id: str, db: Session = Depends(get_db)):
     dr = (
         db.execute(
             select(DailyRiskState).where(
-                DailyRiskState.user_id == user_id,
+                DailyRiskState.user_id == current_user.id,
                 DailyRiskState.day == today,
             )
         )
@@ -157,7 +207,7 @@ def get_today_risk(user_id: str, db: Session = Depends(get_db)):
 
     if not dr:
         return {
-            "user_id": user_id,
+            "user_id": current_user.id,
             "day": str(today),
             "trades_today": 0,
             "realized_pnl_today": 0.0,
