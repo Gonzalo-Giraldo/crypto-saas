@@ -1,5 +1,5 @@
 {
-  "user_id": "6805e2a1-abc7-43cf-b7a0-34e9386b98c5",
+  "user_id": "test-daily-stop-001",
   "symbol": "BTC/USDT",
   "module": "DAY_TREND",
   "base_risk_percent": 0.35,

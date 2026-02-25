@@ -6,21 +6,32 @@ from apps.api.app.db.session import get_db
 from apps.api.app.models.signal import Signal
 from apps.api.app.schemas.signal import SignalCreate, SignalOut
 
+from apps.api.app.api.deps import get_current_user
+from apps.api.app.models.user import User
+
+
 router = APIRouter(prefix="/signals", tags=["signals"])
 
-
 @router.post("", response_model=SignalOut)
-def create_signal(payload: SignalCreate, db: Session = Depends(get_db)):
-    s = Signal(
-        user_id=payload.user_id,
+def create_signal(
+    payload: SignalCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+
+    signal = Signal(
+        user_id=current_user.id,   # 👈 clave
         symbol=payload.symbol,
         module=payload.module,
         base_risk_percent=payload.base_risk_percent,
         entry_price=payload.entry_price,
         stop_loss=payload.stop_loss,
         take_profit=payload.take_profit,
-        status="CREATED",
     )
+
+    db.add(signal)
+    db.commit()
+    db.refresh(signal)
     db.add(s)
     db.commit()
     db.refresh(s)
@@ -39,6 +50,9 @@ from typing import List
 
 @router.post("/claim", response_model=List[SignalOut])
 def claim_signals(user_id: str, limit: int = 10, db: Session = Depends(get_db)):
+
+
+
 
     # seleccionar señales disponibles
     rows = (

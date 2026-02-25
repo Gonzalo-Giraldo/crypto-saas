@@ -1,15 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-
-from apps.api.app.models.daily_risk import DailyRiskState
 from datetime import datetime, timezone
 
-
+from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.db.session import get_db
 from apps.api.app.models.signal import Signal
 from apps.api.app.models.position import Position
 from apps.api.app.schemas.position import PositionOut
+from apps.api.app.core.time import today_colombia
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
@@ -19,7 +18,6 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
     s = db.execute(select(Signal).where(Signal.id == signal_id)).scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Signal not found")
-
     if s.status != "EXECUTING":
         raise HTTPException(status_code=409, detail=f"Signal status must be EXECUTING (got {s.status})")
 
@@ -34,17 +32,7 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
     if open_pos:
         raise HTTPException(status_code=409, detail="Risk block: already has an OPEN position")
 
-    open_pos = db.execute(
-        select(Position).where(Position.user_id == s.user_id, Position.status == "OPEN")
-    ).scalar_one_or_none()
-
-    if open_pos:
-        raise HTTPException(status_code=409, detail="Risk block: already has an OPEN position")
-
-    from datetime import datetime, timezone
-    from apps.api.app.models.daily_risk import DailyRiskState
-
-    today = datetime.now(timezone.utc).date()
+    today = today_colombia()
 
     dr = (
         db.execute(
@@ -57,12 +45,11 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
     )
 
     if dr:
-        if float(dr.realized_pnl_today) <= float(dr.daily_stop):
-           raise HTTPException(status_code=409, detail="Risk block: daily stop reached")
-        if int(dr.trades_today) >= int(dr.max_trades):
-           raise HTTPException(status_code=409, detail="Risk block: max trades reached")
- 
+        if dr.realized_pnl_today <= dr.daily_stop:
+            raise HTTPException(status_code=409, detail="Risk block: daily stop reached")
 
+        if dr.trades_today >= dr.max_trades:
+            raise HTTPException(status_code=409, detail="Risk block: max trades reached")
 
     p = Position(
         user_id=s.user_id,
@@ -79,8 +66,6 @@ def open_from_signal(signal_id: str, qty: float, db: Session = Depends(get_db)):
 
     # avanzamos el estado de la señal
     s.status = "OPENED"
-
-    today = datetime.now(timezone.utc).date()
 
     dr = (
         db.execute(
@@ -108,11 +93,8 @@ def list_positions(db: Session = Depends(get_db)):
     rows = db.execute(select(Position).order_by(Position.opened_at.desc())).scalars().all()
     return rows
 
-from datetime import datetime, timezone
-
 @router.post("/close", response_model=PositionOut)
 def close_position(position_id: str, exit_price: float, fees: float = 0.0, db: Session = Depends(get_db)):
-    import datetime as dt
     p = db.execute(select(Position).where(Position.id == position_id)).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -125,21 +107,15 @@ def close_position(position_id: str, exit_price: float, fees: float = 0.0, db: S
 
     p.fees = float(fees)
     p.realized_pnl = float(realized_pnl)
-    p.status = "CLOSED"
 
-    import datetime as dt
-    p.closed_at = dt.datetime.now(dt.timezone.utc)
+    p.closed_at = datetime.now(timezone.utc)
 
     # marcar signal como COMPLETED
     s = db.execute(select(Signal).where(Signal.id == p.signal_id)).scalar_one_or_none()
     if s:
         s.status = "COMPLETED"
 
-
-    from datetime import datetime, timezone
-    from apps.api.app.models.daily_risk import DailyRiskState
-
-    today = dt.datetime.now(dt.timezone.utc).date()
+    today = today_colombia()
 
     dr = (
         db.execute(
@@ -156,8 +132,48 @@ def close_position(position_id: str, exit_price: float, fees: float = 0.0, db: S
         db.add(dr)
         db.flush()
 
-    dr.trades_today = int(dr.trades_today) + 1
+    dr.trades_today += 1
+    dr.realized_pnl_today += realized_pnl
 
     db.commit()
     db.refresh(p)
     return p
+
+@router.get("/risk/today")
+def get_today_risk(user_id: str, db: Session = Depends(get_db)):
+    from apps.api.app.models.daily_risk import DailyRiskState
+    from apps.api.app.core.time import today_colombia
+    today = today_colombia()
+
+    dr = (
+        db.execute(
+            select(DailyRiskState).where(
+                DailyRiskState.user_id == user_id,
+                DailyRiskState.day == today,
+            )
+        )
+        .scalar_one_or_none()
+    )
+
+    if not dr:
+        return {
+            "user_id": user_id,
+            "day": str(today),
+            "trades_today": 0,
+            "realized_pnl_today": 0.0,
+            "daily_stop": -5.0,
+            "max_trades": 3,
+            "remaining_trades": 3,
+            "remaining_loss_buffer": -5.0,
+        }
+
+    return {
+        "user_id": dr.user_id,
+        "day": str(dr.day),
+        "trades_today": dr.trades_today,
+        "realized_pnl_today": dr.realized_pnl_today,
+        "daily_stop": dr.daily_stop,
+        "max_trades": dr.max_trades,
+        "remaining_trades": dr.max_trades - dr.trades_today,
+        "remaining_loss_buffer": dr.daily_stop - dr.realized_pnl_today,
+    }
