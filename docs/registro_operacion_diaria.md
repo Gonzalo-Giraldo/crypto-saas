@@ -29,3 +29,5 @@ Uso:
 - `Cerrado OK`: operacion validada.
 - `Cerrado con observacion`: operacion estable con nota de seguimiento.
 - `Abierto`: incidente en curso.
+| 2026-02-26 | 12:15 | Gonzalo | OK | Verde | OK | No | Limpieza usuarios smoke y validación RBAC | Cerrado OK | https://github.com/Gonzalo-Giraldo/crypto-saas/actions/runs/ID_DEL_RUN |
+
