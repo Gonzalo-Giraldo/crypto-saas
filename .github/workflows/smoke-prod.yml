@@ -138,16 +138,19 @@ jobs:
           script: |
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const issueTitle = '[Smoke Prod] Incident open';
-            const workflowId = 'smoke-prod.yml';
-            const runsResp = await github.rest.actions.listWorkflowRuns({
+            const runsResp = await github.rest.actions.listWorkflowRunsForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: workflowId,
               status: 'completed',
-              per_page: 5
+              per_page: 30
             });
-            const previousRun = runsResp.data.workflow_runs?.[0];
-            const prevWasFailure = previousRun?.conclusion === 'failure';
+            const sameWorkflowRuns = (runsResp.data.workflow_runs || [])
+              .filter(r => r.path && r.path.includes('.github/workflows/smoke-prod.yml'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            // Current run is still in progress, so the latest completed run is the immediately previous one.
+            const previousRun = sameWorkflowRuns[0];
+            const prevWasFailure = previousRun && previousRun.conclusion === 'failure';
 
             if (!prevWasFailure) {
               core.notice('First failure detected. Waiting for a second consecutive failure before opening an incident.');
