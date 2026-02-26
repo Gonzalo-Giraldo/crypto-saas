@@ -85,3 +85,5 @@ scripts/run_scenario.sh
   - Run summary in GitHub Actions
   - Artifact: `smoke_output.log`
   - Automatic issue creation on smoke failure
+  - Automatic issue close when smoke recovers
+  - Fixed CI smoke user (`SMOKE_EMAIL` optional; defaults to `smoke.ci@example.com`)

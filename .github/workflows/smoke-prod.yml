@@ -32,6 +32,7 @@ jobs:
       BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
       REQUIRE_IBKR_SECRET: ${{ github.event_name == 'workflow_dispatch' && inputs.require_ibkr_secret || 'false' }}
       ALLOW_BINANCE_TEST_ERROR: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_binance_test_error || 'true' }}
+      SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL != '' && secrets.SMOKE_EMAIL || 'smoke.ci@example.com' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,7 +61,7 @@ jobs:
             exit 1
           fi
 
-          export EMAIL="smoke.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}@example.com"
+          export EMAIL="${SMOKE_EMAIL}"
           export PASSWORD="$SMOKE_PASSWORD"
 
           curl -s -X POST "$BASE_URL/auth/register" \
@@ -136,7 +137,14 @@ jobs:
         with:
           script: |
             const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const title = `[Smoke Prod] Failure on ${context.ref.replace('refs/heads/', '')} (${new Date().toISOString().slice(0, 10)})`;
+            const issueTitle = '[Smoke Prod] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
             const body = [
               `Smoke workflow failed.`,
               ``,
@@ -146,12 +154,51 @@ jobs:
               ``,
               `Please review the workflow logs and artifact \`smoke_output.log\`.`
             ].join('\n');
-            await github.rest.issues.create({
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['incident']
+              });
+            }
+
+      - name: Auto-close incident on recovery
+        if: steps.run_smoke.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Smoke Prod] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title,
-              body
+              state: 'open',
+              per_page: 100
             });
+            const incident = openIssues.find(i => i.title === issueTitle);
+            if (incident) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                body: `Smoke workflow recovered successfully. Run: ${runUrl}`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                state: 'closed'
+              });
+            }
 
       - name: Fail job if smoke failed
         if: steps.run_smoke.outcome == 'failure'
