@@ -81,3 +81,7 @@ scripts/run_scenario.sh
   - `SMOKE_PASSWORD`
   - `SMOKE_BINANCE_API_KEY`
   - `SMOKE_BINANCE_API_SECRET`
+- Workflow now stores automatic evidence:
+  - Run summary in GitHub Actions
+  - Artifact: `smoke_output.log`
+  - Automatic issue creation on smoke failure

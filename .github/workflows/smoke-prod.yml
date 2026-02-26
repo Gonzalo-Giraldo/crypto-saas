@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      issues: write
     env:
       BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
       REQUIRE_IBKR_SECRET: ${{ github.event_name == 'workflow_dispatch' && inputs.require_ibkr_secret || 'false' }}
@@ -84,10 +85,74 @@ jobs:
           echo "SMOKE_EMAIL=$EMAIL" >> "$GITHUB_ENV"
 
       - name: Run smoke script
+        id: run_smoke
+        continue-on-error: true
         env:
           EMAIL: ${{ env.SMOKE_EMAIL }}
           PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
         run: |
           set -euo pipefail
           chmod +x scripts/smoke_prod.sh
-          scripts/smoke_prod.sh
+          scripts/smoke_prod.sh 2>&1 | tee smoke_output.log
+
+      - name: Build run summary
+        if: always()
+        run: |
+          {
+            echo "## Smoke Prod Result"
+            echo
+            echo "- Repository: \`${{ github.repository }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Base URL: \`${BASE_URL}\`"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Smoke step outcome: \`${{ steps.run_smoke.outcome }}\`"
+            echo
+            if [[ -f smoke_output.log ]]; then
+              SUMMARY_LINE=$(grep -E "Summary: PASS=[0-9]+ FAIL=[0-9]+" smoke_output.log | tail -n 1 || true)
+              if [[ -n "${SUMMARY_LINE}" ]]; then
+                echo "- ${SUMMARY_LINE}"
+              fi
+              echo
+              echo "### Tail log"
+              echo '```text'
+              tail -n 40 smoke_output.log
+              echo '```'
+            else
+              echo "- No smoke output log found."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-prod-${{ github.run_id }}
+          path: smoke_output.log
+          if-no-files-found: warn
+
+      - name: Open issue on failure
+        if: steps.run_smoke.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `[Smoke Prod] Failure on ${context.ref.replace('refs/heads/', '')} (${new Date().toISOString().slice(0, 10)})`;
+            const body = [
+              `Smoke workflow failed.`,
+              ``,
+              `- Repository: ${context.repo.owner}/${context.repo.repo}`,
+              `- Branch: ${context.ref}`,
+              `- Run: ${runUrl}`,
+              ``,
+              `Please review the workflow logs and artifact \`smoke_output.log\`.`
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            });
+
+      - name: Fail job if smoke failed
+        if: steps.run_smoke.outcome == 'failure'
+        run: exit 1
