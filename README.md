@@ -102,3 +102,31 @@ scripts/run_scenario.sh
   - Automatic issue creation only after 2 consecutive smoke failures
   - Automatic issue close when smoke recovers
   - Fixed CI smoke user (`SMOKE_EMAIL` optional; defaults to `smoke.ci@example.com`)
+
+## Dual Ops Daily
+- Automated two-user daily validation script: `scripts/dual_ops_daily.sh`
+- GitHub Actions workflow: `.github/workflows/dual-ops-daily.yml`
+- Required repository secrets:
+  - `DUAL_USER1_EMAIL` (BINANCE user)
+  - `DUAL_USER1_PASSWORD`
+  - `DUAL_USER2_EMAIL` (IBKR user)
+  - `DUAL_USER2_PASSWORD`
+  - `DUAL_ADMIN_EMAIL`
+  - `DUAL_ADMIN_PASSWORD`
+- Optional repository secrets:
+  - `DUAL_USER1_OTP`
+  - `DUAL_USER2_OTP`
+  - `DUAL_ADMIN_OTP`
+  - `DUAL_USER1_BINANCE_API_KEY`
+  - `DUAL_USER1_BINANCE_API_SECRET`
+  - `DUAL_USER2_IBKR_API_KEY`
+  - `DUAL_USER2_IBKR_API_SECRET`
+  - `DUAL_USER1_SYMBOL_BINANCE` (default `BTCUSDT`)
+  - `DUAL_USER1_QTY_BINANCE` (default `0.01`)
+  - `DUAL_USER2_SYMBOL_IBKR` (default `AAPL`)
+  - `DUAL_USER2_QTY_IBKR` (default `1`)
+- Reliability and incident policy:
+  - Retry policy (`max_attempts=2`)
+  - Auto-remediation via `RENDER_DEPLOY_HOOK_URL` if configured
+  - Issue escalation only after 2 consecutive failures
+  - Auto-close incident on recovery

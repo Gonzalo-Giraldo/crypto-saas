@@ -1,0 +1,235 @@
+name: Dual Ops Daily
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://api.example.com)"
+        required: true
+        type: string
+  schedule:
+    - cron: "20 11 * * *"
+
+jobs:
+  dual_ops:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
+      USER1_EMAIL: ${{ secrets.DUAL_USER1_EMAIL }}
+      USER1_PASSWORD: ${{ secrets.DUAL_USER1_PASSWORD }}
+      USER1_OTP: ${{ secrets.DUAL_USER1_OTP }}
+      USER1_SYMBOL_BINANCE: ${{ secrets.DUAL_USER1_SYMBOL_BINANCE != '' && secrets.DUAL_USER1_SYMBOL_BINANCE || 'BTCUSDT' }}
+      USER1_QTY_BINANCE: ${{ secrets.DUAL_USER1_QTY_BINANCE != '' && secrets.DUAL_USER1_QTY_BINANCE || '0.01' }}
+      USER1_BINANCE_API_KEY: ${{ secrets.DUAL_USER1_BINANCE_API_KEY }}
+      USER1_BINANCE_API_SECRET: ${{ secrets.DUAL_USER1_BINANCE_API_SECRET }}
+      USER2_EMAIL: ${{ secrets.DUAL_USER2_EMAIL }}
+      USER2_PASSWORD: ${{ secrets.DUAL_USER2_PASSWORD }}
+      USER2_OTP: ${{ secrets.DUAL_USER2_OTP }}
+      USER2_SYMBOL_IBKR: ${{ secrets.DUAL_USER2_SYMBOL_IBKR != '' && secrets.DUAL_USER2_SYMBOL_IBKR || 'AAPL' }}
+      USER2_QTY_IBKR: ${{ secrets.DUAL_USER2_QTY_IBKR != '' && secrets.DUAL_USER2_QTY_IBKR || '1' }}
+      USER2_IBKR_API_KEY: ${{ secrets.DUAL_USER2_IBKR_API_KEY }}
+      USER2_IBKR_API_SECRET: ${{ secrets.DUAL_USER2_IBKR_API_SECRET }}
+      ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
+      ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "BASE_URL is empty. Set workflow input 'base_url' or repository secret 'SMOKE_BASE_URL'."
+            exit 1
+          fi
+          for v in USER1_EMAIL USER1_PASSWORD USER2_EMAIL USER2_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD; do
+            if [[ -z "${!v:-}" ]]; then
+              echo "Missing required secret: $v"
+              exit 1
+            fi
+          done
+
+      - name: Run dual ops script
+        id: run_dual
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x scripts/dual_ops_daily.sh
+          attempt=1
+          max_attempts=2
+          success=0
+          : > dual_ops_output.log
+
+          while [[ "$attempt" -le "$max_attempts" ]]; do
+            echo "=== Dual Ops attempt $attempt/$max_attempts ===" | tee -a dual_ops_output.log
+            if scripts/dual_ops_daily.sh 2>&1 | tee -a dual_ops_output.log; then
+              success=1
+              break
+            fi
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+              echo "Dual ops failed on attempt $attempt. Retrying in 15 seconds..." | tee -a dual_ops_output.log
+              sleep 15
+            fi
+            attempt=$((attempt + 1))
+          done
+
+          if [[ "$success" -ne 1 ]]; then
+            echo "Dual ops failed after $max_attempts attempts." | tee -a dual_ops_output.log
+            exit 1
+          fi
+
+      - name: Auto-remediate and rerun dual ops
+        id: auto_remediate
+        if: steps.run_dual.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          : > dual_ops_remediation.log
+          if [[ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]]; then
+            echo "Auto-remediation skipped: RENDER_DEPLOY_HOOK_URL is not configured." | tee -a dual_ops_remediation.log
+            exit 1
+          fi
+
+          echo "Triggering Render redeploy via deploy hook..." | tee -a dual_ops_remediation.log
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" | tee -a dual_ops_remediation.log
+          echo | tee -a dual_ops_remediation.log
+          echo "Waiting 45s for service restart..." | tee -a dual_ops_remediation.log
+          sleep 45
+
+          echo "Running post-remediation dual ops attempt..." | tee -a dual_ops_output.log dual_ops_remediation.log
+          chmod +x scripts/dual_ops_daily.sh
+          scripts/dual_ops_daily.sh 2>&1 | tee -a dual_ops_output.log dual_ops_remediation.log
+
+      - name: Build run summary
+        if: always()
+        run: |
+          {
+            echo "## Dual Ops Daily Result"
+            echo
+            echo "- Repository: \`${{ github.repository }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Base URL: \`${BASE_URL}\`"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Dual ops step outcome: \`${{ steps.run_dual.outcome }}\`"
+            echo "- Auto-remediation outcome: \`${{ steps.auto_remediate.outcome || 'not-run' }}\`"
+            echo "- Retry policy: \`max_attempts=2\`"
+            echo
+            if [[ -f dual_ops_output.log ]]; then
+              SUMMARY_LINE=$(grep -E "Summary: PASS=[0-9]+ FAIL=[0-9]+" dual_ops_output.log | tail -n 1 || true)
+              if [[ -n "${SUMMARY_LINE}" ]]; then
+                echo "- ${SUMMARY_LINE}"
+              fi
+              echo
+              echo "### Tail log"
+              echo '```text'
+              tail -n 40 dual_ops_output.log
+              echo '```'
+            else
+              echo "- No dual ops output log found."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dual ops artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dual-ops-daily-${{ github.run_id }}
+          path: |
+            dual_ops_output.log
+            dual_ops_remediation.log
+          if-no-files-found: warn
+
+      - name: Escalate issue after 2 consecutive failures
+        if: steps.run_dual.outcome == 'failure' && steps.auto_remediate.outcome != 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Dual Ops Daily] Incident open';
+            const runsResp = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              status: 'completed',
+              per_page: 30
+            });
+            const sameWorkflowRuns = (runsResp.data.workflow_runs || [])
+              .filter(r => r.path && r.path.includes('.github/workflows/dual-ops-daily.yml'))
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const previousRun = sameWorkflowRuns[0];
+            const prevWasFailure = previousRun && previousRun.conclusion === 'failure';
+
+            if (!prevWasFailure) {
+              core.notice('First failure detected. Waiting for second consecutive failure before opening incident.');
+              return;
+            }
+
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
+            const body = [
+              `Dual Ops Daily workflow failed.`,
+              ``,
+              `- Repository: ${context.repo.owner}/${context.repo.repo}`,
+              `- Branch: ${context.ref}`,
+              `- Run: ${runUrl}`,
+              ``,
+              `Review workflow logs and artifact \`dual_ops_output.log\`.`
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['incident']
+              });
+            }
+
+      - name: Auto-close incident on recovery
+        if: steps.run_dual.outcome == 'success' || steps.auto_remediate.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Dual Ops Daily] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const incident = openIssues.find(i => i.title === issueTitle);
+            if (incident) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                body: `Dual Ops Daily recovered successfully. Run: ${runUrl}`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                state: 'closed'
+              });
+            }
+
+      - name: Fail job if dual ops failed
+        if: steps.run_dual.outcome == 'failure' && steps.auto_remediate.outcome != 'success'
+        run: exit 1
