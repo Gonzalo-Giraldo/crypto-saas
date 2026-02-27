@@ -141,49 +141,6 @@ def execute_binance_test_order_for_user(
         db.close()
 
 
-def execute_ibkr_paper_check_for_user(
-    user_id: str,
-    symbol: str,
-    side: str,
-    qty: float,
-):
-    db = SessionLocal()
-    try:
-        creds = get_decrypted_exchange_secret(
-            db=db,
-            user_id=user_id,
-            exchange="IBKR",
-        )
-        if not creds:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing credentials for IBKR",
-            )
-
-        material = f"{symbol}|{side}|{qty}|{creds['api_key']}|{creds['api_secret']}"
-        fingerprint = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
-
-        log_audit_event(
-            db,
-            action="execution.ibkr.paper_check",
-            user_id=user_id,
-            entity_type="execution",
-            details={"symbol": symbol, "side": side, "qty": qty},
-        )
-        db.commit()
-
-        return {
-            "exchange": "IBKR",
-            "mode": "paper_check",
-            "symbol": symbol.upper(),
-            "side": side.upper(),
-            "qty": qty,
-            "credential_fingerprint": fingerprint,
-        }
-    finally:
-        db.close()
-
-
 def execute_ibkr_test_order_for_user(
     user_id: str,
     symbol: str,

@@ -51,7 +51,6 @@ scripts/run_scenario.sh
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
-- `POST /ops/execution/ibkr/paper-check` (legacy connector check)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
 - `POST /signals`
 - `GET /signals`
@@ -84,10 +83,12 @@ scripts/run_scenario.sh
   - `SMOKE_PASSWORD`
   - `SMOKE_BINANCE_API_KEY`
   - `SMOKE_BINANCE_API_SECRET`
+  - `RENDER_DEPLOY_HOOK_URL` (optional, enables auto-remediation redeploy)
 - Workflow now stores automatic evidence:
   - Run summary in GitHub Actions
-  - Artifact: `smoke_output.log`
+  - Artifacts: `smoke_output.log`, `smoke_remediation.log`
   - Automatic retry policy (`max_attempts=2`) before declaring failure
+  - Automatic remediation after final failure (redeploy hook + one extra smoke attempt)
   - Automatic issue creation only after 2 consecutive smoke failures
   - Automatic issue close when smoke recovers
   - Fixed CI smoke user (`SMOKE_EMAIL` optional; defaults to `smoke.ci@example.com`)

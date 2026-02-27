@@ -33,6 +33,7 @@ jobs:
       REQUIRE_IBKR_SECRET: ${{ github.event_name == 'workflow_dispatch' && inputs.require_ibkr_secret || 'false' }}
       ALLOW_BINANCE_TEST_ERROR: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_binance_test_error || 'true' }}
       SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL != '' && secrets.SMOKE_EMAIL || 'smoke.ci@example.com' }}
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -117,6 +118,31 @@ jobs:
             exit 1
           fi
 
+      - name: Auto-remediate and rerun smoke
+        id: auto_remediate
+        if: steps.run_smoke.outcome == 'failure'
+        continue-on-error: true
+        env:
+          EMAIL: ${{ env.SMOKE_EMAIL }}
+          PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : > smoke_remediation.log
+          if [[ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]]; then
+            echo "Auto-remediation skipped: RENDER_DEPLOY_HOOK_URL is not configured." | tee -a smoke_remediation.log
+            exit 1
+          fi
+
+          echo "Triggering Render redeploy via deploy hook..." | tee -a smoke_remediation.log
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" | tee -a smoke_remediation.log
+          echo | tee -a smoke_remediation.log
+          echo "Waiting 45s for service restart..." | tee -a smoke_remediation.log
+          sleep 45
+
+          echo "Running post-remediation smoke attempt..." | tee -a smoke_output.log smoke_remediation.log
+          chmod +x scripts/smoke_prod.sh
+          scripts/smoke_prod.sh 2>&1 | tee -a smoke_output.log smoke_remediation.log
+
       - name: Build run summary
         if: always()
         run: |
@@ -128,6 +154,7 @@ jobs:
             echo "- Base URL: \`${BASE_URL}\`"
             echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "- Smoke step outcome: \`${{ steps.run_smoke.outcome }}\`"
+            echo "- Auto-remediation outcome: \`${{ steps.auto_remediate.outcome || 'not-run' }}\`"
             echo "- Retry policy: \`max_attempts=2\`"
             echo
             if [[ -f smoke_output.log ]]; then
@@ -150,11 +177,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smoke-prod-${{ github.run_id }}
-          path: smoke_output.log
+          path: |
+            smoke_output.log
+            smoke_remediation.log
           if-no-files-found: warn
 
       - name: Escalate issue after 2 consecutive failures
-        if: steps.run_smoke.outcome == 'failure'
+        if: steps.run_smoke.outcome == 'failure' && steps.auto_remediate.outcome != 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -213,7 +242,7 @@ jobs:
             }
 
       - name: Auto-close incident on recovery
-        if: steps.run_smoke.outcome == 'success'
+        if: steps.run_smoke.outcome == 'success' || steps.auto_remediate.outcome == 'success'
         uses: actions/github-script@v7
         with:
           script: |
@@ -242,5 +271,5 @@ jobs:
             }
 
       - name: Fail job if smoke failed
-        if: steps.run_smoke.outcome == 'failure'
+        if: steps.run_smoke.outcome == 'failure' && steps.auto_remediate.outcome != 'success'
         run: exit 1

@@ -197,3 +197,5 @@ GitHub Actions:
   - `SMOKE_PASSWORD`
   - `SMOKE_BINANCE_API_KEY`
   - `SMOKE_BINANCE_API_SECRET`
+- Secret opcional:
+  - `RENDER_DEPLOY_HOOK_URL` (auto-remediacion: redeploy + reintento smoke)
