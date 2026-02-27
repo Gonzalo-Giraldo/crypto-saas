@@ -77,6 +77,8 @@ scripts/run_scenario.sh
 - User risk profile assignment (email-based):
   - `RISK_PROFILE_MODEL2_EMAIL`
   - `RISK_PROFILE_LOOSE_EMAIL`
+- Exchange segregation is enforced by strategy assignment:
+  - if exchange is disabled for the user, `exchange-secrets` upsert and execution endpoints are blocked.
 
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`

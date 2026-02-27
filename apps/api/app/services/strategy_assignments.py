@@ -85,3 +85,16 @@ def resolve_strategy_for_user_exchange(
         "enabled": bool(row.enabled),
         "source": "assignment",
     }
+
+
+def is_exchange_enabled_for_user(
+    db: Session,
+    user_id: str,
+    exchange: str,
+) -> bool:
+    data = resolve_strategy_for_user_exchange(
+        db=db,
+        user_id=user_id,
+        exchange=exchange,
+    )
+    return bool(data["enabled"])

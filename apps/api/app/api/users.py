@@ -11,6 +11,7 @@ from apps.api.app.api.deps import get_current_user, require_role
 from apps.api.app.core.security import get_password_hash
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import upsert_exchange_secret
+from apps.api.app.services.strategy_assignments import is_exchange_enabled_for_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -79,6 +80,24 @@ def save_exchange_secret(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not is_exchange_enabled_for_user(
+        db=db,
+        user_id=current_user.id,
+        exchange=payload.exchange,
+    ):
+        log_audit_event(
+            db,
+            action="exchange.secret.upsert.blocked",
+            user_id=current_user.id,
+            entity_type="exchange_secret",
+            details={"exchange": payload.exchange},
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Exchange {payload.exchange} is disabled for this user",
+        )
+
     row = upsert_exchange_secret(
         db=db,
         user_id=current_user.id,

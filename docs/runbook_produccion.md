@@ -149,6 +149,33 @@ curl -s -X POST "$BASE_URL/ops/execution/pretrade/binance/check" \
   --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01}'
 ```
 
+Segregacion operativa recomendada (2 usuarios):
+
+```bash
+# Usuario Binance (habilitado BINANCE, deshabilitado IBKR)
+curl -s -X POST "$BASE_URL/ops/strategy/assign" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"user_email":"usuario_binance@dominio.com","exchange":"BINANCE","strategy_id":"SWING_V1","enabled":true}'
+curl -s -X POST "$BASE_URL/ops/strategy/assign" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"user_email":"usuario_binance@dominio.com","exchange":"IBKR","strategy_id":"SWING_V1","enabled":false}'
+
+# Usuario IBKR (habilitado IBKR, deshabilitado BINANCE)
+curl -s -X POST "$BASE_URL/ops/strategy/assign" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"user_email":"usuario_ibkr@dominio.com","exchange":"IBKR","strategy_id":"SWING_V1","enabled":true}'
+curl -s -X POST "$BASE_URL/ops/strategy/assign" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"user_email":"usuario_ibkr@dominio.com","exchange":"BINANCE","strategy_id":"SWING_V1","enabled":false}'
+```
+
+Nota:
+- Con esta segregacion, la API bloquea `exchange-secrets` y `execution` cuando el exchange esta deshabilitado para el usuario.
+
 ## 6) Rotacion de clave de cifrado (cambio controlado)
 
 Precondiciones:

@@ -33,7 +33,11 @@ from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
 from apps.api.app.services.risk_profiles import resolve_risk_profile_for_email
-from apps.api.app.services.strategy_assignments import resolve_strategy_for_user_exchange, upsert_strategy_assignment
+from apps.api.app.services.strategy_assignments import (
+    is_exchange_enabled_for_user,
+    resolve_strategy_for_user_exchange,
+    upsert_strategy_assignment,
+)
 from apps.worker.app.engine.execution_runtime import (
     execute_binance_test_order_for_user,
     execute_ibkr_test_order_for_user,
@@ -41,6 +45,32 @@ from apps.worker.app.engine.execution_runtime import (
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
+
+
+def _assert_exchange_enabled(
+    db: Session,
+    current_user: User,
+    exchange: str,
+):
+    if is_exchange_enabled_for_user(
+        db=db,
+        user_id=current_user.id,
+        exchange=exchange,
+    ):
+        return
+
+    log_audit_event(
+        db,
+        action="execution.blocked.exchange_disabled",
+        user_id=current_user.id,
+        entity_type="execution",
+        details={"exchange": exchange},
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Exchange {exchange} is disabled for this user",
+    )
 
 
 def _evaluate_pretrade_for_user(
@@ -409,8 +439,14 @@ def pretrade_ibkr_check(
 @router.post("/execution/prepare", response_model=ExecutionPrepareOut)
 def prepare_execution(
     payload: ExecutionPrepareRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange=payload.exchange,
+    )
     result = prepare_execution_for_user(
         user_id=current_user.id,
         exchange=payload.exchange,
@@ -424,8 +460,14 @@ def prepare_execution(
 @router.post("/execution/binance/test-order", response_model=BinanceTestOrderOut)
 def execution_binance_test_order(
     payload: BinanceTestOrderRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
     result = execute_binance_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
@@ -438,8 +480,14 @@ def execution_binance_test_order(
 @router.post("/execution/ibkr/test-order", response_model=IbkrTestOrderOut)
 def execution_ibkr_test_order(
     payload: IbkrTestOrderRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
     result = execute_ibkr_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
