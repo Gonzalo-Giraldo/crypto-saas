@@ -49,7 +49,11 @@ scripts/run_scenario.sh
 - `GET /ops/audit/me`
 - `GET /ops/audit/all` (admin)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
+- `POST /ops/strategy/assign` (admin)
+- `GET /ops/strategy/assignments` (admin)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
+- `POST /ops/execution/pretrade/binance/check`
+- `POST /ops/execution/pretrade/ibkr/check`
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)

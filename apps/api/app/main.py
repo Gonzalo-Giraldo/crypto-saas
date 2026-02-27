@@ -8,6 +8,7 @@ import apps.api.app.models.daily_risk
 import apps.api.app.models.user_2fa
 import apps.api.app.models.audit_log
 import apps.api.app.models.exchange_secret
+import apps.api.app.models.strategy_assignment
 
 from fastapi import FastAPI
 

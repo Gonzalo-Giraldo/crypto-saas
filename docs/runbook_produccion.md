@@ -131,6 +131,24 @@ curl -s "$BASE_URL/ops/risk/daily-compare?real_only=true" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+Asignacion de estrategia (admin):
+
+```bash
+curl -s -X POST "$BASE_URL/ops/strategy/assign" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"user_email":"usuario@dominio.com","exchange":"BINANCE","strategy_id":"SWING_V1","enabled":true}'
+```
+
+Pre-trade check por exchange:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/execution/pretrade/binance/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01}'
+```
+
 ## 6) Rotacion de clave de cifrado (cambio controlado)
 
 Precondiciones:

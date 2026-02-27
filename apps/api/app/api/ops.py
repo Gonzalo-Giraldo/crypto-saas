@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -6,7 +8,9 @@ from apps.api.app.api.deps import get_current_user, require_role
 from apps.api.app.db.session import get_db
 from apps.api.app.models.audit_log import AuditLog
 from apps.api.app.models.daily_risk import DailyRiskState
+from apps.api.app.models.exchange_secret import ExchangeSecret
 from apps.api.app.models.position import Position
+from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.schemas.execution import (
     BinanceTestOrderOut,
     BinanceTestOrderRequest,
@@ -15,6 +19,13 @@ from apps.api.app.schemas.execution import (
     ExecutionPrepareOut,
     ExecutionPrepareRequest,
 )
+from apps.api.app.schemas.strategy import (
+    PretradeCheckOut,
+    PretradeCheckRequest,
+    StrategyAssignmentOut,
+    StrategyAssignOut,
+    StrategyAssignRequest,
+)
 from apps.api.app.schemas.security import ReencryptSecretsOut, ReencryptSecretsRequest
 from apps.api.app.models.user import User
 from apps.api.app.schemas.audit import AuditOut
@@ -22,6 +33,7 @@ from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
 from apps.api.app.services.risk_profiles import resolve_risk_profile_for_email
+from apps.api.app.services.strategy_assignments import resolve_strategy_for_user_exchange, upsert_strategy_assignment
 from apps.worker.app.engine.execution_runtime import (
     execute_binance_test_order_for_user,
     execute_ibkr_test_order_for_user,
@@ -29,6 +41,140 @@ from apps.worker.app.engine.execution_runtime import (
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
+
+
+def _evaluate_pretrade_for_user(
+    db: Session,
+    current_user: User,
+    exchange: str,
+):
+    strategy = resolve_strategy_for_user_exchange(
+        db=db,
+        user_id=current_user.id,
+        exchange=exchange,
+    )
+    profile = resolve_risk_profile_for_email(current_user.email)
+    today = today_colombia()
+    checks = []
+
+    checks.append(
+        {
+            "name": "strategy_enabled",
+            "passed": bool(strategy["enabled"]),
+            "detail": f"{strategy['strategy_id']} ({strategy['source']})",
+        }
+    )
+
+    has_secret = (
+        db.execute(
+            select(ExchangeSecret).where(
+                ExchangeSecret.user_id == current_user.id,
+                ExchangeSecret.exchange == exchange,
+            )
+        )
+        .scalar_one_or_none()
+        is not None
+    )
+    checks.append(
+        {
+            "name": "exchange_secret_configured",
+            "passed": has_secret,
+            "detail": exchange,
+        }
+    )
+
+    dr = (
+        db.execute(
+            select(DailyRiskState).where(
+                DailyRiskState.user_id == current_user.id,
+                DailyRiskState.day == today,
+            )
+        )
+        .scalar_one_or_none()
+    )
+    max_trades = int(profile["max_trades_per_day"])
+    daily_stop = -abs(float(profile["max_daily_loss_pct"]))
+    trades_today = int(dr.trades_today) if dr else 0
+    realized_pnl_today = float(dr.realized_pnl_today) if dr else 0.0
+
+    checks.append(
+        {
+            "name": "daily_stop_not_reached",
+            "passed": realized_pnl_today > daily_stop,
+            "detail": f"pnl={realized_pnl_today} threshold={daily_stop}",
+        }
+    )
+    checks.append(
+        {
+            "name": "max_trades_not_reached",
+            "passed": trades_today < max_trades,
+            "detail": f"trades={trades_today}/{max_trades}",
+        }
+    )
+
+    max_open_positions = int(profile["max_open_positions"])
+    open_positions = db.execute(
+        select(func.count())
+        .select_from(Position)
+        .where(
+            Position.user_id == current_user.id,
+            Position.status == "OPEN",
+        )
+    ).scalar_one()
+    checks.append(
+        {
+            "name": "max_open_positions_not_reached",
+            "passed": int(open_positions) < max_open_positions,
+            "detail": f"open={open_positions}/{max_open_positions}",
+        }
+    )
+
+    cooldown_minutes = float(profile["cooldown_between_trades_minutes"])
+    last_trade_at = db.execute(
+        select(func.max(func.coalesce(Position.closed_at, Position.opened_at))).where(
+            Position.user_id == current_user.id
+        )
+    ).scalar_one_or_none()
+    cooldown_passed = True
+    cooldown_detail = "no previous trade"
+    if last_trade_at:
+        if last_trade_at.tzinfo is None:
+            last_trade_at = last_trade_at.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - last_trade_at.astimezone(timezone.utc)).total_seconds() / 60.0
+        cooldown_passed = elapsed >= cooldown_minutes
+        cooldown_detail = f"elapsed={round(elapsed,2)}m required={cooldown_minutes}m"
+    checks.append(
+        {
+            "name": "cooldown_passed",
+            "passed": cooldown_passed,
+            "detail": cooldown_detail,
+        }
+    )
+
+    passed = all(bool(c["passed"]) for c in checks)
+    action = "pretrade.check.passed" if passed else "pretrade.check.blocked"
+    log_audit_event(
+        db,
+        action=action,
+        user_id=current_user.id,
+        entity_type="pretrade",
+        details={
+            "exchange": exchange,
+            "strategy_id": strategy["strategy_id"],
+            "strategy_source": strategy["source"],
+            "checks": checks,
+        },
+    )
+    db.commit()
+
+    return {
+        "passed": passed,
+        "exchange": exchange,
+        "strategy_id": strategy["strategy_id"],
+        "strategy_source": strategy["source"],
+        "risk_profile": profile["profile_name"],
+        "checks": checks,
+    }
 
 @router.get("/health")
 def ops_health():
@@ -164,6 +310,100 @@ def daily_risk_compare(
         "generated_for": current_user.email,
         "users": rows,
     }
+
+
+@router.post("/strategy/assign", response_model=StrategyAssignOut)
+def assign_strategy(
+    payload: StrategyAssignRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    user = db.execute(
+        select(User).where(User.email == payload.user_email)
+    ).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    row = upsert_strategy_assignment(
+        db=db,
+        user_id=user.id,
+        exchange=payload.exchange,
+        strategy_id=payload.strategy_id,
+        enabled=payload.enabled,
+    )
+    db.flush()
+    log_audit_event(
+        db,
+        action="strategy.assignment.updated",
+        user_id=current_user.id,
+        entity_type="strategy_assignment",
+        entity_id=row.id,
+        details={
+            "target_user_id": user.id,
+            "target_user_email": user.email,
+            "exchange": row.exchange,
+            "strategy_id": row.strategy_id,
+            "enabled": row.enabled,
+        },
+    )
+    db.commit()
+    return {
+        "user_id": user.id,
+        "user_email": user.email,
+        "exchange": row.exchange,
+        "strategy_id": row.strategy_id,
+        "enabled": bool(row.enabled),
+    }
+
+
+@router.get("/strategy/assignments", response_model=list[StrategyAssignmentOut])
+def list_strategy_assignments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    rows = db.execute(
+        select(StrategyAssignment, User)
+        .join(User, StrategyAssignment.user_id == User.id)
+        .order_by(User.email.asc(), StrategyAssignment.exchange.asc())
+    ).all()
+    return [
+        {
+            "user_id": strategy.user_id,
+            "user_email": user.email,
+            "exchange": strategy.exchange,
+            "strategy_id": strategy.strategy_id,
+            "enabled": bool(strategy.enabled),
+        }
+        for strategy, user in rows
+    ]
+
+
+@router.post("/execution/pretrade/binance/check", response_model=PretradeCheckOut)
+def pretrade_binance_check(
+    payload: PretradeCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ = payload  # payload reserved for strategy-specific checks in next iteration
+    return _evaluate_pretrade_for_user(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
+
+
+@router.post("/execution/pretrade/ibkr/check", response_model=PretradeCheckOut)
+def pretrade_ibkr_check(
+    payload: PretradeCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ = payload  # payload reserved for strategy-specific checks in next iteration
+    return _evaluate_pretrade_for_user(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
 
 
 @router.post("/execution/prepare", response_model=ExecutionPrepareOut)
