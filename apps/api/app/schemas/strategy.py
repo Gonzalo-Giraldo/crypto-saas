@@ -44,6 +44,16 @@ class PretradeCheckRequest(BaseModel):
     symbol: str
     side: str
     qty: float
+    rr_estimate: float = 2.0
+    trend_tf: str = "4H"
+    signal_tf: str = "1H"
+    timing_tf: str = "15M"
+    spread_bps: float = 5.0
+    slippage_bps: float = 10.0
+    volume_24h_usdt: float = 100000000.0
+    in_rth: bool = True
+    macro_event_block: bool = False
+    earnings_within_24h: bool = False
 
     @field_validator("side")
     @classmethod
@@ -52,6 +62,11 @@ class PretradeCheckRequest(BaseModel):
         if normalized not in {"BUY", "SELL"}:
             raise ValueError("side must be BUY or SELL")
         return normalized
+
+    @field_validator("trend_tf", "signal_tf", "timing_tf")
+    @classmethod
+    def normalize_tf(cls, value: str):
+        return value.upper().strip()
 
 
 class PretradeCheckOut(BaseModel):

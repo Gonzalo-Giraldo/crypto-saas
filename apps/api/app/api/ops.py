@@ -77,6 +77,7 @@ def _evaluate_pretrade_for_user(
     db: Session,
     current_user: User,
     exchange: str,
+    payload: PretradeCheckRequest,
 ):
     strategy = resolve_strategy_for_user_exchange(
         db=db,
@@ -181,6 +182,14 @@ def _evaluate_pretrade_for_user(
         }
     )
 
+    strategy_id = strategy["strategy_id"]
+    strategy_checks = _build_strategy_checks(
+        exchange=exchange,
+        strategy_id=strategy_id,
+        payload=payload,
+    )
+    checks.extend(strategy_checks)
+
     passed = all(bool(c["passed"]) for c in checks)
     action = "pretrade.check.passed" if passed else "pretrade.check.blocked"
     log_audit_event(
@@ -190,8 +199,17 @@ def _evaluate_pretrade_for_user(
         entity_type="pretrade",
         details={
             "exchange": exchange,
-            "strategy_id": strategy["strategy_id"],
+            "strategy_id": strategy_id,
             "strategy_source": strategy["source"],
+            "request": {
+                "symbol": payload.symbol,
+                "side": payload.side,
+                "qty": payload.qty,
+                "rr_estimate": payload.rr_estimate,
+                "trend_tf": payload.trend_tf,
+                "signal_tf": payload.signal_tf,
+                "timing_tf": payload.timing_tf,
+            },
             "checks": checks,
         },
     )
@@ -200,11 +218,122 @@ def _evaluate_pretrade_for_user(
     return {
         "passed": passed,
         "exchange": exchange,
-        "strategy_id": strategy["strategy_id"],
+        "strategy_id": strategy_id,
         "strategy_source": strategy["source"],
         "risk_profile": profile["profile_name"],
         "checks": checks,
     }
+
+
+def _build_strategy_checks(
+    exchange: str,
+    strategy_id: str,
+    payload: PretradeCheckRequest,
+) -> list[dict]:
+    checks: list[dict] = []
+    ex = exchange.upper()
+    st = strategy_id.upper()
+
+    if st == "INTRADAY_V1":
+        rr_min = 1.3
+        allowed_trend_tfs = {"1H"}
+        allowed_signal_tfs = {"15M"}
+        allowed_timing_tfs = {"5M", "15M"}
+    else:
+        rr_min = 1.5
+        if ex == "IBKR":
+            allowed_trend_tfs = {"1D", "4H"}
+            allowed_signal_tfs = {"1H", "30M"}
+            allowed_timing_tfs = {"5M", "15M"}
+        else:
+            allowed_trend_tfs = {"4H"}
+            allowed_signal_tfs = {"1H"}
+            allowed_timing_tfs = {"15M"}
+
+    checks.append(
+        {
+            "name": "strategy_rr_min",
+            "passed": float(payload.rr_estimate) >= rr_min,
+            "detail": f"rr={payload.rr_estimate} required>={rr_min}",
+        }
+    )
+    checks.append(
+        {
+            "name": "strategy_trend_tf",
+            "passed": payload.trend_tf in allowed_trend_tfs,
+            "detail": f"value={payload.trend_tf} allowed={sorted(allowed_trend_tfs)}",
+        }
+    )
+    checks.append(
+        {
+            "name": "strategy_signal_tf",
+            "passed": payload.signal_tf in allowed_signal_tfs,
+            "detail": f"value={payload.signal_tf} allowed={sorted(allowed_signal_tfs)}",
+        }
+    )
+    checks.append(
+        {
+            "name": "strategy_timing_tf",
+            "passed": payload.timing_tf in allowed_timing_tfs,
+            "detail": f"value={payload.timing_tf} allowed={sorted(allowed_timing_tfs)}",
+        }
+    )
+
+    if ex == "BINANCE":
+        if st == "INTRADAY_V1":
+            min_volume = 80_000_000.0
+            max_spread = 8.0
+            max_slippage = 12.0
+        else:
+            min_volume = 50_000_000.0
+            max_spread = 10.0
+            max_slippage = 15.0
+
+        checks.append(
+            {
+                "name": "liq_volume_24h",
+                "passed": float(payload.volume_24h_usdt) >= min_volume,
+                "detail": f"value={payload.volume_24h_usdt} required>={min_volume}",
+            }
+        )
+        checks.append(
+            {
+                "name": "liq_spread_bps",
+                "passed": float(payload.spread_bps) <= max_spread,
+                "detail": f"value={payload.spread_bps} required<={max_spread}",
+            }
+        )
+        checks.append(
+            {
+                "name": "liq_slippage_bps",
+                "passed": float(payload.slippage_bps) <= max_slippage,
+                "detail": f"value={payload.slippage_bps} required<={max_slippage}",
+            }
+        )
+    else:
+        checks.append(
+            {
+                "name": "ibkr_in_rth",
+                "passed": bool(payload.in_rth),
+                "detail": "must be true",
+            }
+        )
+        checks.append(
+            {
+                "name": "ibkr_no_macro_block",
+                "passed": not bool(payload.macro_event_block),
+                "detail": f"macro_event_block={payload.macro_event_block}",
+            }
+        )
+        checks.append(
+            {
+                "name": "ibkr_no_earnings_24h",
+                "passed": not bool(payload.earnings_within_24h),
+                "detail": f"earnings_within_24h={payload.earnings_within_24h}",
+            }
+        )
+
+    return checks
 
 @router.get("/health")
 def ops_health():
@@ -414,11 +543,11 @@ def pretrade_binance_check(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ = payload  # payload reserved for strategy-specific checks in next iteration
     return _evaluate_pretrade_for_user(
         db=db,
         current_user=current_user,
         exchange="BINANCE",
+        payload=payload,
     )
 
 
@@ -428,11 +557,11 @@ def pretrade_ibkr_check(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _ = payload  # payload reserved for strategy-specific checks in next iteration
     return _evaluate_pretrade_for_user(
         db=db,
         current_user=current_user,
         exchange="IBKR",
+        payload=payload,
     )
 
 

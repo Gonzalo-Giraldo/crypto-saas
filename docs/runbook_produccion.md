@@ -146,7 +146,16 @@ Pre-trade check por exchange:
 curl -s -X POST "$BASE_URL/ops/execution/pretrade/binance/check" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01}'
+  --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01,"rr_estimate":1.6,"trend_tf":"4H","signal_tf":"1H","timing_tf":"15M","spread_bps":7,"slippage_bps":10,"volume_24h_usdt":90000000}'
+```
+
+Ejemplo IBKR (SWING_V1):
+
+```bash
+curl -s -X POST "$BASE_URL/ops/execution/pretrade/ibkr/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"symbol":"AAPL","side":"BUY","qty":1,"rr_estimate":1.6,"trend_tf":"1D","signal_tf":"1H","timing_tf":"15M","in_rth":true,"macro_event_block":false,"earnings_within_24h":false}'
 ```
 
 Segregacion operativa recomendada (2 usuarios):

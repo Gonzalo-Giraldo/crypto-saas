@@ -79,6 +79,12 @@ scripts/run_scenario.sh
   - `RISK_PROFILE_LOOSE_EMAIL`
 - Exchange segregation is enforced by strategy assignment:
   - if exchange is disabled for the user, `exchange-secrets` upsert and execution endpoints are blocked.
+- `pretrade` now applies strategy-specific entry rules:
+  - `SWING_V1` and `INTRADAY_V1`
+  - timeframe checks (`trend_tf`, `signal_tf`, `timing_tf`)
+  - RR threshold (`rr_estimate`)
+  - BINANCE liquidity checks (`volume_24h_usdt`, `spread_bps`, `slippage_bps`)
+  - IBKR market/event checks (`in_rth`, `macro_event_block`, `earnings_within_24h`)
 
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`
