@@ -5,6 +5,7 @@ BASE_URL="${BASE_URL:-}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 ADMIN_OTP="${ADMIN_OTP:-}"
+ADMIN_TOTP_SECRET="${ADMIN_TOTP_SECRET:-}"
 SECRET_MAX_AGE_DAYS="${SECRET_MAX_AGE_DAYS:-30}"
 REAL_ONLY="${REAL_ONLY:-true}"
 
@@ -19,6 +20,48 @@ pass() {
 fail() {
   echo "FAIL | $1"
   fail_count=$((fail_count + 1))
+}
+
+generate_totp() {
+  local secret="$1"
+  python3 - "$secret" <<'PY'
+import base64
+import binascii
+import hashlib
+import hmac
+import struct
+import sys
+import time
+from urllib.parse import parse_qs, urlparse
+
+secret = (sys.argv[1] or "").strip().replace(" ", "").upper()
+if not secret:
+    print("")
+    raise SystemExit(0)
+
+if secret.startswith("OTPAUTH://"):
+    parsed = urlparse(secret)
+    query = parse_qs(parsed.query)
+    secret = (query.get("secret", [""])[0] or "").strip().replace(" ", "").upper()
+
+if "SECRET=" in secret and not secret.startswith("OTPAUTH://"):
+    maybe = secret.split("SECRET=", 1)[1].split("&", 1)[0]
+    secret = maybe.strip().replace(" ", "").upper()
+
+padding = "=" * ((8 - len(secret) % 8) % 8)
+try:
+    key = base64.b32decode(secret + padding, casefold=True)
+except (binascii.Error, ValueError):
+    print("")
+    raise SystemExit(0)
+
+counter = int(time.time() // 30)
+msg = struct.pack(">Q", counter)
+h = hmac.new(key, msg, hashlib.sha1).digest()
+offset = h[-1] & 0x0F
+code = (struct.unpack(">I", h[offset:offset+4])[0] & 0x7FFFFFFF) % 1000000
+print(f"{code:06d}")
+PY
 }
 
 if [[ -z "$BASE_URL" || -z "$ADMIN_EMAIL" || -z "$ADMIN_PASSWORD" ]]; then
@@ -54,6 +97,18 @@ login_resp=$(curl -sS -X POST "$BASE_URL/auth/login" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data "$login_data" || true)
 admin_token=$(echo "$login_resp" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("access_token",""))' 2>/dev/null || true)
+if [[ "${#admin_token}" -le 100 && -n "$ADMIN_TOTP_SECRET" ]]; then
+  ADMIN_OTP=$(generate_totp "$ADMIN_TOTP_SECRET")
+  if [[ -z "$ADMIN_OTP" ]]; then
+    echo "INFO | invalid ADMIN_TOTP_SECRET format"
+  else
+    login_data="username=$ADMIN_EMAIL&password=$ADMIN_PASSWORD&otp=$ADMIN_OTP"
+    login_resp=$(curl -sS -X POST "$BASE_URL/auth/login" \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      --data "$login_data" || true)
+    admin_token=$(echo "$login_resp" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("access_token",""))' 2>/dev/null || true)
+  fi
+fi
 if [[ "${#admin_token}" -gt 100 ]]; then
   pass "admin login"
 else
