@@ -124,6 +124,13 @@ curl -s "$BASE_URL/ops/risk/daily-compare" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+Solo usuarios reales (sin smoke/disabled/example):
+
+```bash
+curl -s "$BASE_URL/ops/risk/daily-compare?real_only=true" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
 ## 6) Rotacion de clave de cifrado (cambio controlado)
 
 Precondiciones:

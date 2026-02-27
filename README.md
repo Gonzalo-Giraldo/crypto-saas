@@ -48,7 +48,7 @@ scripts/run_scenario.sh
 - `DELETE /users/exchange-secrets/{exchange}`
 - `GET /ops/audit/me`
 - `GET /ops/audit/all` (admin)
-- `GET /ops/risk/daily-compare` (admin)
+- `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)

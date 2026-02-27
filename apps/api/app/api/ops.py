@@ -74,6 +74,7 @@ def all_audit(
 
 @router.get("/risk/daily-compare")
 def daily_risk_compare(
+    real_only: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
@@ -82,6 +83,15 @@ def daily_risk_compare(
     rows = []
 
     for user in users:
+        email_l = (user.email or "").lower()
+        if real_only and (
+            email_l.startswith("smoke.")
+            or email_l.startswith("disabled_")
+            or email_l.endswith("@example.com")
+            or email_l.endswith("@example.invalid")
+        ):
+            continue
+
         profile = resolve_risk_profile_for_email(user.email)
         dr = (
             db.execute(
