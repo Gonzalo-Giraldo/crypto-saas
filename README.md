@@ -50,7 +50,8 @@ scripts/run_scenario.sh
 - `GET /ops/audit/all` (admin)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
 - `POST /ops/execution/binance/test-order` (Binance testnet)
-- `POST /ops/execution/ibkr/paper-check` (IBKR connector check)
+- `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
+- `POST /ops/execution/ibkr/paper-check` (legacy connector check)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
 - `POST /signals`
 - `GET /signals`
@@ -66,7 +67,9 @@ scripts/run_scenario.sh
 - If 2FA is enabled for a user, `/auth/login` requires the `otp` form field.
 - Exchange credentials are stored encrypted at rest with `ENCRYPTION_KEY`.
 - Binance live trading is not enabled here; only testnet `order/test` endpoint is wired.
-- IBKR connector is currently a paper-check path (credential verification workflow scaffold).
+- IBKR test-order supports:
+  - simulated safe mode by default (no money movement),
+  - optional bridge mode via `IBKR_BRIDGE_BASE_URL`.
 
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`

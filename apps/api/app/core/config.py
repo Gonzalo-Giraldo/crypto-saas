@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ENCRYPTION_KEY: str
     BINANCE_TESTNET_BASE_URL: str = "https://testnet.binance.vision"
+    IBKR_BRIDGE_BASE_URL: str = ""
     DAILY_STOP: float
     MAX_TRADES: int
 

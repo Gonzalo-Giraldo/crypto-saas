@@ -151,20 +151,20 @@ else
   fi
 fi
 
-IBKR_RESP=$(curl -sS -X POST "$BASE_URL/ops/execution/ibkr/paper-check" \
+IBKR_RESP=$(curl -sS -X POST "$BASE_URL/ops/execution/ibkr/test-order" \
   -H "$AUTH_HEADER" \
   -H "Content-Type: application/json" \
   --data "{\"symbol\":\"$SYMBOL_IBKR\",\"side\":\"BUY\",\"qty\":$IBKR_QTY}" || true)
-IBKR_MODE=$(echo "$IBKR_RESP" | json_get_key mode || true)
 IBKR_EXPECT_AUDIT="true"
-if [[ "$IBKR_MODE" == "paper_check" ]]; then
-  pass "ibkr paper-check"
+IBKR_SENT=$(echo "$IBKR_RESP" | json_get_key sent || true)
+if [[ "$IBKR_SENT" == "True" || "$IBKR_SENT" == "true" ]]; then
+  pass "ibkr test-order"
 else
   if [[ "$REQUIRE_IBKR_SECRET" == "true" ]]; then
-    fail "ibkr paper-check failed: $IBKR_RESP"
+    fail "ibkr test-order failed: $IBKR_RESP"
   else
     IBKR_EXPECT_AUDIT="false"
-    pass "ibkr paper-check optional (not enforced): $IBKR_RESP"
+    pass "ibkr test-order optional (not enforced): $IBKR_RESP"
   fi
 fi
 
@@ -175,14 +175,19 @@ if [[ "${AUDIT_RESP:0:1}" == "[" ]]; then
   pass "audit list"
   HAS_LOGIN=$(echo "$AUDIT_RESP" | array_has_action "auth.login.success")
   HAS_PREP=$(echo "$AUDIT_RESP" | array_has_action "execution.prepare")
-  HAS_IBKR_EVT=$(echo "$AUDIT_RESP" | array_has_action "execution.ibkr.paper_check")
+  HAS_IBKR_OK=$(echo "$AUDIT_RESP" | array_has_action "execution.ibkr.test_order.success")
+  HAS_IBKR_ERR=$(echo "$AUDIT_RESP" | array_has_action "execution.ibkr.test_order.error")
   HAS_BINANCE_OK=$(echo "$AUDIT_RESP" | array_has_action "execution.binance.test_order.success")
   HAS_BINANCE_ERR=$(echo "$AUDIT_RESP" | array_has_action "execution.binance.test_order.error")
 
   [[ "$HAS_LOGIN" == "true" ]] && pass "audit auth.login.success" || fail "audit missing auth.login.success"
   [[ "$HAS_PREP" == "true" ]] && pass "audit execution.prepare" || fail "audit missing execution.prepare"
   if [[ "$IBKR_EXPECT_AUDIT" == "true" ]]; then
-    [[ "$HAS_IBKR_EVT" == "true" ]] && pass "audit execution.ibkr.paper_check" || fail "audit missing execution.ibkr.paper_check"
+    if [[ "$HAS_IBKR_OK" == "true" || "$HAS_IBKR_ERR" == "true" ]]; then
+      pass "audit ibkr test-order event"
+    else
+      fail "audit missing ibkr test-order event"
+    fi
   else
     pass "audit ibkr event optional (not enforced)"
   fi

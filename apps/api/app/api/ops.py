@@ -10,6 +10,8 @@ from apps.api.app.schemas.execution import (
     BinanceTestOrderRequest,
     IbkrPaperCheckOut,
     IbkrPaperCheckRequest,
+    IbkrTestOrderOut,
+    IbkrTestOrderRequest,
     ExecutionPrepareOut,
     ExecutionPrepareRequest,
 )
@@ -21,6 +23,7 @@ from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
 from apps.worker.app.engine.execution_runtime import (
     execute_binance_test_order_for_user,
     execute_ibkr_paper_check_for_user,
+    execute_ibkr_test_order_for_user,
     prepare_execution_for_user,
 )
 
@@ -103,6 +106,20 @@ def execution_ibkr_paper_check(
     current_user: User = Depends(get_current_user),
 ):
     result = execute_ibkr_paper_check_for_user(
+        user_id=current_user.id,
+        symbol=payload.symbol,
+        side=payload.side,
+        qty=payload.qty,
+    )
+    return result
+
+
+@router.post("/execution/ibkr/test-order", response_model=IbkrTestOrderOut)
+def execution_ibkr_test_order(
+    payload: IbkrTestOrderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    result = execute_ibkr_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
         side=payload.side,

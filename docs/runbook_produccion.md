@@ -13,7 +13,7 @@ Este runbook define una operacion segura en staging/produccion con:
 - Toda rotacion de clave se ejecuta con ventana de cambio y plan de rollback.
 - Toda prueba de exchange en produccion debe ser no destructiva:
   - Binance: `order/test`.
-  - IBKR: `paper-check`.
+  - IBKR: `test-order` (simulado o bridge paper).
 
 ## 2) Variables requeridas (inyectadas por plataforma)
 
@@ -21,6 +21,7 @@ Este runbook define una operacion segura en staging/produccion con:
 - `SECRET_KEY`
 - `ENCRYPTION_KEY`
 - `BINANCE_TESTNET_BASE_URL`
+- `IBKR_BRIDGE_BASE_URL` (opcional)
 
 Nota:
 - En produccion real, si se habilita Binance live, usar `BINANCE_BASE_URL` separado y controlado por feature flag.
@@ -90,10 +91,10 @@ curl -s -X POST "$BASE_URL/ops/execution/binance/test-order" \
   --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01}'
 ```
 
-### 4.6 IBKR paper-check
+### 4.6 IBKR test-order (paper/simulado)
 
 ```bash
-curl -s -X POST "$BASE_URL/ops/execution/ibkr/paper-check" \
+curl -s -X POST "$BASE_URL/ops/execution/ibkr/test-order" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"symbol":"AAPL","side":"BUY","qty":1}'
@@ -112,7 +113,7 @@ Eventos esperados despues de pruebas:
 - `auth.login.success`
 - `execution.prepare`
 - `execution.binance.test_order.success` o `.error`
-- `execution.ibkr.paper_check`
+- `execution.ibkr.test_order.success` o `.error`
 
 ## 6) Rotacion de clave de cifrado (cambio controlado)
 
@@ -167,7 +168,7 @@ Si falla descifrado o ejecucion tras rotacion:
 2. Login OK.
 3. Secretos configurados visibles como `configured`.
 4. Dry-run OK.
-5. Binance testnet e IBKR paper-check validados.
+5. Binance testnet e IBKR test-order validados.
 6. Auditoria validada.
 7. Si hubo rotacion: validacion post-rotacion y evidencia de rollback plan.
 

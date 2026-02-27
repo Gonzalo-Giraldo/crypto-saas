@@ -16,15 +16,15 @@ Uso: ejecucion diaria (staging/prod) con control rapido de seguridad y operacion
   - `POST /ops/execution/prepare`
 - [ ] Binance testnet validado:
   - `POST /ops/execution/binance/test-order`
-- [ ] IBKR paper-check validado:
-  - `POST /ops/execution/ibkr/paper-check`
+- [ ] IBKR test-order validado:
+  - `POST /ops/execution/ibkr/test-order`
 
 ## C) Auditoria minima obligatoria
 
 - [ ] `auth.login.success`
 - [ ] `execution.prepare`
 - [ ] `execution.binance.test_order.success` o `execution.binance.test_order.error`
-- [ ] `execution.ibkr.paper_check`
+- [ ] `execution.ibkr.test_order.success` o `execution.ibkr.test_order.error`
 
 Consulta:
 

@@ -3,7 +3,7 @@
 Este runbook define una operacion segura para:
 - configurar credenciales cifradas,
 - ejecutar pruebas en Binance testnet,
-- validar IBKR paper-check,
+- validar IBKR test-order,
 - rotar la clave de cifrado de secretos.
 
 ## 0) Prerrequisitos
@@ -15,6 +15,7 @@ Este runbook define una operacion segura para:
   - `SECRET_KEY`
   - `ENCRYPTION_KEY`
   - `BINANCE_TESTNET_BASE_URL`
+  - `IBKR_BRIDGE_BASE_URL` (opcional)
 
 Health check:
 
@@ -110,10 +111,10 @@ curl -s -X POST "$BASE_URL/ops/execution/binance/test-order" \
   --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01}'
 ```
 
-### 3.3 IBKR paper-check
+### 3.3 IBKR test-order (paper/simulado)
 
 ```bash
-curl -s -X POST "$BASE_URL/ops/execution/ibkr/paper-check" \
+curl -s -X POST "$BASE_URL/ops/execution/ibkr/test-order" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"symbol":"AAPL","side":"BUY","qty":1}'
@@ -190,6 +191,6 @@ Checklist final:
 1. Credenciales cifradas configuradas.
 2. Dry-run OK.
 3. Binance testnet `order/test` OK (o error controlado auditado).
-4. IBKR paper-check OK.
+4. IBKR test-order OK.
 5. Auditoria validada.
 6. Si hubo rotacion: post-rotacion validada.

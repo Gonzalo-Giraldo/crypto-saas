@@ -82,3 +82,27 @@ class IbkrPaperCheckOut(BaseModel):
     side: str
     qty: float
     credential_fingerprint: str
+
+
+class IbkrTestOrderRequest(BaseModel):
+    symbol: str
+    side: str
+    qty: float
+
+    @field_validator("side")
+    @classmethod
+    def validate_side(cls, value: str):
+        normalized = value.upper()
+        if normalized not in ALLOWED_SIDES:
+            raise ValueError("side must be BUY or SELL")
+        return normalized
+
+
+class IbkrTestOrderOut(BaseModel):
+    exchange: str
+    mode: str
+    symbol: str
+    side: str
+    qty: float
+    sent: bool
+    order_ref: str
