@@ -54,6 +54,8 @@ scripts/run_scenario.sh
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
 - `POST /ops/execution/pretrade/binance/check`
 - `POST /ops/execution/pretrade/ibkr/check`
+- `POST /ops/execution/exit/binance/check`
+- `POST /ops/execution/exit/ibkr/check`
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
@@ -85,6 +87,11 @@ scripts/run_scenario.sh
   - RR threshold (`rr_estimate`)
   - BINANCE liquidity checks (`volume_24h_usdt`, `spread_bps`, `slippage_bps`)
   - IBKR market/event checks (`in_rth`, `macro_event_block`, `earnings_within_24h`)
+- `exit` check now applies strategy-specific exit triggers:
+  - stop loss / take profit hit
+  - max holding time by strategy
+  - trend break / signal reverse
+  - IBKR event risk forced exit
 
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`

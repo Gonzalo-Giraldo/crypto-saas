@@ -20,6 +20,8 @@ from apps.api.app.schemas.execution import (
     ExecutionPrepareRequest,
 )
 from apps.api.app.schemas.strategy import (
+    ExitCheckOut,
+    ExitCheckRequest,
     PretradeCheckOut,
     PretradeCheckRequest,
     StrategyAssignmentOut,
@@ -335,6 +337,79 @@ def _build_strategy_checks(
 
     return checks
 
+
+def _build_exit_checks(
+    exchange: str,
+    strategy_id: str,
+    payload: ExitCheckRequest,
+) -> tuple[list[dict], list[str]]:
+    ex = exchange.upper()
+    st = strategy_id.upper()
+    checks: list[dict] = []
+    reasons: list[str] = []
+
+    side = payload.side.upper()
+    entry = float(payload.entry_price)
+    current = float(payload.current_price)
+    stop = float(payload.stop_loss)
+    take = float(payload.take_profit)
+    opened_minutes = int(payload.opened_minutes)
+
+    if side == "BUY":
+        sl_hit = current <= stop
+        tp_hit = current >= take
+    else:
+        sl_hit = current >= stop
+        tp_hit = current <= take
+
+    checks.append({"name": "exit_stop_loss_hit", "passed": sl_hit, "detail": f"current={current} stop={stop}"})
+    checks.append({"name": "exit_take_profit_hit", "passed": tp_hit, "detail": f"current={current} take_profit={take}"})
+    if sl_hit:
+        reasons.append("stop_loss_hit")
+    if tp_hit:
+        reasons.append("take_profit_hit")
+
+    if st == "INTRADAY_V1":
+        max_hold_minutes = 240
+    else:
+        max_hold_minutes = 480
+
+    timeout = opened_minutes >= max_hold_minutes
+    checks.append(
+        {
+            "name": "exit_time_limit",
+            "passed": timeout,
+            "detail": f"opened_minutes={opened_minutes} limit={max_hold_minutes}",
+        }
+    )
+    if timeout:
+        reasons.append("time_limit_reached")
+
+    trend_break = bool(payload.trend_break)
+    signal_reverse = bool(payload.signal_reverse)
+    checks.append({"name": "exit_trend_break", "passed": trend_break, "detail": f"trend_break={trend_break}"})
+    checks.append({"name": "exit_signal_reverse", "passed": signal_reverse, "detail": f"signal_reverse={signal_reverse}"})
+    if trend_break:
+        reasons.append("trend_break")
+    if signal_reverse:
+        reasons.append("signal_reverse")
+
+    if ex == "IBKR":
+        event_forced_exit = bool(payload.macro_event_block) or bool(payload.earnings_within_24h)
+        checks.append(
+            {
+                "name": "exit_event_risk",
+                "passed": event_forced_exit,
+                "detail": f"macro_event_block={payload.macro_event_block} earnings_within_24h={payload.earnings_within_24h}",
+            }
+        )
+        if event_forced_exit:
+            reasons.append("event_risk_exit")
+
+    # Deduplicate while preserving order.
+    uniq_reasons = list(dict.fromkeys(reasons))
+    return checks, uniq_reasons
+
 @router.get("/health")
 def ops_health():
     return {"system_state": "OK", "note": "placeholder"}
@@ -563,6 +638,100 @@ def pretrade_ibkr_check(
         exchange="IBKR",
         payload=payload,
     )
+
+
+@router.post("/execution/exit/binance/check", response_model=ExitCheckOut)
+def exit_binance_check(
+    payload: ExitCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
+    strategy = resolve_strategy_for_user_exchange(
+        db=db,
+        user_id=current_user.id,
+        exchange="BINANCE",
+    )
+    checks, reasons = _build_exit_checks(
+        exchange="BINANCE",
+        strategy_id=strategy["strategy_id"],
+        payload=payload,
+    )
+    should_exit = len(reasons) > 0
+    log_audit_event(
+        db,
+        action="exit.check.triggered" if should_exit else "exit.check.hold",
+        user_id=current_user.id,
+        entity_type="exit",
+        details={
+            "exchange": "BINANCE",
+            "strategy_id": strategy["strategy_id"],
+            "strategy_source": strategy["source"],
+            "should_exit": should_exit,
+            "reasons": reasons,
+            "checks": checks,
+        },
+    )
+    db.commit()
+    return {
+        "should_exit": should_exit,
+        "exchange": "BINANCE",
+        "strategy_id": strategy["strategy_id"],
+        "strategy_source": strategy["source"],
+        "reasons": reasons,
+        "checks": checks,
+    }
+
+
+@router.post("/execution/exit/ibkr/check", response_model=ExitCheckOut)
+def exit_ibkr_check(
+    payload: ExitCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
+    strategy = resolve_strategy_for_user_exchange(
+        db=db,
+        user_id=current_user.id,
+        exchange="IBKR",
+    )
+    checks, reasons = _build_exit_checks(
+        exchange="IBKR",
+        strategy_id=strategy["strategy_id"],
+        payload=payload,
+    )
+    should_exit = len(reasons) > 0
+    log_audit_event(
+        db,
+        action="exit.check.triggered" if should_exit else "exit.check.hold",
+        user_id=current_user.id,
+        entity_type="exit",
+        details={
+            "exchange": "IBKR",
+            "strategy_id": strategy["strategy_id"],
+            "strategy_source": strategy["source"],
+            "should_exit": should_exit,
+            "reasons": reasons,
+            "checks": checks,
+        },
+    )
+    db.commit()
+    return {
+        "should_exit": should_exit,
+        "exchange": "IBKR",
+        "strategy_id": strategy["strategy_id"],
+        "strategy_source": strategy["source"],
+        "reasons": reasons,
+        "checks": checks,
+    }
 
 
 @router.post("/execution/prepare", response_model=ExecutionPrepareOut)

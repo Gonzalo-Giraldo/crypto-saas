@@ -158,6 +158,22 @@ curl -s -X POST "$BASE_URL/ops/execution/pretrade/ibkr/check" \
   --data '{"symbol":"AAPL","side":"BUY","qty":1,"rr_estimate":1.6,"trend_tf":"1D","signal_tf":"1H","timing_tf":"15M","in_rth":true,"macro_event_block":false,"earnings_within_24h":false}'
 ```
 
+Exit check por exchange:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/execution/exit/binance/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"symbol":"BTCUSDT","side":"BUY","entry_price":50000,"current_price":50750,"stop_loss":49500,"take_profit":51000,"opened_minutes":180,"trend_break":false,"signal_reverse":false}'
+```
+
+```bash
+curl -s -X POST "$BASE_URL/ops/execution/exit/ibkr/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"symbol":"AAPL","side":"BUY","entry_price":180,"current_price":179,"stop_loss":178,"take_profit":183,"opened_minutes":500,"trend_break":false,"signal_reverse":false,"macro_event_block":true,"earnings_within_24h":false}'
+```
+
 Segregacion operativa recomendada (2 usuarios):
 
 ```bash

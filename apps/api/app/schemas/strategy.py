@@ -76,3 +76,34 @@ class PretradeCheckOut(BaseModel):
     strategy_source: str
     risk_profile: str
     checks: list[dict]
+
+
+class ExitCheckRequest(BaseModel):
+    symbol: str
+    side: str
+    entry_price: float
+    current_price: float
+    stop_loss: float
+    take_profit: float
+    opened_minutes: int = 0
+    trend_break: bool = False
+    signal_reverse: bool = False
+    macro_event_block: bool = False
+    earnings_within_24h: bool = False
+
+    @field_validator("side")
+    @classmethod
+    def validate_side(cls, value: str):
+        normalized = value.upper().strip()
+        if normalized not in {"BUY", "SELL"}:
+            raise ValueError("side must be BUY or SELL")
+        return normalized
+
+
+class ExitCheckOut(BaseModel):
+    should_exit: bool
+    exchange: str
+    strategy_id: str
+    strategy_source: str
+    reasons: list[str]
+    checks: list[dict]
