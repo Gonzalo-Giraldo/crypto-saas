@@ -59,6 +59,7 @@ scripts/run_scenario.sh
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
+- `GET /ops/security/posture` (admin, 2FA + secret age posture)
 - `POST /signals`
 - `GET /signals`
 - `POST /signals/claim`
@@ -71,6 +72,9 @@ scripts/run_scenario.sh
 - Current focus is crypto flow.
 - Worker notifications support Telegram via optional env vars.
 - If 2FA is enabled for a user, `/auth/login` requires the `otp` form field.
+- Optional hardening:
+  - `ENFORCE_2FA_FOR_ADMINS=true` forces admins to have 2FA enabled.
+  - `ENFORCE_2FA_EMAILS=user1@dominio.com,user2@dominio.com` forces those accounts to have 2FA enabled.
 - Exchange credentials are stored encrypted at rest with `ENCRYPTION_KEY`.
 - Binance live trading is not enabled here; only testnet `order/test` endpoint is wired.
 - IBKR test-order supports:
@@ -146,3 +150,18 @@ scripts/run_scenario.sh
   - Issue escalation only after 2 consecutive failures
   - Auto-close incident on recovery
   - Daily checks include pretrade + test-order + exit-check + segregation assertions + audit validation
+
+## Security Posture Daily
+- Daily security posture script: `scripts/security_posture_daily.sh`
+- GitHub Actions workflow: `.github/workflows/security-posture-daily.yml`
+- Required repository secrets:
+  - `DUAL_ADMIN_EMAIL`
+  - `DUAL_ADMIN_PASSWORD`
+  - `SMOKE_BASE_URL` (or manual `base_url` input)
+- Optional repository secrets:
+  - `DUAL_ADMIN_OTP`
+  - `SECRET_MAX_AGE_DAYS` (default `30`)
+- Behavior:
+  - Opens issue `[Security Posture Daily] Incident open` when posture fails.
+  - Adds comment if incident already exists.
+  - Auto-closes incident when posture recovers.

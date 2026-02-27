@@ -11,6 +11,7 @@ from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.models.exchange_secret import ExchangeSecret
 from apps.api.app.models.position import Position
 from apps.api.app.models.strategy_assignment import StrategyAssignment
+from apps.api.app.models.user_2fa import UserTwoFactor
 from apps.api.app.schemas.execution import (
     BinanceTestOrderOut,
     BinanceTestOrderRequest,
@@ -28,7 +29,13 @@ from apps.api.app.schemas.strategy import (
     StrategyAssignOut,
     StrategyAssignRequest,
 )
-from apps.api.app.schemas.security import ReencryptSecretsOut, ReencryptSecretsRequest
+from apps.api.app.schemas.security import (
+    ReencryptSecretsOut,
+    ReencryptSecretsRequest,
+    SecurityPostureOut,
+    SecurityPostureSummaryOut,
+    SecurityPostureUserOut,
+)
 from apps.api.app.models.user import User
 from apps.api.app.schemas.audit import AuditOut
 from apps.api.app.core.time import today_colombia
@@ -47,6 +54,15 @@ from apps.worker.app.engine.execution_runtime import (
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
+
+
+def _is_real_user_email(email: str) -> bool:
+    e = (email or "").lower()
+    if e.startswith("smoke.") or e.startswith("disabled_"):
+        return False
+    if e.endswith("@example.com") or e.endswith("@example.invalid"):
+        return False
+    return True
 
 
 def _assert_exchange_enabled(
@@ -816,3 +832,95 @@ def security_reencrypt_exchange_secrets(
     )
     db.commit()
     return result
+
+
+@router.get("/security/posture", response_model=SecurityPostureOut)
+def security_posture(
+    real_only: bool = False,
+    max_secret_age_days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    now = datetime.now(timezone.utc)
+    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
+
+    posture_rows: list[SecurityPostureUserOut] = []
+    missing_2fa = 0
+    stale_secrets = 0
+
+    for user in users:
+        if real_only and not _is_real_user_email(user.email):
+            continue
+
+        user_2fa = (
+            db.execute(
+                select(UserTwoFactor).where(UserTwoFactor.user_id == user.id)
+            )
+            .scalar_one_or_none()
+        )
+        two_factor_enabled = bool(user_2fa and user_2fa.enabled)
+
+        secret_rows = db.execute(
+            select(ExchangeSecret.exchange, ExchangeSecret.updated_at).where(
+                ExchangeSecret.user_id == user.id
+            )
+        ).all()
+        configured_exchanges = {row[0] for row in secret_rows}
+
+        oldest_days: int | None = None
+        for _, updated_at in secret_rows:
+            if updated_at is None:
+                continue
+            ts = updated_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age_days = max(0, int((now - ts.astimezone(timezone.utc)).total_seconds() // 86400))
+            if oldest_days is None or age_days > oldest_days:
+                oldest_days = age_days
+
+        stale = oldest_days is not None and oldest_days > max_secret_age_days
+        if stale:
+            stale_secrets += 1
+
+        if user.role in {"admin", "trader"} and not two_factor_enabled:
+            missing_2fa += 1
+
+        posture_rows.append(
+            SecurityPostureUserOut(
+                user_id=user.id,
+                email=user.email,
+                role=user.role,
+                two_factor_enabled=two_factor_enabled,
+                binance_secret_configured="BINANCE" in configured_exchanges,
+                ibkr_secret_configured="IBKR" in configured_exchanges,
+                oldest_secret_age_days=oldest_days,
+                stale_secret=stale,
+            )
+        )
+
+    log_audit_event(
+        db,
+        action="security.posture.read",
+        user_id=current_user.id,
+        entity_type="security",
+        details={
+            "real_only": real_only,
+            "max_secret_age_days": max_secret_age_days,
+            "users": len(posture_rows),
+            "missing_2fa": missing_2fa,
+            "stale_secrets": stale_secrets,
+        },
+    )
+    db.commit()
+
+    return SecurityPostureOut(
+        generated_at=now.isoformat(),
+        max_secret_age_days=max_secret_age_days,
+        real_only=real_only,
+        summary=SecurityPostureSummaryOut(
+            total_users=len(posture_rows),
+            users_missing_2fa=missing_2fa,
+            users_with_stale_secrets=stale_secrets,
+        ),
+        users=posture_rows,
+    )

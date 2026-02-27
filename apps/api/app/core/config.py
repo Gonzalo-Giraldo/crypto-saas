@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     RISK_PROFILE_LOOSE_EMAIL: str = ""
     DAILY_STOP: float
     MAX_TRADES: int
+    ENFORCE_2FA_FOR_ADMINS: bool = False
+    ENFORCE_2FA_EMAILS: str = ""
 
     model_config = ConfigDict(
         env_file=".env",

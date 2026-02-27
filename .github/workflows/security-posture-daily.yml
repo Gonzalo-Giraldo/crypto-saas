@@ -1,0 +1,164 @@
+name: Security Posture Daily
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://api.example.com)"
+        required: true
+        type: string
+      secret_max_age_days:
+        description: "Max allowed secret age in days"
+        required: false
+        default: "30"
+        type: string
+  schedule:
+    - cron: "40 11 * * *"
+
+jobs:
+  security_posture:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
+      SECRET_MAX_AGE_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.secret_max_age_days || secrets.SECRET_MAX_AGE_DAYS }}
+      ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
+      ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      REAL_ONLY: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "BASE_URL is empty. Set workflow input 'base_url' or repository secret 'SMOKE_BASE_URL'."
+            exit 1
+          fi
+          if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" ]]; then
+            echo "Missing required secrets: DUAL_ADMIN_EMAIL / DUAL_ADMIN_PASSWORD"
+            exit 1
+          fi
+          if [[ -z "${SECRET_MAX_AGE_DAYS:-}" ]]; then
+            SECRET_MAX_AGE_DAYS=30
+          fi
+          echo "SECRET_MAX_AGE_DAYS=$SECRET_MAX_AGE_DAYS" >> "$GITHUB_ENV"
+
+      - name: Run security posture check
+        id: run_security
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x scripts/security_posture_daily.sh
+          scripts/security_posture_daily.sh 2>&1 | tee security_posture_output.log
+
+      - name: Build run summary
+        if: always()
+        run: |
+          {
+            echo "## Security Posture Daily Result"
+            echo
+            echo "- Repository: \`${{ github.repository }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Base URL: \`${BASE_URL}\`"
+            echo "- Max secret age days: \`${SECRET_MAX_AGE_DAYS}\`"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Outcome: \`${{ steps.run_security.outcome }}\`"
+            echo
+            if [[ -f security_posture_output.log ]]; then
+              SUMMARY_LINE=$(grep -E "Summary: PASS=[0-9]+ FAIL=[0-9]+" security_posture_output.log | tail -n 1 || true)
+              if [[ -n "${SUMMARY_LINE}" ]]; then
+                echo "- ${SUMMARY_LINE}"
+              fi
+              echo
+              echo "### Tail log"
+              echo '```text'
+              tail -n 40 security_posture_output.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-posture-daily-${{ github.run_id }}
+          path: security_posture_output.log
+          if-no-files-found: warn
+
+      - name: Open incident issue on failure
+        if: steps.run_security.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Security Posture Daily] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
+            const body = [
+              `Security Posture Daily workflow failed.`,
+              ``,
+              `- Repository: ${context.repo.owner}/${context.repo.repo}`,
+              `- Branch: ${context.ref}`,
+              `- Run: ${runUrl}`,
+              ``,
+              `Review workflow logs and artifact \`security_posture_output.log\`.`
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['incident', 'security']
+              });
+            }
+
+      - name: Auto-close incident on recovery
+        if: steps.run_security.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Security Posture Daily] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const incident = openIssues.find(i => i.title === issueTitle);
+            if (incident) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                body: `Security Posture Daily recovered successfully. Run: ${runUrl}`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                state: 'closed'
+              });
+            }
+
+      - name: Fail job if check failed
+        if: steps.run_security.outcome == 'failure'
+        run: exit 1

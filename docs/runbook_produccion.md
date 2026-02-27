@@ -131,6 +131,13 @@ curl -s "$BASE_URL/ops/risk/daily-compare?real_only=true" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+Postura de seguridad diaria (admin):
+
+```bash
+curl -s "$BASE_URL/ops/security/posture?real_only=true&max_secret_age_days=30" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
 Asignacion de estrategia (admin):
 
 ```bash
@@ -285,3 +292,19 @@ GitHub Actions:
   - `SMOKE_BINANCE_API_SECRET`
 - Secret opcional:
   - `RENDER_DEPLOY_HOOK_URL` (auto-remediacion: redeploy + reintento smoke)
+
+Chequeo diario de postura de seguridad:
+- Workflow: `.github/workflows/security-posture-daily.yml`
+- Objetivo:
+  - detectar usuarios operativos sin 2FA,
+  - detectar secretos de exchange envejecidos (`max_secret_age_days`),
+  - abrir incidente solo en fallo y cerrar automaticamente en recuperacion.
+
+Hardening opcional de login:
+- `ENFORCE_2FA_FOR_ADMINS=true`
+- `ENFORCE_2FA_EMAILS=email1@dominio.com,email2@dominio.com`
+
+Recomendacion de activacion:
+1. Habilitar 2FA en cuentas objetivo.
+2. Verificar `GET /ops/security/posture` sin pendientes.
+3. Activar variables de enforcement.

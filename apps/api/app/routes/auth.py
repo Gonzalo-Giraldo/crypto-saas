@@ -16,6 +16,7 @@ from apps.api.app.core.security import (
     get_password_hash,
     create_access_token,
 )
+from apps.api.app.core.config import settings
 from apps.api.app.services.audit import log_audit_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -28,6 +29,15 @@ class RegisterRequest(BaseModel):
 
 class Enable2FARequest(BaseModel):
     otp: str
+
+
+def _enforced_2fa_emails() -> set[str]:
+    raw = settings.ENFORCE_2FA_EMAILS or ""
+    return {
+        e.strip().lower()
+        for e in raw.split(",")
+        if e.strip()
+    }
 
 
 @router.post("/login")
@@ -56,6 +66,17 @@ def login(
         .filter(UserTwoFactor.user_id == user.id)
         .first()
     )
+    enforce_2fa = (
+        user.email.lower() in _enforced_2fa_emails()
+        or (settings.ENFORCE_2FA_FOR_ADMINS and user.role == "admin")
+    )
+
+    if enforce_2fa and (not user_2fa or not user_2fa.enabled):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="2FA must be enabled for this account",
+        )
+
     if user_2fa and user_2fa.enabled:
         if not otp:
             raise HTTPException(
