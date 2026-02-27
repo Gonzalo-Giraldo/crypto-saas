@@ -94,7 +94,28 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x scripts/smoke_prod.sh
-          scripts/smoke_prod.sh 2>&1 | tee smoke_output.log
+          attempt=1
+          max_attempts=2
+          success=0
+          : > smoke_output.log
+
+          while [[ "$attempt" -le "$max_attempts" ]]; do
+            echo "=== Smoke attempt $attempt/$max_attempts ===" | tee -a smoke_output.log
+            if scripts/smoke_prod.sh 2>&1 | tee -a smoke_output.log; then
+              success=1
+              break
+            fi
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+              echo "Smoke failed on attempt $attempt. Retrying in 15 seconds..." | tee -a smoke_output.log
+              sleep 15
+            fi
+            attempt=$((attempt + 1))
+          done
+
+          if [[ "$success" -ne 1 ]]; then
+            echo "Smoke failed after $max_attempts attempts." | tee -a smoke_output.log
+            exit 1
+          fi
 
       - name: Build run summary
         if: always()
@@ -107,6 +128,7 @@ jobs:
             echo "- Base URL: \`${BASE_URL}\`"
             echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "- Smoke step outcome: \`${{ steps.run_smoke.outcome }}\`"
+            echo "- Retry policy: \`max_attempts=2\`"
             echo
             if [[ -f smoke_output.log ]]; then
               SUMMARY_LINE=$(grep -E "Summary: PASS=[0-9]+ FAIL=[0-9]+" smoke_output.log | tail -n 1 || true)

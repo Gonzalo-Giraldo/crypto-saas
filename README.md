@@ -84,6 +84,7 @@ scripts/run_scenario.sh
 - Workflow now stores automatic evidence:
   - Run summary in GitHub Actions
   - Artifact: `smoke_output.log`
+  - Automatic retry policy (`max_attempts=2`) before declaring failure
   - Automatic issue creation only after 2 consecutive smoke failures
   - Automatic issue close when smoke recovers
   - Fixed CI smoke user (`SMOKE_EMAIL` optional; defaults to `smoke.ci@example.com`)
