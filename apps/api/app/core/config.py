@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str
     BINANCE_TESTNET_BASE_URL: str = "https://testnet.binance.vision"
     IBKR_BRIDGE_BASE_URL: str = ""
+    RISK_PROFILE_MODEL2_EMAIL: str = ""
+    RISK_PROFILE_LOOSE_EMAIL: str = ""
     DAILY_STOP: float
     MAX_TRADES: int
 

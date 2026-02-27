@@ -48,6 +48,7 @@ scripts/run_scenario.sh
 - `DELETE /users/exchange-secrets/{exchange}`
 - `GET /ops/audit/me`
 - `GET /ops/audit/all` (admin)
+- `GET /ops/risk/daily-compare` (admin)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
@@ -69,6 +70,9 @@ scripts/run_scenario.sh
 - IBKR test-order supports:
   - simulated safe mode by default (no money movement),
   - optional bridge mode via `IBKR_BRIDGE_BASE_URL`.
+- User risk profile assignment (email-based):
+  - `RISK_PROFILE_MODEL2_EMAIL`
+  - `RISK_PROFILE_LOOSE_EMAIL`
 
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import func, select
 from datetime import datetime, timezone
 
 from apps.api.app.models.daily_risk import DailyRiskState
@@ -12,8 +12,30 @@ from apps.api.app.core.time import today_colombia
 from apps.api.app.api.deps import get_current_user
 from apps.api.app.models.user import User
 from apps.api.app.services.audit import log_audit_event
+from apps.api.app.services.risk_profiles import (
+    apply_profile_daily_limits,
+    resolve_risk_profile_for_email,
+)
 
 router = APIRouter(prefix="/positions", tags=["positions"])
+
+
+def _log_and_raise_risk_block(
+    db: Session,
+    current_user: User,
+    detail: str,
+    action: str,
+    extra: dict | None = None,
+):
+    log_audit_event(
+        db,
+        action=action,
+        user_id=current_user.id,
+        entity_type="risk",
+        details=extra or {},
+    )
+    db.commit()
+    raise HTTPException(status_code=409, detail=detail)
 
 
 @router.post("/open_from_signal", response_model=PositionOut)
@@ -23,6 +45,7 @@ def open_from_signal(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    profile = resolve_risk_profile_for_email(current_user.email)
     s = db.execute(select(Signal).where(Signal.id == signal_id)).scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Signal not found")
@@ -34,13 +57,41 @@ def open_from_signal(
     if s.entry_price is None:
         raise HTTPException(status_code=400, detail="Signal missing entry_price")
 
-    # RISK RULE: solo 1 posición OPEN por usuario
-    open_pos = db.execute(
-        select(Position).where(Position.user_id == s.user_id, Position.status == "OPEN")
-    ).scalar_one_or_none()
+    open_positions = (
+        db.execute(
+            select(Position).where(Position.user_id == s.user_id, Position.status == "OPEN")
+        )
+        .scalars()
+        .all()
+    )
 
-    if open_pos:
-        raise HTTPException(status_code=409, detail="Risk block: already has an OPEN position")
+    if len(open_positions) >= int(profile["max_open_positions"]):
+        _log_and_raise_risk_block(
+            db=db,
+            current_user=current_user,
+            detail="Risk block: max open positions reached",
+            action="position.open.blocked.max_open_positions",
+            extra={"max_open_positions": profile["max_open_positions"]},
+        )
+
+    last_trade_at = db.execute(
+        select(func.max(func.coalesce(Position.closed_at, Position.opened_at))).where(
+            Position.user_id == s.user_id
+        )
+    ).scalar_one_or_none()
+    if last_trade_at:
+        if last_trade_at.tzinfo is None:
+            last_trade_at = last_trade_at.replace(tzinfo=timezone.utc)
+        elapsed_minutes = (datetime.now(timezone.utc) - last_trade_at.astimezone(timezone.utc)).total_seconds() / 60.0
+        cooldown_minutes = float(profile["cooldown_between_trades_minutes"])
+        if elapsed_minutes < cooldown_minutes:
+            _log_and_raise_risk_block(
+                db=db,
+                current_user=current_user,
+                detail=f"Risk block: cooldown active ({cooldown_minutes}m)",
+                action="position.open.blocked.cooldown",
+                extra={"cooldown_minutes": cooldown_minutes, "elapsed_minutes": round(elapsed_minutes, 2)},
+            )
 
     today = today_colombia()
 
@@ -53,13 +104,29 @@ def open_from_signal(
         )
         .scalar_one_or_none()
     )
+    if not dr:
+        dr = DailyRiskState(user_id=s.user_id, day=today)
+        db.add(dr)
+        db.flush()
+    apply_profile_daily_limits(dr, profile)
 
-    if dr:
-        if dr.realized_pnl_today <= dr.daily_stop:
-            raise HTTPException(status_code=409, detail="Risk block: daily stop reached")
+    if dr.realized_pnl_today <= dr.daily_stop:
+        _log_and_raise_risk_block(
+            db=db,
+            current_user=current_user,
+            detail="Risk block: daily stop reached",
+            action="position.open.blocked.daily_stop",
+            extra={"realized_pnl_today": dr.realized_pnl_today, "daily_stop": dr.daily_stop},
+        )
 
-        if dr.trades_today >= dr.max_trades:
-            raise HTTPException(status_code=409, detail="Risk block: max trades reached")
+    if dr.trades_today >= dr.max_trades:
+        _log_and_raise_risk_block(
+            db=db,
+            current_user=current_user,
+            detail="Risk block: max trades reached",
+            action="position.open.blocked.max_trades",
+            extra={"trades_today": dr.trades_today, "max_trades": dr.max_trades},
+        )
 
     p = Position(
         user_id=s.user_id,
@@ -77,21 +144,6 @@ def open_from_signal(
 
     # avanzamos el estado de la señal
     s.status = "OPENED"
-
-    dr = (
-        db.execute(
-            select(DailyRiskState).where(
-                DailyRiskState.user_id == p.user_id,
-                DailyRiskState.day == today,
-            )
-        )
-        .scalar_one_or_none()
-    )
-
-    if not dr:
-        dr = DailyRiskState(user_id=p.user_id, day=today)
-        db.add(dr)
-        db.flush()
 
     log_audit_event(
         db,
@@ -131,6 +183,7 @@ def close_position(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    profile = resolve_risk_profile_for_email(current_user.email)
     p = db.execute(select(Position).where(Position.id == position_id)).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -170,6 +223,7 @@ def close_position(
         dr = DailyRiskState(user_id=p.user_id, day=today)
         db.add(dr)
         db.flush()
+    apply_profile_daily_limits(dr, profile)
 
     dr.trades_today += 1
     dr.realized_pnl_today += realized_pnl
@@ -191,8 +245,7 @@ def get_today_risk(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from apps.api.app.models.daily_risk import DailyRiskState
-    from apps.api.app.core.time import today_colombia
+    profile = resolve_risk_profile_for_email(current_user.email)
     today = today_colombia()
 
     dr = (
@@ -206,24 +259,35 @@ def get_today_risk(
     )
 
     if not dr:
+        daily_stop = -abs(float(profile["max_daily_loss_pct"]))
+        max_trades = int(profile["max_trades_per_day"])
         return {
             "user_id": current_user.id,
             "day": str(today),
+            "risk_profile": profile["profile_name"],
             "trades_today": 0,
             "realized_pnl_today": 0.0,
-            "daily_stop": -5.0,
-            "max_trades": 3,
-            "remaining_trades": 3,
-            "remaining_loss_buffer": -5.0,
+            "daily_stop": daily_stop,
+            "max_trades": max_trades,
+            "max_open_positions": int(profile["max_open_positions"]),
+            "cooldown_between_trades_minutes": float(profile["cooldown_between_trades_minutes"]),
+            "remaining_trades": max_trades,
+            "remaining_loss_buffer": daily_stop,
         }
+
+    apply_profile_daily_limits(dr, profile)
+    db.commit()
 
     return {
         "user_id": dr.user_id,
         "day": str(dr.day),
+        "risk_profile": profile["profile_name"],
         "trades_today": dr.trades_today,
         "realized_pnl_today": dr.realized_pnl_today,
         "daily_stop": dr.daily_stop,
         "max_trades": dr.max_trades,
+        "max_open_positions": int(profile["max_open_positions"]),
+        "cooldown_between_trades_minutes": float(profile["cooldown_between_trades_minutes"]),
         "remaining_trades": dr.max_trades - dr.trades_today,
         "remaining_loss_buffer": dr.daily_stop - dr.realized_pnl_today,
     }

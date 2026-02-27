@@ -22,6 +22,8 @@ Este runbook define una operacion segura en staging/produccion con:
 - `ENCRYPTION_KEY`
 - `BINANCE_TESTNET_BASE_URL`
 - `IBKR_BRIDGE_BASE_URL` (opcional)
+- `RISK_PROFILE_MODEL2_EMAIL` (email del usuario 1)
+- `RISK_PROFILE_LOOSE_EMAIL` (email del usuario 2)
 
 Nota:
 - En produccion real, si se habilita Binance live, usar `BINANCE_BASE_URL` separado y controlado por feature flag.
@@ -114,6 +116,13 @@ Eventos esperados despues de pruebas:
 - `execution.prepare`
 - `execution.binance.test_order.success` o `.error`
 - `execution.ibkr.test_order.success` o `.error`
+
+Comparativo diario (admin):
+
+```bash
+curl -s "$BASE_URL/ops/risk/daily-compare" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
 
 ## 6) Rotacion de clave de cifrado (cambio controlado)
 
