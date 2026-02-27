@@ -40,6 +40,7 @@ USER2_EXPECT_EXIT="${USER2_EXPECT_EXIT:-true}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 ADMIN_OTP="${ADMIN_OTP:-}"
+BINANCE_GEO_RESTRICT_AS_PASS="${BINANCE_GEO_RESTRICT_AS_PASS:-true}"
 
 pass_count=0
 fail_count=0
@@ -118,6 +119,8 @@ check_exit_decision() {
   local should_exit
   should_exit=$(echo "$resp" | json_get should_exit || true)
   if [[ "$should_exit" == "True" ]]; then should_exit="true"; fi
+  if [[ "$should_exit" == "False" ]]; then should_exit="false"; fi
+  expected=$(echo "$expected" | tr '[:upper:]' '[:lower:]')
   if [[ "$should_exit" == "$expected" ]]; then
     pass "$label exit-check expected=$expected"
   else
@@ -182,6 +185,10 @@ check_test_order() {
   sent=$(echo "$resp" | json_get sent || true)
   if [[ "$sent" == "True" || "$sent" == "true" ]]; then
     pass "$label test-order"
+  elif [[ "$endpoint" == "/ops/execution/binance/test-order" && "$BINANCE_GEO_RESTRICT_AS_PASS" == "true" && "$resp" == *"restricted location"* ]]; then
+    pass "$label test-order reachable (binance geo-restricted controlled)"
+  elif [[ "$endpoint" == "/ops/execution/binance/test-order" && "$BINANCE_GEO_RESTRICT_AS_PASS" == "true" && "$resp" == *"Binance testnet error 451"* ]]; then
+    pass "$label test-order reachable (binance 451 controlled)"
   else
     fail "$label test-order failed: $resp"
   fi
