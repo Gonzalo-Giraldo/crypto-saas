@@ -112,19 +112,35 @@ generate_totp() {
   local secret="$1"
   python3 - "$secret" <<'PY'
 import base64
+import binascii
 import hashlib
 import hmac
 import struct
 import sys
 import time
+from urllib.parse import parse_qs, urlparse
 
 secret = (sys.argv[1] or "").strip().replace(" ", "").upper()
 if not secret:
     print("")
     raise SystemExit(0)
 
+if secret.startswith("OTPAUTH://"):
+    parsed = urlparse(secret)
+    query = parse_qs(parsed.query)
+    secret = (query.get("secret", [""])[0] or "").strip().replace(" ", "").upper()
+
+if "SECRET=" in secret and not secret.startswith("OTPAUTH://"):
+    maybe = secret.split("SECRET=", 1)[1].split("&", 1)[0]
+    secret = maybe.strip().replace(" ", "").upper()
+
 padding = "=" * ((8 - len(secret) % 8) % 8)
-key = base64.b32decode(secret + padding, casefold=True)
+try:
+    key = base64.b32decode(secret + padding, casefold=True)
+except (binascii.Error, ValueError):
+    print("")
+    raise SystemExit(0)
+
 counter = int(time.time() // 30)
 msg = struct.pack(">Q", counter)
 h = hmac.new(key, msg, hashlib.sha1).digest()
@@ -269,14 +285,23 @@ ADMIN_TOKEN=$(login_token "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_OTP")
 
 if [[ "${#TOKEN1}" -le 100 && -n "$USER1_TOTP_SECRET" ]]; then
   USER1_OTP=$(generate_totp "$USER1_TOTP_SECRET")
+  if [[ -z "$USER1_OTP" ]]; then
+    echo "INFO | invalid USER1_TOTP_SECRET format"
+  fi
   TOKEN1=$(login_token "$USER1_EMAIL" "$USER1_PASSWORD" "$USER1_OTP")
 fi
 if [[ "${#TOKEN2}" -le 100 && -n "$USER2_TOTP_SECRET" ]]; then
   USER2_OTP=$(generate_totp "$USER2_TOTP_SECRET")
+  if [[ -z "$USER2_OTP" ]]; then
+    echo "INFO | invalid USER2_TOTP_SECRET format"
+  fi
   TOKEN2=$(login_token "$USER2_EMAIL" "$USER2_PASSWORD" "$USER2_OTP")
 fi
 if [[ "${#ADMIN_TOKEN}" -le 100 && -n "$ADMIN_TOTP_SECRET" ]]; then
   ADMIN_OTP=$(generate_totp "$ADMIN_TOTP_SECRET")
+  if [[ -z "$ADMIN_OTP" ]]; then
+    echo "INFO | invalid ADMIN_TOTP_SECRET format"
+  fi
   ADMIN_TOKEN=$(login_token "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_OTP")
 fi
 
