@@ -6,6 +6,7 @@ BASE_URL="${BASE_URL:-}"
 USER1_EMAIL="${USER1_EMAIL:-}"     # BINANCE user
 USER1_PASSWORD="${USER1_PASSWORD:-}"
 USER1_OTP="${USER1_OTP:-}"
+USER1_TOTP_SECRET="${USER1_TOTP_SECRET:-}"
 USER1_SYMBOL_BINANCE="${USER1_SYMBOL_BINANCE:-BTCUSDT}"
 USER1_QTY_BINANCE="${USER1_QTY_BINANCE:-0.01}"
 USER1_BINANCE_API_KEY="${USER1_BINANCE_API_KEY:-}"
@@ -22,6 +23,7 @@ USER1_EXPECT_EXIT="${USER1_EXPECT_EXIT:-false}"
 USER2_EMAIL="${USER2_EMAIL:-}"     # IBKR user
 USER2_PASSWORD="${USER2_PASSWORD:-}"
 USER2_OTP="${USER2_OTP:-}"
+USER2_TOTP_SECRET="${USER2_TOTP_SECRET:-}"
 USER2_SYMBOL_IBKR="${USER2_SYMBOL_IBKR:-AAPL}"
 USER2_QTY_IBKR="${USER2_QTY_IBKR:-1}"
 USER2_IBKR_API_KEY="${USER2_IBKR_API_KEY:-}"
@@ -40,6 +42,7 @@ USER2_EXPECT_EXIT="${USER2_EXPECT_EXIT:-true}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
 ADMIN_OTP="${ADMIN_OTP:-}"
+ADMIN_TOTP_SECRET="${ADMIN_TOTP_SECRET:-}"
 BINANCE_GEO_RESTRICT_AS_PASS="${BINANCE_GEO_RESTRICT_AS_PASS:-true}"
 
 pass_count=0
@@ -103,6 +106,32 @@ login_token() {
   local token
   token=$(echo "$resp" | json_get access_token || true)
   echo "$token"
+}
+
+generate_totp() {
+  local secret="$1"
+  python3 - "$secret" <<'PY'
+import base64
+import hashlib
+import hmac
+import struct
+import sys
+import time
+
+secret = (sys.argv[1] or "").strip().replace(" ", "").upper()
+if not secret:
+    print("")
+    raise SystemExit(0)
+
+padding = "=" * ((8 - len(secret) % 8) % 8)
+key = base64.b32decode(secret + padding, casefold=True)
+counter = int(time.time() // 30)
+msg = struct.pack(">Q", counter)
+h = hmac.new(key, msg, hashlib.sha1).digest()
+offset = h[-1] & 0x0F
+code = (struct.unpack(">I", h[offset:offset+4])[0] & 0x7FFFFFFF) % 1000000
+print(f"{code:06d}")
+PY
 }
 
 check_exit_decision() {
@@ -237,6 +266,19 @@ echo "[B] Login"
 TOKEN1=$(login_token "$USER1_EMAIL" "$USER1_PASSWORD" "$USER1_OTP")
 TOKEN2=$(login_token "$USER2_EMAIL" "$USER2_PASSWORD" "$USER2_OTP")
 ADMIN_TOKEN=$(login_token "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_OTP")
+
+if [[ "${#TOKEN1}" -le 100 && -n "$USER1_TOTP_SECRET" ]]; then
+  USER1_OTP=$(generate_totp "$USER1_TOTP_SECRET")
+  TOKEN1=$(login_token "$USER1_EMAIL" "$USER1_PASSWORD" "$USER1_OTP")
+fi
+if [[ "${#TOKEN2}" -le 100 && -n "$USER2_TOTP_SECRET" ]]; then
+  USER2_OTP=$(generate_totp "$USER2_TOTP_SECRET")
+  TOKEN2=$(login_token "$USER2_EMAIL" "$USER2_PASSWORD" "$USER2_OTP")
+fi
+if [[ "${#ADMIN_TOKEN}" -le 100 && -n "$ADMIN_TOTP_SECRET" ]]; then
+  ADMIN_OTP=$(generate_totp "$ADMIN_TOTP_SECRET")
+  ADMIN_TOKEN=$(login_token "$ADMIN_EMAIL" "$ADMIN_PASSWORD" "$ADMIN_OTP")
+fi
 
 if [[ "${#TOKEN1}" -gt 100 ]]; then pass "user1 login"; else fail "user1 login failed"; fi
 if [[ "${#TOKEN2}" -gt 100 ]]; then pass "user2 login"; else fail "user2 login failed"; fi

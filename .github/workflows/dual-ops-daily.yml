@@ -21,6 +21,7 @@ jobs:
       USER1_EMAIL: ${{ secrets.DUAL_USER1_EMAIL }}
       USER1_PASSWORD: ${{ secrets.DUAL_USER1_PASSWORD }}
       USER1_OTP: ${{ secrets.DUAL_USER1_OTP }}
+      USER1_TOTP_SECRET: ${{ secrets.DUAL_USER1_TOTP_SECRET }}
       USER1_SYMBOL_BINANCE: ${{ secrets.DUAL_USER1_SYMBOL_BINANCE != '' && secrets.DUAL_USER1_SYMBOL_BINANCE || 'BTCUSDT' }}
       USER1_QTY_BINANCE: ${{ secrets.DUAL_USER1_QTY_BINANCE != '' && secrets.DUAL_USER1_QTY_BINANCE || '0.01' }}
       USER1_EXPECT_EXIT: ${{ secrets.DUAL_USER1_EXPECT_EXIT != '' && secrets.DUAL_USER1_EXPECT_EXIT || 'false' }}
@@ -29,6 +30,7 @@ jobs:
       USER2_EMAIL: ${{ secrets.DUAL_USER2_EMAIL }}
       USER2_PASSWORD: ${{ secrets.DUAL_USER2_PASSWORD }}
       USER2_OTP: ${{ secrets.DUAL_USER2_OTP }}
+      USER2_TOTP_SECRET: ${{ secrets.DUAL_USER2_TOTP_SECRET }}
       USER2_SYMBOL_IBKR: ${{ secrets.DUAL_USER2_SYMBOL_IBKR != '' && secrets.DUAL_USER2_SYMBOL_IBKR || 'AAPL' }}
       USER2_QTY_IBKR: ${{ secrets.DUAL_USER2_QTY_IBKR != '' && secrets.DUAL_USER2_QTY_IBKR || '1' }}
       USER2_EXPECT_EXIT: ${{ secrets.DUAL_USER2_EXPECT_EXIT != '' && secrets.DUAL_USER2_EXPECT_EXIT || 'true' }}
@@ -37,6 +39,7 @@ jobs:
       ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
       ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
       RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
     steps:
       - name: Checkout

@@ -134,6 +134,9 @@ scripts/run_scenario.sh
   - `DUAL_USER1_OTP`
   - `DUAL_USER2_OTP`
   - `DUAL_ADMIN_OTP`
+  - `DUAL_USER1_TOTP_SECRET` (recommended if 2FA enabled; auto-generates OTP per run)
+  - `DUAL_USER2_TOTP_SECRET` (recommended if 2FA enabled; auto-generates OTP per run)
+  - `DUAL_ADMIN_TOTP_SECRET` (optional)
   - `DUAL_USER1_BINANCE_API_KEY`
   - `DUAL_USER1_BINANCE_API_SECRET`
   - `DUAL_USER2_IBKR_API_KEY`
@@ -144,6 +147,7 @@ scripts/run_scenario.sh
   - `DUAL_USER2_QTY_IBKR` (default `1`)
   - `DUAL_USER1_EXPECT_EXIT` (default `false`)
   - `DUAL_USER2_EXPECT_EXIT` (default `true`)
+- If users have 2FA enabled, prefer `*_TOTP_SECRET` over `*_OTP` to avoid expired OTP failures.
 - Reliability and incident policy:
   - Retry policy (`max_attempts=2`)
   - Auto-remediation via `RENDER_DEPLOY_HOOK_URL` if configured

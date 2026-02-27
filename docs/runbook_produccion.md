@@ -293,6 +293,14 @@ GitHub Actions:
 - Secret opcional:
   - `RENDER_DEPLOY_HOOK_URL` (auto-remediacion: redeploy + reintento smoke)
 
+Nota para usuarios con 2FA en workflows:
+- No usar OTP fijo para jobs diarios.
+- Usar secrets tipo semilla TOTP:
+  - `DUAL_USER1_TOTP_SECRET`
+  - `DUAL_USER2_TOTP_SECRET`
+  - `DUAL_ADMIN_TOTP_SECRET` (si aplica)
+- El workflow genera OTP automaticamente en cada ejecucion.
+
 Chequeo diario de postura de seguridad:
 - Workflow: `.github/workflows/security-posture-daily.yml`
 - Objetivo:
