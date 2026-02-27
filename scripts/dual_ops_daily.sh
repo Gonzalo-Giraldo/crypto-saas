@@ -10,6 +10,14 @@ USER1_SYMBOL_BINANCE="${USER1_SYMBOL_BINANCE:-BTCUSDT}"
 USER1_QTY_BINANCE="${USER1_QTY_BINANCE:-0.01}"
 USER1_BINANCE_API_KEY="${USER1_BINANCE_API_KEY:-}"
 USER1_BINANCE_API_SECRET="${USER1_BINANCE_API_SECRET:-}"
+USER1_EXIT_ENTRY_PRICE="${USER1_EXIT_ENTRY_PRICE:-50000}"
+USER1_EXIT_CURRENT_PRICE="${USER1_EXIT_CURRENT_PRICE:-50750}"
+USER1_EXIT_STOP_LOSS="${USER1_EXIT_STOP_LOSS:-49500}"
+USER1_EXIT_TAKE_PROFIT="${USER1_EXIT_TAKE_PROFIT:-51000}"
+USER1_EXIT_OPENED_MINUTES="${USER1_EXIT_OPENED_MINUTES:-180}"
+USER1_EXIT_TREND_BREAK="${USER1_EXIT_TREND_BREAK:-false}"
+USER1_EXIT_SIGNAL_REVERSE="${USER1_EXIT_SIGNAL_REVERSE:-false}"
+USER1_EXPECT_EXIT="${USER1_EXPECT_EXIT:-false}"
 
 USER2_EMAIL="${USER2_EMAIL:-}"     # IBKR user
 USER2_PASSWORD="${USER2_PASSWORD:-}"
@@ -18,6 +26,16 @@ USER2_SYMBOL_IBKR="${USER2_SYMBOL_IBKR:-AAPL}"
 USER2_QTY_IBKR="${USER2_QTY_IBKR:-1}"
 USER2_IBKR_API_KEY="${USER2_IBKR_API_KEY:-}"
 USER2_IBKR_API_SECRET="${USER2_IBKR_API_SECRET:-}"
+USER2_EXIT_ENTRY_PRICE="${USER2_EXIT_ENTRY_PRICE:-180}"
+USER2_EXIT_CURRENT_PRICE="${USER2_EXIT_CURRENT_PRICE:-179}"
+USER2_EXIT_STOP_LOSS="${USER2_EXIT_STOP_LOSS:-178}"
+USER2_EXIT_TAKE_PROFIT="${USER2_EXIT_TAKE_PROFIT:-183}"
+USER2_EXIT_OPENED_MINUTES="${USER2_EXIT_OPENED_MINUTES:-500}"
+USER2_EXIT_TREND_BREAK="${USER2_EXIT_TREND_BREAK:-false}"
+USER2_EXIT_SIGNAL_REVERSE="${USER2_EXIT_SIGNAL_REVERSE:-false}"
+USER2_EXIT_MACRO_EVENT_BLOCK="${USER2_EXIT_MACRO_EVENT_BLOCK:-true}"
+USER2_EXIT_EARNINGS_WITHIN_24H="${USER2_EXIT_EARNINGS_WITHIN_24H:-false}"
+USER2_EXPECT_EXIT="${USER2_EXPECT_EXIT:-true}"
 
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
@@ -64,6 +82,11 @@ json_get() {
   python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1], ""))' "$key"
 }
 
+array_has_action() {
+  local action="$1"
+  python3 -c 'import json,sys; arr=json.load(sys.stdin); print("true" if any(x.get("action")==sys.argv[1] for x in arr) else "false")' "$action"
+}
+
 login_token() {
   local email="$1"
   local password="$2"
@@ -79,6 +102,27 @@ login_token() {
   local token
   token=$(echo "$resp" | json_get access_token || true)
   echo "$token"
+}
+
+check_exit_decision() {
+  local token="$1"
+  local endpoint="$2"
+  local payload="$3"
+  local expected="$4"
+  local label="$5"
+  local resp
+  resp=$(curl -sS -X POST "$BASE_URL$endpoint" \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    --data "$payload" || true)
+  local should_exit
+  should_exit=$(echo "$resp" | json_get should_exit || true)
+  if [[ "$should_exit" == "True" ]]; then should_exit="true"; fi
+  if [[ "$should_exit" == "$expected" ]]; then
+    pass "$label exit-check expected=$expected"
+  else
+    fail "$label exit-check mismatch expected=$expected got=$should_exit resp=$resp"
+  fi
 }
 
 seed_exchange_secret_if_present() {
@@ -211,12 +255,48 @@ check_test_order "$TOKEN1" "/ops/execution/binance/test-order" "{\"symbol\":\"$U
 check_test_order "$TOKEN2" "/ops/execution/ibkr/test-order" "{\"symbol\":\"$USER2_SYMBOL_IBKR\",\"side\":\"BUY\",\"qty\":$USER2_QTY_IBKR}" "user2 IBKR"
 
 echo
-echo "[E] Segregation Assertions"
+echo "[E] Exit Checks"
+check_exit_decision "$TOKEN1" "/ops/execution/exit/binance/check" \
+  "{\"symbol\":\"$USER1_SYMBOL_BINANCE\",\"side\":\"BUY\",\"entry_price\":$USER1_EXIT_ENTRY_PRICE,\"current_price\":$USER1_EXIT_CURRENT_PRICE,\"stop_loss\":$USER1_EXIT_STOP_LOSS,\"take_profit\":$USER1_EXIT_TAKE_PROFIT,\"opened_minutes\":$USER1_EXIT_OPENED_MINUTES,\"trend_break\":$USER1_EXIT_TREND_BREAK,\"signal_reverse\":$USER1_EXIT_SIGNAL_REVERSE}" \
+  "$USER1_EXPECT_EXIT" "user1 BINANCE"
+check_exit_decision "$TOKEN2" "/ops/execution/exit/ibkr/check" \
+  "{\"symbol\":\"$USER2_SYMBOL_IBKR\",\"side\":\"BUY\",\"entry_price\":$USER2_EXIT_ENTRY_PRICE,\"current_price\":$USER2_EXIT_CURRENT_PRICE,\"stop_loss\":$USER2_EXIT_STOP_LOSS,\"take_profit\":$USER2_EXIT_TAKE_PROFIT,\"opened_minutes\":$USER2_EXIT_OPENED_MINUTES,\"trend_break\":$USER2_EXIT_TREND_BREAK,\"signal_reverse\":$USER2_EXIT_SIGNAL_REVERSE,\"macro_event_block\":$USER2_EXIT_MACRO_EVENT_BLOCK,\"earnings_within_24h\":$USER2_EXIT_EARNINGS_WITHIN_24H}" \
+  "$USER2_EXPECT_EXIT" "user2 IBKR"
+
+echo
+echo "[F] Segregation Assertions"
 check_expected_403 "$TOKEN1" "/ops/execution/ibkr/test-order" "{\"symbol\":\"$USER2_SYMBOL_IBKR\",\"side\":\"BUY\",\"qty\":$USER2_QTY_IBKR}" "Exchange IBKR is disabled for this user" "user1 IBKR"
 check_expected_403 "$TOKEN2" "/ops/execution/binance/test-order" "{\"symbol\":\"$USER1_SYMBOL_BINANCE\",\"side\":\"BUY\",\"qty\":$USER1_QTY_BINANCE}" "Exchange BINANCE is disabled for this user" "user2 BINANCE"
 
 echo
-echo "[F] Daily Compare"
+echo "[G] Audit Checks"
+AUDIT1=$(curl -sS "$BASE_URL/ops/audit/me?limit=120" -H "Authorization: Bearer $TOKEN1" || true)
+AUDIT2=$(curl -sS "$BASE_URL/ops/audit/me?limit=120" -H "Authorization: Bearer $TOKEN2" || true)
+if [[ "${AUDIT1:0:1}" == "[" ]]; then
+  HAS_EXIT1_HOLD=$(echo "$AUDIT1" | array_has_action "exit.check.hold")
+  HAS_EXIT1_TRG=$(echo "$AUDIT1" | array_has_action "exit.check.triggered")
+  if [[ "$HAS_EXIT1_HOLD" == "true" || "$HAS_EXIT1_TRG" == "true" ]]; then
+    pass "audit user1 exit.check.*"
+  else
+    fail "audit user1 missing exit.check.*"
+  fi
+else
+  fail "audit user1 list failed: $AUDIT1"
+fi
+if [[ "${AUDIT2:0:1}" == "[" ]]; then
+  HAS_EXIT2_HOLD=$(echo "$AUDIT2" | array_has_action "exit.check.hold")
+  HAS_EXIT2_TRG=$(echo "$AUDIT2" | array_has_action "exit.check.triggered")
+  if [[ "$HAS_EXIT2_HOLD" == "true" || "$HAS_EXIT2_TRG" == "true" ]]; then
+    pass "audit user2 exit.check.*"
+  else
+    fail "audit user2 missing exit.check.*"
+  fi
+else
+  fail "audit user2 list failed: $AUDIT2"
+fi
+
+echo
+echo "[H] Daily Compare"
 compare=$(curl -sS "$BASE_URL/ops/risk/daily-compare?real_only=true" \
   -H "Authorization: Bearer $ADMIN_TOKEN" || true)
 if [[ "${compare:0:1}" == "{" ]]; then

@@ -138,8 +138,11 @@ scripts/run_scenario.sh
   - `DUAL_USER1_QTY_BINANCE` (default `0.01`)
   - `DUAL_USER2_SYMBOL_IBKR` (default `AAPL`)
   - `DUAL_USER2_QTY_IBKR` (default `1`)
+  - `DUAL_USER1_EXPECT_EXIT` (default `false`)
+  - `DUAL_USER2_EXPECT_EXIT` (default `true`)
 - Reliability and incident policy:
   - Retry policy (`max_attempts=2`)
   - Auto-remediation via `RENDER_DEPLOY_HOOK_URL` if configured
   - Issue escalation only after 2 consecutive failures
   - Auto-close incident on recovery
+  - Daily checks include pretrade + test-order + exit-check + segregation assertions + audit validation

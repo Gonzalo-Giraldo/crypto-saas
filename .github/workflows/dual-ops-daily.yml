@@ -23,6 +23,7 @@ jobs:
       USER1_OTP: ${{ secrets.DUAL_USER1_OTP }}
       USER1_SYMBOL_BINANCE: ${{ secrets.DUAL_USER1_SYMBOL_BINANCE != '' && secrets.DUAL_USER1_SYMBOL_BINANCE || 'BTCUSDT' }}
       USER1_QTY_BINANCE: ${{ secrets.DUAL_USER1_QTY_BINANCE != '' && secrets.DUAL_USER1_QTY_BINANCE || '0.01' }}
+      USER1_EXPECT_EXIT: ${{ secrets.DUAL_USER1_EXPECT_EXIT != '' && secrets.DUAL_USER1_EXPECT_EXIT || 'false' }}
       USER1_BINANCE_API_KEY: ${{ secrets.DUAL_USER1_BINANCE_API_KEY }}
       USER1_BINANCE_API_SECRET: ${{ secrets.DUAL_USER1_BINANCE_API_SECRET }}
       USER2_EMAIL: ${{ secrets.DUAL_USER2_EMAIL }}
@@ -30,6 +31,7 @@ jobs:
       USER2_OTP: ${{ secrets.DUAL_USER2_OTP }}
       USER2_SYMBOL_IBKR: ${{ secrets.DUAL_USER2_SYMBOL_IBKR != '' && secrets.DUAL_USER2_SYMBOL_IBKR || 'AAPL' }}
       USER2_QTY_IBKR: ${{ secrets.DUAL_USER2_QTY_IBKR != '' && secrets.DUAL_USER2_QTY_IBKR || '1' }}
+      USER2_EXPECT_EXIT: ${{ secrets.DUAL_USER2_EXPECT_EXIT != '' && secrets.DUAL_USER2_EXPECT_EXIT || 'true' }}
       USER2_IBKR_API_KEY: ${{ secrets.DUAL_USER2_IBKR_API_KEY }}
       USER2_IBKR_API_SECRET: ${{ secrets.DUAL_USER2_IBKR_API_SECRET }}
       ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
