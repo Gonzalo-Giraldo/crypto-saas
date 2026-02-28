@@ -9,6 +9,7 @@ import apps.api.app.models.user_2fa
 import apps.api.app.models.audit_log
 import apps.api.app.models.exchange_secret
 import apps.api.app.models.strategy_assignment
+import apps.api.app.models.user_risk_profile
 
 from fastapi import FastAPI
 

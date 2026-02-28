@@ -193,6 +193,32 @@ curl -s -X POST "$BASE_URL/ops/strategy/assign" \
   --data '{"user_email":"usuario@dominio.com","exchange":"BINANCE","strategy_id":"SWING_V1","enabled":true}'
 ```
 
+Gestion admin de usuarios (sin SQL manual):
+
+```bash
+# Cambiar rol
+curl -s -X PATCH "$BASE_URL/users/USER_ID/role" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"role":"admin"}'
+```
+
+```bash
+# Set override de perfil de riesgo
+curl -s -X PUT "$BASE_URL/users/USER_ID/risk-profile" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"profile_name":"modelo_suelto_controlado"}'
+```
+
+```bash
+# Limpiar override (volver a default por email/config)
+curl -s -X PUT "$BASE_URL/users/USER_ID/risk-profile" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"profile_name":null}'
+```
+
 Pre-trade check por exchange:
 
 ```bash

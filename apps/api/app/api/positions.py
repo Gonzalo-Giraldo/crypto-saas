@@ -14,7 +14,7 @@ from apps.api.app.models.user import User
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.risk_profiles import (
     apply_profile_daily_limits,
-    resolve_risk_profile_for_email,
+    resolve_risk_profile,
 )
 
 router = APIRouter(prefix="/positions", tags=["positions"])
@@ -45,7 +45,7 @@ def open_from_signal(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    profile = resolve_risk_profile_for_email(current_user.email)
+    profile = resolve_risk_profile(db, current_user.id, current_user.email)
     s = db.execute(select(Signal).where(Signal.id == signal_id)).scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Signal not found")
@@ -183,7 +183,7 @@ def close_position(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    profile = resolve_risk_profile_for_email(current_user.email)
+    profile = resolve_risk_profile(db, current_user.id, current_user.email)
     p = db.execute(select(Position).where(Position.id == position_id)).scalar_one_or_none()
     if not p:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -245,7 +245,7 @@ def get_today_risk(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    profile = resolve_risk_profile_for_email(current_user.email)
+    profile = resolve_risk_profile(db, current_user.id, current_user.email)
     today = today_colombia()
 
     dr = (

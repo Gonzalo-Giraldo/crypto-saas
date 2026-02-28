@@ -14,6 +14,16 @@ class UserCreate(UserBase):
 class UserOut(UserBase):
     id: str
     role: str
+    risk_profile: Optional[str] = None
+    risk_profile_source: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class UserRoleUpdate(BaseModel):
+    role: str
+
+
+class UserRiskProfileUpdate(BaseModel):
+    profile_name: Optional[str] = None

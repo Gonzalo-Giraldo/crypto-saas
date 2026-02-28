@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from apps.api.app.core.config import settings
+from apps.api.app.models.user_risk_profile import UserRiskProfileOverride
 
 
 PROFILE_MODEL2 = {
@@ -29,6 +30,11 @@ PROFILE_LOOSE = {
     "min_rr": 1.3,
 }
 
+PROFILES = {
+    PROFILE_MODEL2["profile_name"]: PROFILE_MODEL2,
+    PROFILE_LOOSE["profile_name"]: PROFILE_LOOSE,
+}
+
 
 def _norm_email(value: str | None) -> str:
     return (value or "").strip().lower()
@@ -44,6 +50,25 @@ def resolve_risk_profile_for_email(email: str) -> dict:
     if target and target == model2_email:
         return deepcopy(PROFILE_MODEL2)
     return deepcopy(PROFILE_MODEL2)
+
+
+def resolve_risk_profile(
+    db,
+    user_id: str,
+    email: str,
+) -> dict:
+    override = (
+        db.query(UserRiskProfileOverride)
+        .filter(UserRiskProfileOverride.user_id == user_id)
+        .first()
+    )
+    if override and override.profile_name in PROFILES:
+        return deepcopy(PROFILES[override.profile_name])
+    return resolve_risk_profile_for_email(email)
+
+
+def list_profile_names() -> list[str]:
+    return sorted(PROFILES.keys())
 
 
 def apply_profile_daily_limits(dr, profile: dict):

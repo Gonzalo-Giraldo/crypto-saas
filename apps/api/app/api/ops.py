@@ -52,7 +52,7 @@ from apps.api.app.schemas.audit import AuditOut
 from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
-from apps.api.app.services.risk_profiles import resolve_risk_profile_for_email
+from apps.api.app.services.risk_profiles import resolve_risk_profile
 from apps.api.app.services.strategy_assignments import (
     is_exchange_enabled_for_user,
     resolve_strategy_for_user_exchange,
@@ -178,7 +178,7 @@ def _evaluate_pretrade_for_user(
         user_id=current_user.id,
         exchange=exchange,
     )
-    profile = resolve_risk_profile_for_email(current_user.email)
+    profile = resolve_risk_profile(db, current_user.id, current_user.email)
     today = today_colombia()
     checks = []
 
@@ -564,7 +564,7 @@ def daily_risk_compare(
         ):
             continue
 
-        profile = resolve_risk_profile_for_email(user.email)
+        profile = resolve_risk_profile(db, user.id, user.email)
         dr = (
             db.execute(
                 select(DailyRiskState).where(
@@ -1091,7 +1091,7 @@ def dashboard_summary(
         if email_contains and email_contains.lower() not in (user.email or "").lower():
             continue
 
-        profile = resolve_risk_profile_for_email(user.email)
+        profile = resolve_risk_profile(db, user.id, user.email)
         p = posture_map[user.id]
         exchange_u = (exchange or "ALL").upper()
         if exchange_u == "BINANCE" and not p.binance_secret_configured:
