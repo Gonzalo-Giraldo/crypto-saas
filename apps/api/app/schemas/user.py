@@ -3,11 +3,12 @@ from typing import Optional
 
 
 class UserBase(BaseModel):
-    email: EmailStr
+    email: str
     display_name: Optional[str] = None
 
 
 class UserCreate(UserBase):
+    email: EmailStr
     password: str
 
 
