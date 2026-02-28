@@ -24,6 +24,7 @@ jobs:
     env:
       BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
       SECRET_MAX_AGE_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.secret_max_age_days || secrets.SECRET_MAX_AGE_DAYS }}
+      PREVENTIVE_MIN_ERRORS: ${{ secrets.PREVENTIVE_MIN_ERRORS }}
       ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
       ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
       ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}

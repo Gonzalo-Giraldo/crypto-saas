@@ -161,8 +161,9 @@ Artifact diario de snapshot:
 - Archivo JSON: `security_dashboard_snapshot.json`
 
 Regla preventiva automatica:
-- Si `errors_total` aumenta 2 dias consecutivos (en `trends_7d`), el workflow falla y abre incidente preventivo.
+- Si `errors_total` aumenta 2 dias consecutivos (en `trends_7d`) y el dia actual supera el umbral, el workflow falla y abre incidente preventivo.
 - Si ademas `pretrade_blocked_last_24h > 0`, tratar como prioridad alta.
+- Umbral configurable: `PREVENTIVE_MIN_ERRORS` (default `10`).
 
 Asignacion de estrategia (admin):
 

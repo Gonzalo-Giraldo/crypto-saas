@@ -8,6 +8,7 @@ ADMIN_OTP="${ADMIN_OTP:-}"
 ADMIN_TOTP_SECRET="${ADMIN_TOTP_SECRET:-}"
 SECRET_MAX_AGE_DAYS="${SECRET_MAX_AGE_DAYS:-30}"
 REAL_ONLY="${REAL_ONLY:-true}"
+PREVENTIVE_MIN_ERRORS="${PREVENTIVE_MIN_ERRORS:-10}"
 
 pass_count=0
 fail_count=0
@@ -73,6 +74,7 @@ echo "== Security Posture Daily =="
 echo "BASE_URL=$BASE_URL"
 echo "REAL_ONLY=$REAL_ONLY"
 echo "SECRET_MAX_AGE_DAYS=$SECRET_MAX_AGE_DAYS"
+echo "PREVENTIVE_MIN_ERRORS=$PREVENTIVE_MIN_ERRORS"
 
 echo
 echo "[A] Health"
@@ -177,19 +179,25 @@ else:
     e2=t[-1].get("errors_total",0)
     print("true" if (e0 < e1 < e2) else "false")
 ')
+  errors_today=$(echo "$dashboard_resp" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+t=d.get("trends_7d", [])
+print(int((t[-1].get("errors_total",0) if t else 0)))
+')
   pretrade_blocked_24h=$(echo "$dashboard_resp" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 print(int(d.get("recent_events",{}).get("pretrade_blocked_last_24h",0)))
 ')
-  if [[ "$trend_rising_2d" == "true" ]]; then
+  if [[ "$trend_rising_2d" == "true" && "$errors_today" -ge "$PREVENTIVE_MIN_ERRORS" ]]; then
     if [[ "$pretrade_blocked_24h" -gt 0 ]]; then
-      fail "preventive incident: errors trend rising 2 days + pretrade_blocked_last_24h=$pretrade_blocked_24h (high priority)"
+      fail "preventive incident: errors trend rising 2 days and errors_today=$errors_today>=${PREVENTIVE_MIN_ERRORS} + pretrade_blocked_last_24h=$pretrade_blocked_24h (high priority)"
     else
-      fail "preventive incident: errors trend rising 2 days"
+      fail "preventive incident: errors trend rising 2 days and errors_today=$errors_today>=${PREVENTIVE_MIN_ERRORS}"
     fi
   else
-    pass "preventive trend rule ok"
+    pass "preventive trend rule ok (trend=$trend_rising_2d errors_today=$errors_today threshold=$PREVENTIVE_MIN_ERRORS)"
   fi
 else
   fail "preventive trend rule skipped: dashboard data unavailable"
