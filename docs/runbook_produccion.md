@@ -171,6 +171,19 @@ Regla preventiva automatica:
 - Si ademas `pretrade_blocked_last_24h > 0`, tratar como prioridad alta.
 - Umbral configurable: `PREVENTIVE_MIN_ERRORS` (default `10`).
 
+Cleanup de usuarios smoke (admin):
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/cleanup-smoke-users?dry_run=true&older_than_days=14" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Automatizacion semanal:
+- Workflow: `.github/workflows/cleanup-smoke-users-weekly.yml`
+- Artifact:
+  - `cleanup_smoke_users.log`
+  - `cleanup_smoke_users_output.json`
+
 Asignacion de estrategia (admin):
 
 ```bash

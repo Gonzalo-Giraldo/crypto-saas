@@ -1,0 +1,132 @@
+name: Cleanup Smoke Users Weekly
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://api.example.com)"
+        required: true
+        type: string
+      older_than_days:
+        description: "Delete smoke users inactive for more than N days"
+        required: false
+        default: "14"
+        type: string
+      dry_run:
+        description: "Run in dry-run mode"
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: "5 12 * * 1"
+
+jobs:
+  cleanup_smoke_users:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
+      ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
+      ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
+      OLDER_THAN_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.older_than_days || '14' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "BASE_URL is empty. Set workflow input 'base_url' or repository secret 'SMOKE_BASE_URL'."
+            exit 1
+          fi
+          if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" ]]; then
+            echo "Missing required secrets: DUAL_ADMIN_EMAIL / DUAL_ADMIN_PASSWORD"
+            exit 1
+          fi
+
+      - name: Run cleanup script
+        id: cleanup
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x scripts/cleanup_smoke_users.sh
+          scripts/cleanup_smoke_users.sh 2>&1 | tee cleanup_smoke_users.log
+
+      - name: Build run summary
+        if: always()
+        run: |
+          {
+            echo "## Cleanup Smoke Users Weekly Result"
+            echo
+            echo "- Repository: \`${{ github.repository }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Base URL: \`${BASE_URL}\`"
+            echo "- older_than_days: \`${OLDER_THAN_DAYS}\`"
+            echo "- dry_run: \`${DRY_RUN}\`"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Outcome: \`${{ steps.cleanup.outcome }}\`"
+            echo
+            if [[ -f cleanup_smoke_users.log ]]; then
+              echo "### Tail log"
+              echo '```text'
+              tail -n 40 cleanup_smoke_users.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-smoke-users-${{ github.run_id }}
+          path: |
+            cleanup_smoke_users.log
+            cleanup_smoke_users_output.json
+          if-no-files-found: warn
+
+      - name: Open incident on failure
+        if: steps.cleanup.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Cleanup Smoke Users] Incident open';
+            const body = [
+              `Cleanup smoke users workflow failed.`,
+              ``,
+              `Run: ${runUrl}`,
+              `Review artifact cleanup_smoke_users.log`
+            ].join('\n');
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['incident', 'operations']
+              });
+            }
+
+      - name: Fail job if cleanup failed
+        if: steps.cleanup.outcome == 'failure'
+        run: exit 1

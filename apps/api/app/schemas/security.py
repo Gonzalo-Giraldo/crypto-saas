@@ -13,6 +13,22 @@ class ReencryptSecretsOut(BaseModel):
     updated: int
 
 
+class CleanupSmokeUsersUserOut(BaseModel):
+    user_id: str
+    email: str
+    last_activity_at: str | None
+    eligible_for_delete: bool
+
+
+class CleanupSmokeUsersOut(BaseModel):
+    dry_run: bool
+    older_than_days: int
+    scanned: int
+    eligible: int
+    deleted: int
+    users: list[CleanupSmokeUsersUserOut]
+
+
 class SecurityPostureUserOut(BaseModel):
     user_id: str
     email: str

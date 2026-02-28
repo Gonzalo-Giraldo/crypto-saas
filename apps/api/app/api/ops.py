@@ -11,6 +11,7 @@ from apps.api.app.models.audit_log import AuditLog
 from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.models.exchange_secret import ExchangeSecret
 from apps.api.app.models.position import Position
+from apps.api.app.models.signal import Signal
 from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.models.user_2fa import UserTwoFactor
 from apps.api.app.schemas.execution import (
@@ -33,6 +34,8 @@ from apps.api.app.schemas.strategy import (
 from apps.api.app.schemas.security import (
     ReencryptSecretsOut,
     ReencryptSecretsRequest,
+    CleanupSmokeUsersOut,
+    CleanupSmokeUsersUserOut,
     DashboardSummaryOut,
     DashboardSecurityOut,
     DashboardOperationsOut,
@@ -945,6 +948,111 @@ def security_posture(
             users_with_stale_secrets=stale_secrets,
         ),
         users=posture_rows,
+    )
+
+
+def _max_dt(values):
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return None
+    out = max(vals)
+    if out.tzinfo is None:
+        out = out.replace(tzinfo=timezone.utc)
+    return out
+
+
+@router.post("/admin/cleanup-smoke-users", response_model=CleanupSmokeUsersOut)
+def cleanup_smoke_users(
+    dry_run: bool = True,
+    older_than_days: int = 14,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=max(0, older_than_days))
+    smoke_users = db.execute(
+        select(User).where(User.email.like("smoke.%")).order_by(User.email.asc())
+    ).scalars().all()
+
+    rows: list[CleanupSmokeUsersUserOut] = []
+    eligible_ids: list[str] = []
+
+    for u in smoke_users:
+        last_audit = db.execute(
+            select(func.max(AuditLog.created_at)).where(AuditLog.user_id == u.id)
+        ).scalar_one()
+        last_position_open = db.execute(
+            select(func.max(Position.opened_at)).where(Position.user_id == u.id)
+        ).scalar_one()
+        last_position_close = db.execute(
+            select(func.max(Position.closed_at)).where(Position.user_id == u.id)
+        ).scalar_one()
+        last_signal = db.execute(
+            select(func.max(Signal.updated_at)).where(Signal.user_id == u.id)
+        ).scalar_one()
+        last_secret = db.execute(
+            select(func.max(ExchangeSecret.updated_at)).where(ExchangeSecret.user_id == u.id)
+        ).scalar_one()
+        last_assignment = db.execute(
+            select(func.max(StrategyAssignment.updated_at)).where(StrategyAssignment.user_id == u.id)
+        ).scalar_one()
+
+        last_activity = _max_dt(
+            [
+                last_audit,
+                last_position_open,
+                last_position_close,
+                last_signal,
+                last_secret,
+                last_assignment,
+            ]
+        )
+        eligible = last_activity is None or last_activity < cutoff
+        if eligible:
+            eligible_ids.append(u.id)
+
+        rows.append(
+            CleanupSmokeUsersUserOut(
+                user_id=u.id,
+                email=u.email,
+                last_activity_at=last_activity.isoformat() if last_activity else None,
+                eligible_for_delete=eligible,
+            )
+        )
+
+    deleted = 0
+    if not dry_run and eligible_ids:
+        db.query(AuditLog).filter(AuditLog.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        db.query(DailyRiskState).filter(DailyRiskState.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        db.query(Position).filter(Position.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        db.query(Signal).filter(Signal.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        db.query(ExchangeSecret).filter(ExchangeSecret.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        db.query(StrategyAssignment).filter(StrategyAssignment.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        db.query(UserTwoFactor).filter(UserTwoFactor.user_id.in_(eligible_ids)).delete(synchronize_session=False)
+        deleted = db.query(User).filter(User.id.in_(eligible_ids)).delete(synchronize_session=False)
+
+    log_audit_event(
+        db,
+        action="ops.cleanup.smoke_users",
+        user_id=current_user.id,
+        entity_type="ops",
+        details={
+            "dry_run": dry_run,
+            "older_than_days": older_than_days,
+            "scanned": len(smoke_users),
+            "eligible": len(eligible_ids),
+            "deleted": deleted,
+        },
+    )
+    db.commit()
+
+    return CleanupSmokeUsersOut(
+        dry_run=dry_run,
+        older_than_days=older_than_days,
+        scanned=len(smoke_users),
+        eligible=len(eligible_ids),
+        deleted=deleted,
+        users=rows,
     )
 
 

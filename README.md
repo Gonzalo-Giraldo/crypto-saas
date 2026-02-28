@@ -62,6 +62,7 @@ scripts/run_scenario.sh
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
 - `GET /ops/security/posture` (admin, 2FA + secret age posture)
+- `POST /ops/admin/cleanup-smoke-users` (admin, cleanup smoke users with dry-run)
 - `POST /signals`
 - `GET /signals`
 - `POST /signals/claim`
@@ -172,6 +173,18 @@ scripts/run_scenario.sh
   - Opens issue `[Security Posture Daily] Incident open` when posture fails.
   - Adds comment if incident already exists.
   - Auto-closes incident when posture recovers.
+
+## Cleanup Smoke Users Weekly
+- Weekly cleanup workflow: `.github/workflows/cleanup-smoke-users-weekly.yml`
+- Script: `scripts/cleanup_smoke_users.sh`
+- Endpoint: `POST /ops/admin/cleanup-smoke-users?dry_run=true|false&older_than_days=14`
+- Defaults:
+  - weekly schedule every Monday
+  - `older_than_days=14`
+  - scheduled run executes with `dry_run=false`
+- Workflow artifact:
+  - `cleanup_smoke_users.log`
+  - `cleanup_smoke_users_output.json`
 
 ## Ops Dashboard
 - Browser UI endpoint: `/ops/dashboard`
