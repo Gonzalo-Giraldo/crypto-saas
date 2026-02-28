@@ -1138,6 +1138,7 @@ def dashboard_page():
           <option value="BINANCE">BINANCE</option>
           <option value="IBKR">IBKR</option>
         </select>
+        <button id="resetBtn" class="ghost">Reset Filters</button>
         <button id="incidentBtn" class="ghost">Open Incident</button>
       </div>
       <div class="muted" id="stamp" style="margin-top:8px">Waiting for token...</div>
@@ -1202,6 +1203,12 @@ def dashboard_page():
       fill(data);
     }
     byId("load").addEventListener("click", async () => {
+      try { await load(); } catch (e) { byId("stamp").textContent = String(e.message || e); setOverall("red"); }
+    });
+    byId("resetBtn").addEventListener("click", async () => {
+      byId("emailFilter").value = "";
+      byId("realOnlyFilter").value = "true";
+      byId("exchangeFilter").value = "ALL";
       try { await load(); } catch (e) { byId("stamp").textContent = String(e.message || e); setOverall("red"); }
     });
     byId("incidentBtn").addEventListener("click", () => {
