@@ -145,10 +145,15 @@ curl -s "$BASE_URL/ops/dashboard/summary?real_only=true" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+Filtros opcionales:
+- `email_contains=<texto>`
+- `exchange=ALL|BINANCE|IBKR`
+
 UI web:
 - abrir `https://TU_BASE_URL/ops/dashboard`
 - pegar bearer token admin
 - cargar estado unificado de operacion + seguridad.
+- boton `Open Incident` abre issue prellenado en GitHub.
 
 Asignacion de estrategia (admin):
 

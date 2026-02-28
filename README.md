@@ -175,11 +175,18 @@ scripts/run_scenario.sh
 ## Ops Dashboard
 - Browser UI endpoint: `/ops/dashboard`
 - Data endpoint: `/ops/dashboard/summary?real_only=true`
+- Optional filters:
+  - `email_contains=<texto>`
+  - `exchange=ALL|BINANCE|IBKR`
 - Usage:
   - login as admin, copy bearer token,
   - open `/ops/dashboard`,
   - paste token and click `Load`,
   - dashboard refreshes every 60 seconds.
+  - `Open Incident` button opens a prefilled GitHub issue.
+
+Security posture artifact:
+- `Security Posture Daily` now exports `security_dashboard_snapshot.json` as workflow artifact.
 
 ## Quarterly Rotation
 - Quarterly workflow: `.github/workflows/quarterly-rotation.yml`

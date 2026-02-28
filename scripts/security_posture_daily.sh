@@ -152,6 +152,17 @@ else
 fi
 
 echo
+echo "[D] Dashboard snapshot"
+dashboard_resp=$(curl -sS "$BASE_URL/ops/dashboard/summary?real_only=$REAL_ONLY&max_secret_age_days=$SECRET_MAX_AGE_DAYS" \
+  -H "Authorization: Bearer $admin_token" || true)
+if [[ "${dashboard_resp:0:1}" == "{" ]]; then
+  echo "$dashboard_resp" > security_dashboard_snapshot.json
+  pass "dashboard snapshot exported"
+else
+  fail "dashboard snapshot failed: $dashboard_resp"
+fi
+
+echo
 echo "Summary: PASS=$pass_count FAIL=$fail_count"
 if [[ "$fail_count" -gt 0 ]]; then
   exit 1

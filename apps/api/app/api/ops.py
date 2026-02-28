@@ -951,6 +951,8 @@ def dashboard_summary(
     real_only: bool = True,
     max_secret_age_days: int = 30,
     recent_hours: int = 24,
+    email_contains: str | None = None,
+    exchange: str = "ALL",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
@@ -971,8 +973,17 @@ def dashboard_summary(
     for user in users:
         if user.id not in posture_map:
             continue
+        if email_contains and email_contains.lower() not in (user.email or "").lower():
+            continue
 
         profile = resolve_risk_profile_for_email(user.email)
+        p = posture_map[user.id]
+        exchange_u = (exchange or "ALL").upper()
+        if exchange_u == "BINANCE" and not p.binance_secret_configured:
+            continue
+        if exchange_u == "IBKR" and not p.ibkr_secret_configured:
+            continue
+
         dr = (
             db.execute(
                 select(DailyRiskState).where(
@@ -1004,7 +1015,6 @@ def dashboard_summary(
         open_positions_total += int(open_positions)
         blocked_open_attempts_total += int(blocked_today)
 
-        p = posture_map[user.id]
         user_status_rows.append(
             DashboardUserOut(
                 user_id=user.id,
@@ -1092,6 +1102,7 @@ def dashboard_page():
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
     input { width:420px; max-width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
     button { border:0; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; background:#0b62d6; color:#fff; }
+    .ghost { background:#eef3fb; color:#0b62d6; border:1px solid #bcd0f4; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
     .kpi { border:1px solid var(--line); border-radius:10px; padding:10px; }
     .kpi .v { font-size:24px; font-weight:700; }
@@ -1111,6 +1122,13 @@ def dashboard_page():
       <div class="row" style="margin-top:12px">
         <input id="token" placeholder="Paste admin bearer token here" />
         <button id="load">Load</button>
+        <input id="emailFilter" placeholder="email contains (optional)" />
+        <select id="exchangeFilter" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
+          <option value="ALL">ALL</option>
+          <option value="BINANCE">BINANCE</option>
+          <option value="IBKR">IBKR</option>
+        </select>
+        <button id="incidentBtn" class="ghost">Open Incident</button>
       </div>
       <div class="muted" id="stamp" style="margin-top:8px">Waiting for token...</div>
     </div>
@@ -1159,13 +1177,23 @@ def dashboard_page():
     async function load() {
       const token = byId("token").value.trim();
       if (!token) return;
-      const res = await fetch("/ops/dashboard/summary?real_only=true", { headers: { Authorization: `Bearer ${token}` } });
+      const email = encodeURIComponent(byId("emailFilter").value.trim());
+      const exchange = encodeURIComponent(byId("exchangeFilter").value || "ALL");
+      const qs = `/ops/dashboard/summary?real_only=true&email_contains=${email}&exchange=${exchange}`;
+      const res = await fetch(qs, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Dashboard request failed");
       fill(data);
     }
     byId("load").addEventListener("click", async () => {
       try { await load(); } catch (e) { byId("stamp").textContent = String(e.message || e); setOverall("red"); }
+    });
+    byId("incidentBtn").addEventListener("click", () => {
+      const repo = "https://github.com/Gonzalo-Giraldo/crypto-saas";
+      const ts = new Date().toISOString();
+      const title = encodeURIComponent(`[Ops Dashboard] Incident ${ts}`);
+      const body = encodeURIComponent(`Opened from /ops/dashboard\n\n- Timestamp: ${ts}\n- Context: dashboard review\n`);
+      window.open(`${repo}/issues/new?title=${title}&body=${body}`, "_blank");
     });
     setInterval(async () => {
       const token = byId("token").value.trim();

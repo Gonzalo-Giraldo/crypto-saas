@@ -88,7 +88,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: security-posture-daily-${{ github.run_id }}
-          path: security_posture_output.log
+          path: |
+            security_posture_output.log
+            security_dashboard_snapshot.json
           if-no-files-found: warn
 
       - name: Open incident issue on failure
