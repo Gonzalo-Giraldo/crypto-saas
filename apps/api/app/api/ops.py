@@ -1398,6 +1398,55 @@ def dashboard_page():
         <tbody id="tbody"><tr><td colspan="9" class="muted">No data yet</td></tr></tbody>
       </table>
     </div>
+    <div class="card">
+      <strong>User Admin</strong>
+      <div class="muted" style="margin:4px 0 10px">Manage users, roles, passwords, risk profile and exchange secrets without SQL.</div>
+      <div class="row" style="margin-bottom:10px">
+        <input id="newUserEmail" placeholder="new user email" />
+        <input id="newUserPassword" type="password" placeholder="new user password" />
+        <button id="createUserBtn" class="ghost">Create user</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="adminUserSelect" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:320px;"></select>
+        <button id="refreshUsersBtn" class="ghost">Refresh users</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="adminRoleSelect" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
+          <option value="trader">trader</option>
+          <option value="admin">admin</option>
+          <option value="disabled">disabled</option>
+        </select>
+        <button id="setRoleBtn">Set role</button>
+        <input id="newEmailInput" placeholder="new email (optional)" />
+        <button id="setEmailBtn" class="ghost">Update email</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="adminRiskSelect" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:260px;"></select>
+        <button id="setRiskBtn">Set risk profile</button>
+        <button id="clearRiskBtn" class="ghost">Clear risk override</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <input id="newPasswordInput" type="password" placeholder="new password (min 8 chars)" />
+        <button id="setPasswordBtn">Set password</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <select id="adminExchangeSelect" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
+          <option value="BINANCE">BINANCE</option>
+          <option value="IBKR">IBKR</option>
+        </select>
+        <input id="adminApiKey" placeholder="API key" />
+        <input id="adminApiSecret" type="password" placeholder="API secret" />
+        <button id="setSecretBtn">Save secret</button>
+        <button id="deleteSecretBtn" class="ghost">Delete secret</button>
+      </div>
+      <div class="muted" id="adminMsg">Admin panel idle.</div>
+      <table style="margin-top:10px">
+        <thead>
+          <tr><th>User</th><th>Role</th><th>Risk profile</th><th>Source</th></tr>
+        </thead>
+        <tbody id="adminUsersBody"><tr><td colspan="4" class="muted">Load dashboard first</td></tr></tbody>
+      </table>
+    </div>
   </div>
   <script>
     const byId = (id) => document.getElementById(id);
@@ -1405,6 +1454,8 @@ def dashboard_page():
     const TOKEN_PERSIST_KEY = "ops_dashboard_token_persist";
     const TOKEN_REMEMBER_KEY = "ops_dashboard_token_remember";
     const LOGIN_EMAIL_KEY = "ops_dashboard_login_email";
+    const DEFAULT_RISK_PROFILES = ["model2_conservador_productivo", "modelo_suelto_controlado"];
+    const adminState = { users: [], riskProfiles: [...DEFAULT_RISK_PROFILES] };
 
     function saveToken(token) {
       sessionStorage.setItem(TOKEN_SESSION_KEY, token || "");
@@ -1433,6 +1484,79 @@ def dashboard_page():
       el.textContent = v || "unknown";
       el.className = "badge " + (v === "green" ? "green" : v === "red" ? "red" : "yellow");
     }
+
+    function setAdminMsg(msg, isError = false) {
+      const el = byId("adminMsg");
+      el.textContent = msg;
+      el.style.color = isError ? "var(--bad)" : "var(--muted)";
+    }
+
+    function authHeaders(token) {
+      return {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
+    }
+
+    async function apiJson(path, token, opts = {}) {
+      const headers = opts.headers || authHeaders(token);
+      const res = await fetch(path, { ...opts, headers });
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? await res.json()
+        : { detail: await res.text() };
+      if (!res.ok) {
+        throw new Error(data.detail || `${res.status} request failed`);
+      }
+      return data;
+    }
+
+    function selectedUserId() {
+      return (byId("adminUserSelect").value || "").trim();
+    }
+
+    function selectedUserObj() {
+      const id = selectedUserId();
+      return adminState.users.find((u) => u.id === id) || null;
+    }
+
+    function renderRiskProfileOptions() {
+      byId("adminRiskSelect").innerHTML = adminState.riskProfiles
+        .map((p) => `<option value="${p}">${p}</option>`)
+        .join("");
+    }
+
+    function renderAdminUsers() {
+      const users = adminState.users || [];
+      byId("adminUserSelect").innerHTML = users
+        .map((u) => `<option value="${u.id}">${u.email} | ${u.role} | ${u.risk_profile}</option>`)
+        .join("");
+
+      byId("adminUsersBody").innerHTML = users.map((u) => `<tr>
+        <td>${u.email}</td><td>${u.role}</td><td>${u.risk_profile || "-"}</td><td>${u.risk_profile_source || "-"}</td>
+      </tr>`).join("") || '<tr><td colspan="4" class="muted">No users found</td></tr>';
+    }
+
+    async function loadAdminUsers() {
+      const token = byId("token").value.trim();
+      if (!token) return;
+      const users = await apiJson("/users", token, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+      adminState.users = users || [];
+      renderAdminUsers();
+    }
+
+    async function loadRiskProfiles() {
+      const token = byId("token").value.trim();
+      if (!token) return;
+      try {
+        const profiles = await apiJson("/users/risk-profiles", token, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+        adminState.riskProfiles = (profiles && profiles.length) ? profiles : [...DEFAULT_RISK_PROFILES];
+      } catch (_) {
+        adminState.riskProfiles = [...DEFAULT_RISK_PROFILES];
+      }
+      renderRiskProfileOptions();
+    }
+
     function fill(d) {
       setOverall(d.overall_status);
       byId("stamp").textContent = `Generated: ${d.generated_at} | Day: ${d.day} | For: ${d.generated_for}`;
@@ -1470,6 +1594,8 @@ def dashboard_page():
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Dashboard request failed");
       fill(data);
+      await loadRiskProfiles();
+      await loadAdminUsers();
     }
     byId("load").addEventListener("click", async () => {
       try { await load(); } catch (e) { byId("stamp").textContent = String(e.message || e); setOverall("red"); }
@@ -1490,6 +1616,155 @@ def dashboard_page():
       const title = encodeURIComponent(`[Ops Dashboard] Incident ${ts}`);
       const body = encodeURIComponent(`Opened from /ops/dashboard\n\n- Timestamp: ${ts}\n- Context: dashboard review\n`);
       window.open(`${repo}/issues/new?title=${title}&body=${body}`, "_blank");
+    });
+    byId("refreshUsersBtn").addEventListener("click", async () => {
+      try {
+        await loadAdminUsers();
+        setAdminMsg("Users refreshed.");
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("createUserBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const email = byId("newUserEmail").value.trim();
+        const password = byId("newUserPassword").value;
+        if (!token) throw new Error("Token required");
+        if (!email || !password) throw new Error("Email and password are required");
+        await apiJson("/users", token, {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+        });
+        byId("newUserPassword").value = "";
+        await loadAdminUsers();
+        setAdminMsg(`User created: ${email}`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("setRoleBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        const role = byId("adminRoleSelect").value;
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        await apiJson(`/users/${user.id}/role`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ role }),
+        });
+        await loadAdminUsers();
+        setAdminMsg(`Role updated for ${user.email}: ${role}`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("setEmailBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        const email = byId("newEmailInput").value.trim();
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        if (!email) throw new Error("New email is required");
+        await apiJson(`/users/${user.id}/email`, token, {
+          method: "PATCH",
+          body: JSON.stringify({ email }),
+        });
+        byId("newEmailInput").value = "";
+        await loadAdminUsers();
+        setAdminMsg(`Email updated for user id ${user.id}`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("setRiskBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        const profile_name = byId("adminRiskSelect").value;
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        await apiJson(`/users/${user.id}/risk-profile`, token, {
+          method: "PUT",
+          body: JSON.stringify({ profile_name }),
+        });
+        await loadAdminUsers();
+        setAdminMsg(`Risk profile updated for ${user.email}: ${profile_name}`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("clearRiskBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        await apiJson(`/users/${user.id}/risk-profile`, token, {
+          method: "PUT",
+          body: JSON.stringify({ profile_name: null }),
+        });
+        await loadAdminUsers();
+        setAdminMsg(`Risk override cleared for ${user.email}`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("setPasswordBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        const new_password = byId("newPasswordInput").value;
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        if (!new_password || new_password.length < 8) throw new Error("Password must be at least 8 characters");
+        await apiJson(`/users/${user.id}/password`, token, {
+          method: "PUT",
+          body: JSON.stringify({ new_password }),
+        });
+        byId("newPasswordInput").value = "";
+        setAdminMsg(`Password updated for ${user.email}`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("setSecretBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        const exchange = byId("adminExchangeSelect").value;
+        const api_key = byId("adminApiKey").value.trim();
+        const api_secret = byId("adminApiSecret").value;
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        if (!api_key || !api_secret) throw new Error("API key and API secret are required");
+        await apiJson(`/users/${user.id}/exchange-secrets`, token, {
+          method: "PUT",
+          body: JSON.stringify({ exchange, api_key, api_secret }),
+        });
+        byId("adminApiSecret").value = "";
+        setAdminMsg(`Secret saved for ${user.email} (${exchange})`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("deleteSecretBtn").addEventListener("click", async () => {
+      try {
+        const token = byId("token").value.trim();
+        const user = selectedUserObj();
+        const exchange = byId("adminExchangeSelect").value;
+        if (!token) throw new Error("Token required");
+        if (!user) throw new Error("Select a user first");
+        await apiJson(`/users/${user.id}/exchange-secrets/${exchange}`, token, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setAdminMsg(`Secret deleted for ${user.email} (${exchange})`);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
     });
     byId("loginBtn").addEventListener("click", async () => {
       try {

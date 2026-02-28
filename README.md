@@ -44,7 +44,13 @@ scripts/run_scenario.sh
 - `POST /auth/2fa/disable`
 - `GET /users/me`
 - `PATCH /users/{user_id}/role` (admin)
+- `PATCH /users/{user_id}/email` (admin)
+- `PUT /users/{user_id}/password` (admin)
 - `PUT /users/{user_id}/risk-profile` (admin, set/clear override)
+- `GET /users/risk-profiles` (admin)
+- `PUT /users/{user_id}/exchange-secrets` (admin)
+- `GET /users/{user_id}/exchange-secrets` (admin)
+- `DELETE /users/{user_id}/exchange-secrets/{exchange}` (admin)
 - `POST /users/exchange-secrets`
 - `GET /users/exchange-secrets`
 - `DELETE /users/exchange-secrets/{exchange}`

@@ -28,3 +28,11 @@ class UserRoleUpdate(BaseModel):
 
 class UserRiskProfileUpdate(BaseModel):
     profile_name: Optional[str] = None
+
+
+class UserEmailUpdate(BaseModel):
+    email: EmailStr
+
+
+class UserPasswordUpdate(BaseModel):
+    new_password: str

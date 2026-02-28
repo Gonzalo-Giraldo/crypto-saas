@@ -160,6 +160,11 @@ UI web:
 - pegar bearer token admin
 - cargar estado unificado de operacion + seguridad.
 - boton `Open Incident` abre issue prellenado en GitHub.
+- panel `User Admin` para gestionar usuarios sin SQL:
+  - crear usuarios,
+  - actualizar rol/email/password,
+  - asignar/limpiar perfil de riesgo,
+  - guardar/eliminar secretos BINANCE/IBKR por usuario.
 
 Artifact diario de snapshot:
 - Workflow: `Security Posture Daily`
@@ -225,6 +230,36 @@ curl -s -X PUT "$BASE_URL/users/USER_ID/risk-profile" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   --data '{"profile_name":null}'
+```
+
+```bash
+# Actualizar email
+curl -s -X PATCH "$BASE_URL/users/USER_ID/email" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"email":"nuevo_email@dominio.com"}'
+```
+
+```bash
+# Actualizar password
+curl -s -X PUT "$BASE_URL/users/USER_ID/password" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"new_password":"ClaveNuevaSegura123!"}'
+```
+
+```bash
+# Guardar secreto por usuario (admin)
+curl -s -X PUT "$BASE_URL/users/USER_ID/exchange-secrets" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"exchange":"BINANCE","api_key":"KEY","api_secret":"SECRET"}'
+```
+
+```bash
+# Eliminar secreto por usuario (admin)
+curl -s -X DELETE "$BASE_URL/users/USER_ID/exchange-secrets/BINANCE" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
 Pre-trade check por exchange:
