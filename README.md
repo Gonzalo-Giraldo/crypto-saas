@@ -179,6 +179,10 @@ scripts/run_scenario.sh
   - `email_contains=<texto>`
   - `exchange=ALL|BINANCE|IBKR`
   - `real_only=true|false`
+- Includes a built-in 7-day trend block (`trends_7d`) for:
+  - total trades
+  - blocked open attempts
+  - error events
 - Usage:
   - login as admin, copy bearer token,
   - open `/ops/dashboard`,

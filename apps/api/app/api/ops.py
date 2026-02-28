@@ -37,6 +37,7 @@ from apps.api.app.schemas.security import (
     DashboardSecurityOut,
     DashboardOperationsOut,
     DashboardEventsOut,
+    DashboardTrendDayOut,
     DashboardUserOut,
     SecurityPostureOut,
     SecurityPostureSummaryOut,
@@ -1031,6 +1032,8 @@ def dashboard_summary(
             )
         )
 
+    scope_user_ids = [u.user_id for u in user_status_rows]
+
     cutoff = now - timedelta(hours=recent_hours)
     errors_last_24h = db.execute(
         select(func.count())
@@ -1052,6 +1055,52 @@ def dashboard_summary(
             AuditLog.created_at >= cutoff,
         )
     ).scalar_one()
+
+    trends_7d: list[DashboardTrendDayOut] = []
+    for i in range(6, -1, -1):
+        day_i = today - timedelta(days=i)
+
+        if scope_user_ids:
+            trades_agg = db.execute(
+                select(func.coalesce(func.sum(DailyRiskState.trades_today), 0)).where(
+                    DailyRiskState.day == day_i,
+                    DailyRiskState.user_id.in_(scope_user_ids),
+                )
+            ).scalar_one()
+            blocked_agg = db.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(
+                    AuditLog.user_id.in_(scope_user_ids),
+                    AuditLog.action.like("position.open.blocked.%"),
+                    func.date(AuditLog.created_at) == str(day_i),
+                )
+            ).scalar_one()
+            errors_agg = db.execute(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(
+                    AuditLog.user_id.in_(scope_user_ids),
+                    func.date(AuditLog.created_at) == str(day_i),
+                    or_(
+                        AuditLog.action.like("%.error"),
+                        AuditLog.action.like("execution.blocked.%"),
+                    ),
+                )
+            ).scalar_one()
+        else:
+            trades_agg = 0
+            blocked_agg = 0
+            errors_agg = 0
+
+        trends_7d.append(
+            DashboardTrendDayOut(
+                day=str(day_i),
+                trades_total=int(trades_agg or 0),
+                blocked_open_attempts_total=int(blocked_agg or 0),
+                errors_total=int(errors_agg or 0),
+            )
+        )
 
     overall_status = "green"
     if missing_2fa > 0 or stale_secrets > 0:
@@ -1079,6 +1128,7 @@ def dashboard_summary(
             errors_last_24h=int(errors_last_24h),
             pretrade_blocked_last_24h=int(pretrade_blocked_last_24h),
         ),
+        trends_7d=trends_7d,
         users=user_status_rows,
     )
 
@@ -1108,6 +1158,7 @@ def dashboard_page():
     .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
     .kpi { border:1px solid var(--line); border-radius:10px; padding:10px; }
     .kpi .v { font-size:24px; font-weight:700; }
+    .trend-grid { display:grid; grid-template-columns:1fr; gap:8px; }
     table { width:100%; border-collapse:collapse; }
     th,td { border-bottom:1px solid var(--line); text-align:left; padding:8px 6px; font-size:13px; }
     .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-weight:700; font-size:12px; color:#fff; }
@@ -1165,6 +1216,16 @@ def dashboard_page():
       </div>
     </div>
     <div class="card">
+      <strong>7-day trend</strong>
+      <div class="muted" style="margin:4px 0 10px">Trades, blocked opens and errors per day.</div>
+      <table>
+        <thead>
+          <tr><th>Day</th><th>Trades</th><th>Blocked opens</th><th>Errors</th></tr>
+        </thead>
+        <tbody id="trendBody"><tr><td colspan="4" class="muted">No trend data yet</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
       <strong>Users</strong>
       <table>
         <thead>
@@ -1217,6 +1278,9 @@ def dashboard_page():
       byId("k_trades").textContent = d.operations.trades_today_total;
       byId("k_open").textContent = d.operations.open_positions_total;
       byId("k_blocked").textContent = d.operations.blocked_open_attempts_total;
+      byId("trendBody").innerHTML = (d.trends_7d || []).map(t => `<tr>
+        <td>${t.day}</td><td>${t.trades_total}</td><td>${t.blocked_open_attempts_total}</td><td>${t.errors_total}</td>
+      </tr>`).join("") || '<tr><td colspan="4" class="muted">No trend data yet</td></tr>';
       byId("tbody").innerHTML = d.users.map(u => `<tr>
         <td>${u.email}</td><td>${u.role}</td><td>${u.risk_profile}</td>
         <td>

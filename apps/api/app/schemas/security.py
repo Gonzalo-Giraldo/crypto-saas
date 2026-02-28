@@ -70,6 +70,13 @@ class DashboardEventsOut(BaseModel):
     pretrade_blocked_last_24h: int
 
 
+class DashboardTrendDayOut(BaseModel):
+    day: str
+    trades_total: int
+    blocked_open_attempts_total: int
+    errors_total: int
+
+
 class DashboardSummaryOut(BaseModel):
     generated_at: str
     day: str
@@ -78,4 +85,5 @@ class DashboardSummaryOut(BaseModel):
     security: DashboardSecurityOut
     operations: DashboardOperationsOut
     recent_events: DashboardEventsOut
+    trends_7d: list[DashboardTrendDayOut]
     users: list[DashboardUserOut]
