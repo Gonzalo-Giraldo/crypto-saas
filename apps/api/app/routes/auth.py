@@ -60,6 +60,11 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
+    if user.role == "disabled":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is disabled",
+        )
 
     user_2fa = (
         db.query(UserTwoFactor)

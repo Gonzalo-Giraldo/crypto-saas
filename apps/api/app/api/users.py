@@ -105,10 +105,10 @@ def update_user_role(
     current_user: User = Depends(require_role("admin")),
 ):
     normalized_role = (payload.role or "").strip().lower()
-    if normalized_role not in {"admin", "trader"}:
+    if normalized_role not in {"admin", "trader", "disabled"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="role must be admin or trader",
+            detail="role must be admin, trader, or disabled",
         )
 
     user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()

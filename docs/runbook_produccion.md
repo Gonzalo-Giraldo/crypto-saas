@@ -204,6 +204,14 @@ curl -s -X PATCH "$BASE_URL/users/USER_ID/role" \
 ```
 
 ```bash
+# Desactivar usuario legacy/smoke
+curl -s -X PATCH "$BASE_URL/users/USER_ID/role" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"role":"disabled"}'
+```
+
+```bash
 # Set override de perfil de riesgo
 curl -s -X PUT "$BASE_URL/users/USER_ID/risk-profile" \
   -H "Authorization: Bearer $ADMIN_TOKEN" \

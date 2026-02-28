@@ -90,6 +90,9 @@ scripts/run_scenario.sh
   - `RISK_PROFILE_LOOSE_EMAIL`
 - Exchange segregation is enforced by strategy assignment:
   - if exchange is disabled for the user, `exchange-secrets` upsert and execution endpoints are blocked.
+- User lifecycle hardening:
+  - `PATCH /users/{user_id}/role` accepts `admin`, `trader`, `disabled`.
+  - users with role `disabled` cannot login and cannot use existing tokens.
 - `pretrade` now applies strategy-specific entry rules:
   - `SWING_V1` and `INTRADAY_V1`
   - timeframe checks (`trend_tf`, `signal_tf`, `timing_tf`)
