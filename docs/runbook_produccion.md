@@ -291,6 +291,11 @@ Si falla descifrado o ejecucion tras rotacion:
 6. Auditoria validada.
 7. Si hubo rotacion: validacion post-rotacion y evidencia de rollback plan.
 
+## 8.1 NOC-lite
+
+Tabla de decision operativa resumida (verde/amarillo/rojo):
+- `docs/noc_lite.md`
+
 ## 9) Automatizacion recomendada
 
 Script rapido de smoke:

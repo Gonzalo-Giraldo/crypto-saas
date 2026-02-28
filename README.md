@@ -103,6 +103,7 @@ scripts/run_scenario.sh
 - Local/dev operations: `docs/runbook_operativo.md`
 - Staging/production operations: `docs/runbook_produccion.md`
 - Daily one-page checklist: `docs/checklist_operativa_1pagina.md`
+- NOC-lite decision table: `docs/noc_lite.md`
 
 ## Smoke Script
 - Automated production smoke checks: `scripts/smoke_prod.sh`
