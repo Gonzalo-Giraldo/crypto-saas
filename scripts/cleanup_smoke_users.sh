@@ -90,6 +90,11 @@ fi
 summary=$(echo "$resp" | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
-print(f"PASS | cleanup scanned={d.get(\"scanned\",0)} eligible={d.get(\"eligible\",0)} deleted={d.get(\"deleted\",0)} dry_run={d.get(\"dry_run\",True)}")
+print("PASS | cleanup scanned={} eligible={} deleted={} dry_run={}".format(
+    d.get("scanned", 0),
+    d.get("eligible", 0),
+    d.get("deleted", 0),
+    d.get("dry_run", True),
+))
 ')
 echo "$summary"
