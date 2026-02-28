@@ -1145,6 +1145,12 @@ def dashboard_page():
         <button id="resetBtn" class="ghost">Reset Filters</button>
         <button id="incidentBtn" class="ghost">Open Incident</button>
       </div>
+      <div class="row" style="margin-top:10px">
+        <input id="loginEmail" placeholder="admin email (for auto token)" />
+        <input id="loginPassword" type="password" placeholder="admin password" />
+        <input id="loginOtp" placeholder="otp (if required)" style="width:180px" />
+        <button id="loginBtn" class="ghost">Get Token</button>
+      </div>
       <div class="muted" id="stamp" style="margin-top:8px">Waiting for token...</div>
     </div>
     <div class="card">
@@ -1173,6 +1179,7 @@ def dashboard_page():
     const TOKEN_SESSION_KEY = "ops_dashboard_token_session";
     const TOKEN_PERSIST_KEY = "ops_dashboard_token_persist";
     const TOKEN_REMEMBER_KEY = "ops_dashboard_token_remember";
+    const LOGIN_EMAIL_KEY = "ops_dashboard_login_email";
 
     function saveToken(token) {
       sessionStorage.setItem(TOKEN_SESSION_KEY, token || "");
@@ -1192,6 +1199,8 @@ def dashboard_page():
         ? (localStorage.getItem(TOKEN_PERSIST_KEY) || "")
         : (sessionStorage.getItem(TOKEN_SESSION_KEY) || "");
       if (token) byId("token").value = token;
+      const email = localStorage.getItem(LOGIN_EMAIL_KEY) || "";
+      if (email) byId("loginEmail").value = email;
     }
 
     function setOverall(v) {
@@ -1250,6 +1259,38 @@ def dashboard_page():
       const title = encodeURIComponent(`[Ops Dashboard] Incident ${ts}`);
       const body = encodeURIComponent(`Opened from /ops/dashboard\n\n- Timestamp: ${ts}\n- Context: dashboard review\n`);
       window.open(`${repo}/issues/new?title=${title}&body=${body}`, "_blank");
+    });
+    byId("loginBtn").addEventListener("click", async () => {
+      try {
+        const email = byId("loginEmail").value.trim();
+        const password = byId("loginPassword").value;
+        const otp = byId("loginOtp").value.trim();
+        if (!email || !password) {
+          throw new Error("Email and password are required");
+        }
+        localStorage.setItem(LOGIN_EMAIL_KEY, email);
+        const body = new URLSearchParams();
+        body.set("username", email);
+        body.set("password", password);
+        if (otp) body.set("otp", otp);
+        const res = await fetch("/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Login failed");
+        const token = data.access_token || "";
+        if (!token) throw new Error("No token returned");
+        byId("token").value = token;
+        saveToken(token);
+        byId("loginPassword").value = "";
+        byId("loginOtp").value = "";
+        await load();
+      } catch (e) {
+        byId("stamp").textContent = String(e.message || e);
+        setOverall("red");
+      }
     });
     setInterval(async () => {
       const token = byId("token").value.trim();
