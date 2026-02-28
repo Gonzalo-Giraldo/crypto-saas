@@ -184,6 +184,11 @@ scripts/run_scenario.sh
   - total trades
   - blocked open attempts
   - error events
+- Includes profile productivity comparison (`profile_productivity`) by risk profile:
+  - users count
+  - trades total / utilization
+  - blocked opens
+  - realized pnl total and average per user
 - Usage:
   - login as admin, copy bearer token,
   - open `/ops/dashboard`,

@@ -70,6 +70,16 @@ class DashboardEventsOut(BaseModel):
     pretrade_blocked_last_24h: int
 
 
+class DashboardProfileProductivityOut(BaseModel):
+    risk_profile: str
+    users_count: int
+    trades_today_total: int
+    blocked_open_attempts_total: int
+    realized_pnl_today_total: float
+    avg_realized_pnl_per_user: float
+    trades_utilization_pct: float
+
+
 class DashboardTrendDayOut(BaseModel):
     day: str
     trades_total: int
@@ -85,5 +95,6 @@ class DashboardSummaryOut(BaseModel):
     security: DashboardSecurityOut
     operations: DashboardOperationsOut
     recent_events: DashboardEventsOut
+    profile_productivity: list[DashboardProfileProductivityOut]
     trends_7d: list[DashboardTrendDayOut]
     users: list[DashboardUserOut]

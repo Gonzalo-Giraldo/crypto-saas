@@ -145,6 +145,12 @@ curl -s "$BASE_URL/ops/dashboard/summary?real_only=true" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+Comparativo por perfil (en el mismo summary):
+- `profile_productivity`
+- Permite contrastar productividad diaria entre:
+  - `model2_conservador_productivo`
+  - `modelo_suelto_controlado`
+
 Filtros opcionales:
 - `email_contains=<texto>`
 - `exchange=ALL|BINANCE|IBKR`

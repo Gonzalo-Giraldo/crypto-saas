@@ -37,6 +37,7 @@ from apps.api.app.schemas.security import (
     DashboardSecurityOut,
     DashboardOperationsOut,
     DashboardEventsOut,
+    DashboardProfileProductivityOut,
     DashboardTrendDayOut,
     DashboardUserOut,
     SecurityPostureOut,
@@ -966,6 +967,7 @@ def dashboard_summary(
 
     posture_map = {row.user_id: row for row in posture_rows}
     user_status_rows: list[DashboardUserOut] = []
+    profile_agg: dict[str, dict[str, float]] = {}
     trades_today_total = 0
     open_positions_total = 0
     blocked_open_attempts_total = 0
@@ -1016,6 +1018,24 @@ def dashboard_summary(
         open_positions_total += int(open_positions)
         blocked_open_attempts_total += int(blocked_today)
 
+        profile_name = str(profile["profile_name"])
+        max_trades_profile = int(profile["max_trades_per_day"])
+        bucket = profile_agg.setdefault(
+            profile_name,
+            {
+                "users_count": 0,
+                "trades_today_total": 0,
+                "blocked_open_attempts_total": 0,
+                "realized_pnl_today_total": 0.0,
+                "max_trades_capacity_total": 0,
+            },
+        )
+        bucket["users_count"] += 1
+        bucket["trades_today_total"] += trades_today
+        bucket["blocked_open_attempts_total"] += int(blocked_today)
+        bucket["realized_pnl_today_total"] += realized_pnl_today
+        bucket["max_trades_capacity_total"] += max_trades_profile
+
         user_status_rows.append(
             DashboardUserOut(
                 user_id=user.id,
@@ -1033,6 +1053,27 @@ def dashboard_summary(
         )
 
     scope_user_ids = [u.user_id for u in user_status_rows]
+    profile_productivity: list[DashboardProfileProductivityOut] = []
+    for profile_name in sorted(profile_agg.keys()):
+        p = profile_agg[profile_name]
+        users_count = int(p["users_count"])
+        trades_total = int(p["trades_today_total"])
+        blocked_total = int(p["blocked_open_attempts_total"])
+        pnl_total = float(p["realized_pnl_today_total"])
+        capacity = int(p["max_trades_capacity_total"])
+        avg_pnl = round((pnl_total / users_count), 4) if users_count > 0 else 0.0
+        util = round((trades_total / capacity) * 100.0, 2) if capacity > 0 else 0.0
+        profile_productivity.append(
+            DashboardProfileProductivityOut(
+                risk_profile=profile_name,
+                users_count=users_count,
+                trades_today_total=trades_total,
+                blocked_open_attempts_total=blocked_total,
+                realized_pnl_today_total=round(pnl_total, 4),
+                avg_realized_pnl_per_user=avg_pnl,
+                trades_utilization_pct=util,
+            )
+        )
 
     cutoff = now - timedelta(hours=recent_hours)
     errors_last_24h = db.execute(
@@ -1128,6 +1169,7 @@ def dashboard_summary(
             errors_last_24h=int(errors_last_24h),
             pretrade_blocked_last_24h=int(pretrade_blocked_last_24h),
         ),
+        profile_productivity=profile_productivity,
         trends_7d=trends_7d,
         users=user_status_rows,
     )
@@ -1216,6 +1258,16 @@ def dashboard_page():
       </div>
     </div>
     <div class="card">
+      <strong>Profile Productivity</strong>
+      <div class="muted" style="margin:4px 0 10px">Daily comparison by risk profile (conservative vs loose).</div>
+      <table>
+        <thead>
+          <tr><th>Risk profile</th><th>Users</th><th>Trades</th><th>Utilization %</th><th>Blocked opens</th><th>PnL total</th><th>Avg PnL/user</th></tr>
+        </thead>
+        <tbody id="profileBody"><tr><td colspan="7" class="muted">No profile data yet</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
       <strong>7-day trend</strong>
       <div class="muted" style="margin:4px 0 10px">Trades, blocked opens and errors per day.</div>
       <table>
@@ -1278,6 +1330,9 @@ def dashboard_page():
       byId("k_trades").textContent = d.operations.trades_today_total;
       byId("k_open").textContent = d.operations.open_positions_total;
       byId("k_blocked").textContent = d.operations.blocked_open_attempts_total;
+      byId("profileBody").innerHTML = (d.profile_productivity || []).map(p => `<tr>
+        <td>${p.risk_profile}</td><td>${p.users_count}</td><td>${p.trades_today_total}</td><td>${p.trades_utilization_pct}</td><td>${p.blocked_open_attempts_total}</td><td>${p.realized_pnl_today_total}</td><td>${p.avg_realized_pnl_per_user}</td>
+      </tr>`).join("") || '<tr><td colspan="7" class="muted">No profile data yet</td></tr>';
       byId("trendBody").innerHTML = (d.trends_7d || []).map(t => `<tr>
         <td>${t.day}</td><td>${t.trades_total}</td><td>${t.blocked_open_attempts_total}</td><td>${t.errors_total}</td>
       </tr>`).join("") || '<tr><td colspan="4" class="muted">No trend data yet</td></tr>';
