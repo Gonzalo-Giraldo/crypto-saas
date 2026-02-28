@@ -1,0 +1,166 @@
+name: Permissions Matrix Daily
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://api.example.com)"
+        required: true
+        type: string
+  schedule:
+    - cron: "55 11 * * *"
+
+jobs:
+  permissions_matrix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
+      ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
+      ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
+      USER1_EMAIL: ${{ secrets.DUAL_USER1_EMAIL }}
+      USER1_PASSWORD: ${{ secrets.DUAL_USER1_PASSWORD }}
+      USER1_OTP: ${{ secrets.DUAL_USER1_OTP }}
+      USER1_TOTP_SECRET: ${{ secrets.DUAL_USER1_TOTP_SECRET }}
+      USER2_EMAIL: ${{ secrets.DUAL_USER2_EMAIL }}
+      USER2_PASSWORD: ${{ secrets.DUAL_USER2_PASSWORD }}
+      USER2_OTP: ${{ secrets.DUAL_USER2_OTP }}
+      USER2_TOTP_SECRET: ${{ secrets.DUAL_USER2_TOTP_SECRET }}
+      DISABLED_EMAIL: ${{ secrets.DUAL_DISABLED_EMAIL }}
+      DISABLED_PASSWORD: ${{ secrets.DUAL_DISABLED_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "BASE_URL is empty. Set workflow input 'base_url' or repository secret 'SMOKE_BASE_URL'."
+            exit 1
+          fi
+          for v in ADMIN_EMAIL ADMIN_PASSWORD USER1_EMAIL USER1_PASSWORD; do
+            if [[ -z "${!v:-}" ]]; then
+              echo "Missing required secret: $v"
+              exit 1
+            fi
+          done
+
+      - name: Run permissions matrix
+        id: run_matrix
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x scripts/permissions_matrix.sh
+          scripts/permissions_matrix.sh 2>&1 | tee permissions_matrix_output.log
+
+      - name: Build run summary
+        if: always()
+        run: |
+          {
+            echo "## Permissions Matrix Daily Result"
+            echo
+            echo "- Repository: \`${{ github.repository }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Base URL: \`${BASE_URL}\`"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Outcome: \`${{ steps.run_matrix.outcome }}\`"
+            echo
+            if [[ -f permissions_matrix_output.log ]]; then
+              SUMMARY_LINE=$(grep -E "Summary: PASS=[0-9]+ FAIL=[0-9]+" permissions_matrix_output.log | tail -n 1 || true)
+              if [[ -n "${SUMMARY_LINE}" ]]; then
+                echo "- ${SUMMARY_LINE}"
+              fi
+              echo
+              echo "### Tail log"
+              echo '```text'
+              tail -n 40 permissions_matrix_output.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: permissions-matrix-daily-${{ github.run_id }}
+          path: permissions_matrix_output.log
+          if-no-files-found: warn
+
+      - name: Open incident issue on failure
+        if: steps.run_matrix.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Permissions Matrix Daily] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
+            const body = [
+              `Permissions Matrix Daily workflow failed.`,
+              ``,
+              `- Repository: ${context.repo.owner}/${context.repo.repo}`,
+              `- Branch: ${context.ref}`,
+              `- Run: ${runUrl}`,
+              ``,
+              `Review workflow logs and artifact \`permissions_matrix_output.log\`.`
+            ].join('\n');
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['incident', 'security', 'operations']
+              });
+            }
+
+      - name: Auto-close incident on recovery
+        if: steps.run_matrix.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Permissions Matrix Daily] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const incident = openIssues.find(i => i.title === issueTitle);
+            if (incident) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                body: `Permissions Matrix Daily recovered successfully. Run: ${runUrl}`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                state: 'closed'
+              });
+            }
+
+      - name: Fail job if matrix failed
+        if: steps.run_matrix.outcome == 'failure'
+        run: exit 1
+

@@ -191,6 +191,25 @@ scripts/run_scenario.sh
   - `cleanup_smoke_users.log`
   - `cleanup_smoke_users_output.json`
 
+## Permissions Matrix Daily
+- Daily authorization matrix workflow: `.github/workflows/permissions-matrix-daily.yml`
+- Script: `scripts/permissions_matrix.sh`
+- Validates role boundaries for critical endpoints:
+  - admin can access admin endpoints (`/users`, `/ops/audit/all`, `/ops/risk/daily-compare`)
+  - trader is blocked (`403`) on those endpoints
+  - optional disabled-user login check (`403 User is disabled`)
+- Required repository secrets:
+  - `SMOKE_BASE_URL` (or manual `base_url` input)
+  - `DUAL_ADMIN_EMAIL`
+  - `DUAL_ADMIN_PASSWORD`
+  - `DUAL_USER1_EMAIL`
+  - `DUAL_USER1_PASSWORD`
+- Optional repository secrets:
+  - `DUAL_ADMIN_TOTP_SECRET` / `DUAL_ADMIN_OTP`
+  - `DUAL_USER1_TOTP_SECRET` / `DUAL_USER1_OTP`
+  - `DUAL_USER2_EMAIL` / `DUAL_USER2_PASSWORD` (extra trader check)
+  - `DUAL_DISABLED_EMAIL` / `DUAL_DISABLED_PASSWORD` (disabled login enforcement check)
+
 ## Ops Dashboard
 - Browser UI endpoint: `/ops/dashboard`
 - Data endpoint: `/ops/dashboard/summary?real_only=true`
