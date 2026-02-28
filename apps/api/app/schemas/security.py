@@ -36,3 +36,44 @@ class SecurityPostureOut(BaseModel):
     real_only: bool
     summary: SecurityPostureSummaryOut
     users: list[SecurityPostureUserOut]
+
+
+class DashboardUserOut(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    risk_profile: str
+    two_factor_enabled: bool
+    trades_today: int
+    open_positions_now: int
+    blocked_open_attempts_today: int
+    realized_pnl_today: float
+
+
+class DashboardSecurityOut(BaseModel):
+    total_users: int
+    users_missing_2fa: int
+    users_with_stale_secrets: int
+    max_secret_age_days: int
+
+
+class DashboardOperationsOut(BaseModel):
+    trades_today_total: int
+    open_positions_total: int
+    blocked_open_attempts_total: int
+
+
+class DashboardEventsOut(BaseModel):
+    errors_last_24h: int
+    pretrade_blocked_last_24h: int
+
+
+class DashboardSummaryOut(BaseModel):
+    generated_at: str
+    day: str
+    overall_status: str
+    generated_for: str
+    security: DashboardSecurityOut
+    operations: DashboardOperationsOut
+    recent_events: DashboardEventsOut
+    users: list[DashboardUserOut]

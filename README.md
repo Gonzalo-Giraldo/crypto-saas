@@ -49,6 +49,8 @@ scripts/run_scenario.sh
 - `GET /ops/audit/me`
 - `GET /ops/audit/all` (admin)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
+ - `GET /ops/dashboard/summary` (admin, single-screen status summary)
+ - `GET /ops/dashboard` (simple web dashboard UI)
 - `POST /ops/strategy/assign` (admin)
 - `GET /ops/strategy/assignments` (admin)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
@@ -169,6 +171,15 @@ scripts/run_scenario.sh
   - Opens issue `[Security Posture Daily] Incident open` when posture fails.
   - Adds comment if incident already exists.
   - Auto-closes incident when posture recovers.
+
+## Ops Dashboard
+- Browser UI endpoint: `/ops/dashboard`
+- Data endpoint: `/ops/dashboard/summary?real_only=true`
+- Usage:
+  - login as admin, copy bearer token,
+  - open `/ops/dashboard`,
+  - paste token and click `Load`,
+  - dashboard refreshes every 60 seconds.
 
 ## Quarterly Rotation
 - Quarterly workflow: `.github/workflows/quarterly-rotation.yml`

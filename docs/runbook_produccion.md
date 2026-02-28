@@ -138,6 +138,18 @@ curl -s "$BASE_URL/ops/security/posture?real_only=true&max_secret_age_days=30" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+Dashboard operativo (admin):
+
+```bash
+curl -s "$BASE_URL/ops/dashboard/summary?real_only=true" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+UI web:
+- abrir `https://TU_BASE_URL/ops/dashboard`
+- pegar bearer token admin
+- cargar estado unificado de operacion + seguridad.
+
 Asignacion de estrategia (admin):
 
 ```bash

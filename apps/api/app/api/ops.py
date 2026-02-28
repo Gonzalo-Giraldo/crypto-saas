@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from fastapi.responses import HTMLResponse
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.deps import get_current_user, require_role
@@ -32,6 +33,11 @@ from apps.api.app.schemas.strategy import (
 from apps.api.app.schemas.security import (
     ReencryptSecretsOut,
     ReencryptSecretsRequest,
+    DashboardSummaryOut,
+    DashboardSecurityOut,
+    DashboardOperationsOut,
+    DashboardEventsOut,
+    DashboardUserOut,
     SecurityPostureOut,
     SecurityPostureSummaryOut,
     SecurityPostureUserOut,
@@ -63,6 +69,71 @@ def _is_real_user_email(email: str) -> bool:
     if e.endswith("@example.com") or e.endswith("@example.invalid"):
         return False
     return True
+
+
+def _build_security_posture_rows(
+    db: Session,
+    *,
+    real_only: bool,
+    max_secret_age_days: int,
+):
+    now = datetime.now(timezone.utc)
+    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
+    posture_rows: list[SecurityPostureUserOut] = []
+    missing_2fa = 0
+    stale_secrets = 0
+
+    for user in users:
+        if real_only and not _is_real_user_email(user.email):
+            continue
+
+        user_2fa = (
+            db.execute(
+                select(UserTwoFactor).where(UserTwoFactor.user_id == user.id)
+            )
+            .scalar_one_or_none()
+        )
+        two_factor_enabled = bool(user_2fa and user_2fa.enabled)
+
+        secret_rows = db.execute(
+            select(ExchangeSecret.exchange, ExchangeSecret.updated_at).where(
+                ExchangeSecret.user_id == user.id
+            )
+        ).all()
+        configured_exchanges = {row[0] for row in secret_rows}
+
+        oldest_days: int | None = None
+        for _, updated_at in secret_rows:
+            if updated_at is None:
+                continue
+            ts = updated_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age_days = max(0, int((now - ts.astimezone(timezone.utc)).total_seconds() // 86400))
+            if oldest_days is None or age_days > oldest_days:
+                oldest_days = age_days
+
+        stale = oldest_days is not None and oldest_days > max_secret_age_days
+        if stale:
+            stale_secrets += 1
+
+        if user.role in {"admin", "trader"} and not two_factor_enabled:
+            missing_2fa += 1
+
+        posture_rows.append(
+            SecurityPostureUserOut(
+                user_id=user.id,
+                email=user.email,
+                role=user.role,
+                two_factor_enabled=two_factor_enabled,
+                binance_secret_configured="BINANCE" in configured_exchanges,
+                ibkr_secret_configured="IBKR" in configured_exchanges,
+                oldest_secret_age_days=oldest_days,
+                stale_secret=stale,
+            )
+        )
+
+    return now, posture_rows, missing_2fa, stale_secrets
 
 
 def _assert_exchange_enabled(
@@ -841,62 +912,11 @@ def security_posture(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    now = datetime.now(timezone.utc)
-    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
-
-    posture_rows: list[SecurityPostureUserOut] = []
-    missing_2fa = 0
-    stale_secrets = 0
-
-    for user in users:
-        if real_only and not _is_real_user_email(user.email):
-            continue
-
-        user_2fa = (
-            db.execute(
-                select(UserTwoFactor).where(UserTwoFactor.user_id == user.id)
-            )
-            .scalar_one_or_none()
-        )
-        two_factor_enabled = bool(user_2fa and user_2fa.enabled)
-
-        secret_rows = db.execute(
-            select(ExchangeSecret.exchange, ExchangeSecret.updated_at).where(
-                ExchangeSecret.user_id == user.id
-            )
-        ).all()
-        configured_exchanges = {row[0] for row in secret_rows}
-
-        oldest_days: int | None = None
-        for _, updated_at in secret_rows:
-            if updated_at is None:
-                continue
-            ts = updated_at
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            age_days = max(0, int((now - ts.astimezone(timezone.utc)).total_seconds() // 86400))
-            if oldest_days is None or age_days > oldest_days:
-                oldest_days = age_days
-
-        stale = oldest_days is not None and oldest_days > max_secret_age_days
-        if stale:
-            stale_secrets += 1
-
-        if user.role in {"admin", "trader"} and not two_factor_enabled:
-            missing_2fa += 1
-
-        posture_rows.append(
-            SecurityPostureUserOut(
-                user_id=user.id,
-                email=user.email,
-                role=user.role,
-                two_factor_enabled=two_factor_enabled,
-                binance_secret_configured="BINANCE" in configured_exchanges,
-                ibkr_secret_configured="IBKR" in configured_exchanges,
-                oldest_secret_age_days=oldest_days,
-                stale_secret=stale,
-            )
-        )
+    now, posture_rows, missing_2fa, stale_secrets = _build_security_posture_rows(
+        db,
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+    )
 
     log_audit_event(
         db,
@@ -923,4 +943,237 @@ def security_posture(
             users_with_stale_secrets=stale_secrets,
         ),
         users=posture_rows,
+    )
+
+
+@router.get("/dashboard/summary", response_model=DashboardSummaryOut)
+def dashboard_summary(
+    real_only: bool = True,
+    max_secret_age_days: int = 30,
+    recent_hours: int = 24,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    now, posture_rows, missing_2fa, stale_secrets = _build_security_posture_rows(
+        db,
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+    )
+    today = today_colombia()
+
+    posture_map = {row.user_id: row for row in posture_rows}
+    user_status_rows: list[DashboardUserOut] = []
+    trades_today_total = 0
+    open_positions_total = 0
+    blocked_open_attempts_total = 0
+
+    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
+    for user in users:
+        if user.id not in posture_map:
+            continue
+
+        profile = resolve_risk_profile_for_email(user.email)
+        dr = (
+            db.execute(
+                select(DailyRiskState).where(
+                    DailyRiskState.user_id == user.id,
+                    DailyRiskState.day == today,
+                )
+            )
+            .scalar_one_or_none()
+        )
+        open_positions = db.execute(
+            select(func.count())
+            .select_from(Position)
+            .where(Position.user_id == user.id, Position.status == "OPEN")
+        ).scalar_one()
+        blocked_today = db.execute(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.user_id == user.id,
+                AuditLog.action.like("position.open.blocked.%"),
+                func.date(AuditLog.created_at) == str(today),
+            )
+        ).scalar_one()
+
+        trades_today = int(dr.trades_today) if dr else 0
+        realized_pnl_today = float(dr.realized_pnl_today) if dr else 0.0
+
+        trades_today_total += trades_today
+        open_positions_total += int(open_positions)
+        blocked_open_attempts_total += int(blocked_today)
+
+        p = posture_map[user.id]
+        user_status_rows.append(
+            DashboardUserOut(
+                user_id=user.id,
+                email=user.email,
+                role=user.role,
+                risk_profile=profile["profile_name"],
+                two_factor_enabled=bool(p.two_factor_enabled),
+                trades_today=trades_today,
+                open_positions_now=int(open_positions),
+                blocked_open_attempts_today=int(blocked_today),
+                realized_pnl_today=realized_pnl_today,
+            )
+        )
+
+    cutoff = now - timedelta(hours=recent_hours)
+    errors_last_24h = db.execute(
+        select(func.count())
+        .select_from(AuditLog)
+        .where(
+            AuditLog.created_at >= cutoff,
+            or_(
+                AuditLog.action.like("%.error"),
+                AuditLog.action.like("execution.blocked.%"),
+            ),
+        )
+    ).scalar_one()
+
+    pretrade_blocked_last_24h = db.execute(
+        select(func.count())
+        .select_from(AuditLog)
+        .where(
+            AuditLog.action == "pretrade.check.blocked",
+            AuditLog.created_at >= cutoff,
+        )
+    ).scalar_one()
+
+    overall_status = "green"
+    if missing_2fa > 0 or stale_secrets > 0:
+        overall_status = "red"
+    elif blocked_open_attempts_total > 0:
+        overall_status = "yellow"
+
+    return DashboardSummaryOut(
+        generated_at=now.isoformat(),
+        day=str(today),
+        overall_status=overall_status,
+        generated_for=current_user.email,
+        security=DashboardSecurityOut(
+            total_users=len(posture_rows),
+            users_missing_2fa=missing_2fa,
+            users_with_stale_secrets=stale_secrets,
+            max_secret_age_days=max_secret_age_days,
+        ),
+        operations=DashboardOperationsOut(
+            trades_today_total=trades_today_total,
+            open_positions_total=open_positions_total,
+            blocked_open_attempts_total=blocked_open_attempts_total,
+        ),
+        recent_events=DashboardEventsOut(
+            errors_last_24h=int(errors_last_24h),
+            pretrade_blocked_last_24h=int(pretrade_blocked_last_24h),
+        ),
+        users=user_status_rows,
+    )
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+def dashboard_page():
+    return HTMLResponse(
+        """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ops Dashboard</title>
+  <style>
+    :root { --bg:#f5f7f9; --card:#ffffff; --text:#142033; --muted:#5b677a; --ok:#117a3e; --warn:#a35b00; --bad:#b42318; --line:#dde3ea; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: "Segoe UI", Tahoma, sans-serif; background:linear-gradient(180deg,#eef4ff 0%,var(--bg) 45%); color:var(--text); }
+    .wrap { max-width:1100px; margin:24px auto; padding:0 16px 32px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+    h1 { margin:0 0 6px; font-size:28px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    input { width:420px; max-width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+    button { border:0; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; background:#0b62d6; color:#fff; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; }
+    .kpi { border:1px solid var(--line); border-radius:10px; padding:10px; }
+    .kpi .v { font-size:24px; font-weight:700; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { border-bottom:1px solid var(--line); text-align:left; padding:8px 6px; font-size:13px; }
+    .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-weight:700; font-size:12px; color:#fff; }
+    .green { background:var(--ok); }
+    .yellow { background:var(--warn); }
+    .red { background:var(--bad); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Ops Dashboard</h1>
+      <div class="muted">Single-screen view for health, security posture and daily operations.</div>
+      <div class="row" style="margin-top:12px">
+        <input id="token" placeholder="Paste admin bearer token here" />
+        <button id="load">Load</button>
+      </div>
+      <div class="muted" id="stamp" style="margin-top:8px">Waiting for token...</div>
+    </div>
+    <div class="card">
+      <div class="row"><strong>Overall status:</strong> <span id="overall" class="badge yellow">unknown</span></div>
+      <div class="grid" style="margin-top:10px">
+        <div class="kpi"><div class="muted">Users in scope</div><div id="k_users" class="v">-</div></div>
+        <div class="kpi"><div class="muted">Missing 2FA</div><div id="k_2fa" class="v">-</div></div>
+        <div class="kpi"><div class="muted">Stale secrets</div><div id="k_stale" class="v">-</div></div>
+        <div class="kpi"><div class="muted">Trades today</div><div id="k_trades" class="v">-</div></div>
+        <div class="kpi"><div class="muted">Open positions</div><div id="k_open" class="v">-</div></div>
+        <div class="kpi"><div class="muted">Blocked opens today</div><div id="k_blocked" class="v">-</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <strong>Users</strong>
+      <table>
+        <thead>
+          <tr><th>Email</th><th>Role</th><th>Risk profile</th><th>2FA</th><th>Trades</th><th>Open</th><th>Blocked</th><th>Realized PnL</th></tr>
+        </thead>
+        <tbody id="tbody"><tr><td colspan="8" class="muted">No data yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <script>
+    const byId = (id) => document.getElementById(id);
+    function setOverall(v) {
+      const el = byId("overall");
+      el.textContent = v || "unknown";
+      el.className = "badge " + (v === "green" ? "green" : v === "red" ? "red" : "yellow");
+    }
+    function fill(d) {
+      setOverall(d.overall_status);
+      byId("stamp").textContent = `Generated: ${d.generated_at} | Day: ${d.day} | For: ${d.generated_for}`;
+      byId("k_users").textContent = d.security.total_users;
+      byId("k_2fa").textContent = d.security.users_missing_2fa;
+      byId("k_stale").textContent = d.security.users_with_stale_secrets;
+      byId("k_trades").textContent = d.operations.trades_today_total;
+      byId("k_open").textContent = d.operations.open_positions_total;
+      byId("k_blocked").textContent = d.operations.blocked_open_attempts_total;
+      byId("tbody").innerHTML = d.users.map(u => `<tr>
+        <td>${u.email}</td><td>${u.role}</td><td>${u.risk_profile}</td><td>${u.two_factor_enabled ? "yes" : "no"}</td>
+        <td>${u.trades_today}</td><td>${u.open_positions_now}</td><td>${u.blocked_open_attempts_today}</td><td>${u.realized_pnl_today}</td>
+      </tr>`).join("") || '<tr><td colspan="8" class="muted">No users in scope</td></tr>';
+    }
+    async function load() {
+      const token = byId("token").value.trim();
+      if (!token) return;
+      const res = await fetch("/ops/dashboard/summary?real_only=true", { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Dashboard request failed");
+      fill(data);
+    }
+    byId("load").addEventListener("click", async () => {
+      try { await load(); } catch (e) { byId("stamp").textContent = String(e.message || e); setOverall("red"); }
+    });
+    setInterval(async () => {
+      const token = byId("token").value.trim();
+      if (!token) return;
+      try { await load(); } catch (_) {}
+    }, 60000);
+  </script>
+</body>
+</html>
+        """
     )
