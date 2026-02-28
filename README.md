@@ -193,6 +193,9 @@ scripts/run_scenario.sh
 Security posture artifact:
 - `Security Posture Daily` now exports `security_dashboard_snapshot.json` as workflow artifact.
 - Artifact bundle name format: `security-posture-daily-<run_id>`.
+- Preventive rule in `Security Posture Daily`:
+  - fails the run if `errors_total` rises for 2 consecutive days (from `trends_7d`),
+  - marks higher urgency when `pretrade_blocked_last_24h > 0`.
 
 ## Quarterly Rotation
 - Quarterly workflow: `.github/workflows/quarterly-rotation.yml`

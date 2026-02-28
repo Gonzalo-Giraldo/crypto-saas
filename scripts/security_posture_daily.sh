@@ -163,6 +163,39 @@ else
 fi
 
 echo
+echo "[E] Preventive trend rule"
+if [[ "${dashboard_resp:0:1}" == "{" ]]; then
+  trend_rising_2d=$(echo "$dashboard_resp" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+t=d.get("trends_7d", [])
+if len(t) < 3:
+    print("false")
+else:
+    e0=t[-3].get("errors_total",0)
+    e1=t[-2].get("errors_total",0)
+    e2=t[-1].get("errors_total",0)
+    print("true" if (e0 < e1 < e2) else "false")
+')
+  pretrade_blocked_24h=$(echo "$dashboard_resp" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+print(int(d.get("recent_events",{}).get("pretrade_blocked_last_24h",0)))
+')
+  if [[ "$trend_rising_2d" == "true" ]]; then
+    if [[ "$pretrade_blocked_24h" -gt 0 ]]; then
+      fail "preventive incident: errors trend rising 2 days + pretrade_blocked_last_24h=$pretrade_blocked_24h (high priority)"
+    else
+      fail "preventive incident: errors trend rising 2 days"
+    fi
+  else
+    pass "preventive trend rule ok"
+  fi
+else
+  fail "preventive trend rule skipped: dashboard data unavailable"
+fi
+
+echo
 echo "Summary: PASS=$pass_count FAIL=$fail_count"
 if [[ "$fail_count" -gt 0 ]]; then
   exit 1

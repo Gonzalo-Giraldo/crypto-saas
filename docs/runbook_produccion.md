@@ -160,6 +160,10 @@ Artifact diario de snapshot:
 - Artifact: `security-posture-daily-<run_id>`
 - Archivo JSON: `security_dashboard_snapshot.json`
 
+Regla preventiva automatica:
+- Si `errors_total` aumenta 2 dias consecutivos (en `trends_7d`), el workflow falla y abre incidente preventivo.
+- Si ademas `pretrade_blocked_last_24h > 0`, tratar como prioridad alta.
+
 Asignacion de estrategia (admin):
 
 ```bash
