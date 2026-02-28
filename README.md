@@ -180,6 +180,7 @@ scripts/run_scenario.sh
   - `email_contains=<texto>`
   - `exchange=ALL|BINANCE|IBKR`
   - `real_only=true|false`
+  - `include_service_users=true|false` (default `false`; hides `ops.bot.*`)
 - Includes a built-in 7-day trend block (`trends_7d`) for:
   - total trades
   - blocked open attempts

@@ -955,6 +955,7 @@ def dashboard_summary(
     recent_hours: int = 24,
     email_contains: str | None = None,
     exchange: str = "ALL",
+    include_service_users: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
@@ -975,6 +976,9 @@ def dashboard_summary(
     users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
     for user in users:
         if user.id not in posture_map:
+            continue
+        email_l = (user.email or "").lower()
+        if not include_service_users and email_l.startswith("ops.bot."):
             continue
         if email_contains and email_contains.lower() not in (user.email or "").lower():
             continue
