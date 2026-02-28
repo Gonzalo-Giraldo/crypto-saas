@@ -1128,6 +1128,10 @@ def dashboard_page():
       <div class="row" style="margin-top:12px">
         <input id="token" placeholder="Paste admin bearer token here" />
         <button id="load">Load</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#445066;">
+          <input id="rememberToken" type="checkbox" />
+          Remember token
+        </label>
         <input id="emailFilter" placeholder="email contains (optional)" />
         <select id="realOnlyFilter" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
           <option value="true">real_only=true</option>
@@ -1166,6 +1170,30 @@ def dashboard_page():
   </div>
   <script>
     const byId = (id) => document.getElementById(id);
+    const TOKEN_SESSION_KEY = "ops_dashboard_token_session";
+    const TOKEN_PERSIST_KEY = "ops_dashboard_token_persist";
+    const TOKEN_REMEMBER_KEY = "ops_dashboard_token_remember";
+
+    function saveToken(token) {
+      sessionStorage.setItem(TOKEN_SESSION_KEY, token || "");
+      const remember = byId("rememberToken").checked;
+      localStorage.setItem(TOKEN_REMEMBER_KEY, remember ? "1" : "0");
+      if (remember) {
+        localStorage.setItem(TOKEN_PERSIST_KEY, token || "");
+      } else {
+        localStorage.removeItem(TOKEN_PERSIST_KEY);
+      }
+    }
+
+    function loadStoredToken() {
+      const remember = localStorage.getItem(TOKEN_REMEMBER_KEY) === "1";
+      byId("rememberToken").checked = remember;
+      const token = remember
+        ? (localStorage.getItem(TOKEN_PERSIST_KEY) || "")
+        : (sessionStorage.getItem(TOKEN_SESSION_KEY) || "");
+      if (token) byId("token").value = token;
+    }
+
     function setOverall(v) {
       const el = byId("overall");
       el.textContent = v || "unknown";
@@ -1193,6 +1221,7 @@ def dashboard_page():
     async function load() {
       const token = byId("token").value.trim();
       if (!token) return;
+      saveToken(token);
       const email = encodeURIComponent(byId("emailFilter").value.trim());
       const exchange = encodeURIComponent(byId("exchangeFilter").value || "ALL");
       const realOnly = encodeURIComponent(byId("realOnlyFilter").value || "true");
@@ -1211,6 +1240,10 @@ def dashboard_page():
       byId("exchangeFilter").value = "ALL";
       try { await load(); } catch (e) { byId("stamp").textContent = String(e.message || e); setOverall("red"); }
     });
+    byId("rememberToken").addEventListener("change", () => {
+      const token = byId("token").value.trim();
+      saveToken(token);
+    });
     byId("incidentBtn").addEventListener("click", () => {
       const repo = "https://github.com/Gonzalo-Giraldo/crypto-saas";
       const ts = new Date().toISOString();
@@ -1223,6 +1256,7 @@ def dashboard_page():
       if (!token) return;
       try { await load(); } catch (_) {}
     }, 60000);
+    loadStoredToken();
   </script>
 </body>
 </html>
