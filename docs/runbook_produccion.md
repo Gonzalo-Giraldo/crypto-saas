@@ -155,6 +155,11 @@ UI web:
 - cargar estado unificado de operacion + seguridad.
 - boton `Open Incident` abre issue prellenado en GitHub.
 
+Artifact diario de snapshot:
+- Workflow: `Security Posture Daily`
+- Artifact: `security-posture-daily-<run_id>`
+- Archivo JSON: `security_dashboard_snapshot.json`
+
 Asignacion de estrategia (admin):
 
 ```bash

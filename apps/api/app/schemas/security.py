@@ -44,6 +44,8 @@ class DashboardUserOut(BaseModel):
     role: str
     risk_profile: str
     two_factor_enabled: bool
+    binance_secret_configured: bool
+    ibkr_secret_configured: bool
     trades_today: int
     open_positions_now: int
     blocked_open_attempts_today: int

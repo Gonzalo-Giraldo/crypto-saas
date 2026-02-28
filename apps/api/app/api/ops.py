@@ -1022,6 +1022,8 @@ def dashboard_summary(
                 role=user.role,
                 risk_profile=profile["profile_name"],
                 two_factor_enabled=bool(p.two_factor_enabled),
+                binance_secret_configured=bool(p.binance_secret_configured),
+                ibkr_secret_configured=bool(p.ibkr_secret_configured),
                 trades_today=trades_today,
                 open_positions_now=int(open_positions),
                 blocked_open_attempts_today=int(blocked_today),
@@ -1109,6 +1111,10 @@ def dashboard_page():
     table { width:100%; border-collapse:collapse; }
     th,td { border-bottom:1px solid var(--line); text-align:left; padding:8px 6px; font-size:13px; }
     .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-weight:700; font-size:12px; color:#fff; }
+    .tag { display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700; font-size:11px; margin-right:4px; }
+    .tag-binance { background:#fff3d0; color:#7a5200; border:1px solid #e7c060; }
+    .tag-ibkr { background:#dcecff; color:#164a8a; border:1px solid #90b6ea; }
+    .tag-off { background:#f1f4f8; color:#667085; border:1px solid #d0d7e2; }
     .green { background:var(--ok); }
     .yellow { background:var(--warn); }
     .red { background:var(--bad); }
@@ -1123,6 +1129,10 @@ def dashboard_page():
         <input id="token" placeholder="Paste admin bearer token here" />
         <button id="load">Load</button>
         <input id="emailFilter" placeholder="email contains (optional)" />
+        <select id="realOnlyFilter" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
+          <option value="true">real_only=true</option>
+          <option value="false">real_only=false</option>
+        </select>
         <select id="exchangeFilter" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
           <option value="ALL">ALL</option>
           <option value="BINANCE">BINANCE</option>
@@ -1147,9 +1157,9 @@ def dashboard_page():
       <strong>Users</strong>
       <table>
         <thead>
-          <tr><th>Email</th><th>Role</th><th>Risk profile</th><th>2FA</th><th>Trades</th><th>Open</th><th>Blocked</th><th>Realized PnL</th></tr>
+          <tr><th>Email</th><th>Role</th><th>Risk profile</th><th>Exchanges</th><th>2FA</th><th>Trades</th><th>Open</th><th>Blocked</th><th>Realized PnL</th></tr>
         </thead>
-        <tbody id="tbody"><tr><td colspan="8" class="muted">No data yet</td></tr></tbody>
+        <tbody id="tbody"><tr><td colspan="9" class="muted">No data yet</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1170,16 +1180,22 @@ def dashboard_page():
       byId("k_open").textContent = d.operations.open_positions_total;
       byId("k_blocked").textContent = d.operations.blocked_open_attempts_total;
       byId("tbody").innerHTML = d.users.map(u => `<tr>
-        <td>${u.email}</td><td>${u.role}</td><td>${u.risk_profile}</td><td>${u.two_factor_enabled ? "yes" : "no"}</td>
+        <td>${u.email}</td><td>${u.role}</td><td>${u.risk_profile}</td>
+        <td>
+          <span class="tag ${u.binance_secret_configured ? "tag-binance" : "tag-off"}">BINANCE ${u.binance_secret_configured ? "on" : "off"}</span>
+          <span class="tag ${u.ibkr_secret_configured ? "tag-ibkr" : "tag-off"}">IBKR ${u.ibkr_secret_configured ? "on" : "off"}</span>
+        </td>
+        <td>${u.two_factor_enabled ? "yes" : "no"}</td>
         <td>${u.trades_today}</td><td>${u.open_positions_now}</td><td>${u.blocked_open_attempts_today}</td><td>${u.realized_pnl_today}</td>
-      </tr>`).join("") || '<tr><td colspan="8" class="muted">No users in scope</td></tr>';
+      </tr>`).join("") || '<tr><td colspan="9" class="muted">No users in scope</td></tr>';
     }
     async function load() {
       const token = byId("token").value.trim();
       if (!token) return;
       const email = encodeURIComponent(byId("emailFilter").value.trim());
       const exchange = encodeURIComponent(byId("exchangeFilter").value || "ALL");
-      const qs = `/ops/dashboard/summary?real_only=true&email_contains=${email}&exchange=${exchange}`;
+      const realOnly = encodeURIComponent(byId("realOnlyFilter").value || "true");
+      const qs = `/ops/dashboard/summary?real_only=${realOnly}&email_contains=${email}&exchange=${exchange}`;
       const res = await fetch(qs, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Dashboard request failed");

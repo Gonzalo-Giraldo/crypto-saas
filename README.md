@@ -178,6 +178,7 @@ scripts/run_scenario.sh
 - Optional filters:
   - `email_contains=<texto>`
   - `exchange=ALL|BINANCE|IBKR`
+  - `real_only=true|false`
 - Usage:
   - login as admin, copy bearer token,
   - open `/ops/dashboard`,
@@ -187,6 +188,7 @@ scripts/run_scenario.sh
 
 Security posture artifact:
 - `Security Posture Daily` now exports `security_dashboard_snapshot.json` as workflow artifact.
+- Artifact bundle name format: `security-posture-daily-<run_id>`.
 
 ## Quarterly Rotation
 - Quarterly workflow: `.github/workflows/quarterly-rotation.yml`
