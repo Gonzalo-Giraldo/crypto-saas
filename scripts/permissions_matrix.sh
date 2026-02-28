@@ -105,6 +105,13 @@ login_token() {
     --data "$data" || true
 }
 
+user_me_field() {
+  local token="$1"
+  local field="$2"
+  curl -sS "$BASE_URL/users/me" \
+    -H "Authorization: Bearer $token" | json_get "$field" || true
+}
+
 expect_status() {
   local token="$1"
   local method="$2"
@@ -211,6 +218,29 @@ if [[ "${#ADMIN_TOKEN}" -le 100 || "${#USER1_TOKEN}" -le 100 ]]; then
   exit 1
 fi
 
+admin_role=$(user_me_field "$ADMIN_TOKEN" "role")
+if [[ "$admin_role" == "admin" ]]; then
+  pass "admin role assertion"
+else
+  fail "admin role assertion failed: expected=admin got=$admin_role"
+fi
+
+user1_role=$(user_me_field "$USER1_TOKEN" "role")
+if [[ "$user1_role" == "trader" ]]; then
+  pass "user1 role assertion"
+else
+  fail "user1 role assertion failed: expected=trader got=$user1_role (check DUAL_USER1_EMAIL/PASSWORD)"
+fi
+
+if [[ -n "$USER2_TOKEN" ]]; then
+  user2_role=$(user_me_field "$USER2_TOKEN" "role")
+  if [[ "$user2_role" == "trader" ]]; then
+    pass "user2 role assertion"
+  else
+    fail "user2 role assertion failed: expected=trader got=$user2_role (check DUAL_USER2_EMAIL/PASSWORD)"
+  fi
+fi
+
 echo
 echo "[C] Admin vs trader authorization"
 expect_status "$ADMIN_TOKEN" "GET" "/users" "200" "admin can list users"
@@ -241,4 +271,3 @@ echo "Summary: PASS=$pass_count FAIL=$fail_count"
 if [[ "$fail_count" -gt 0 ]]; then
   exit 1
 fi
-

@@ -198,6 +198,7 @@ scripts/run_scenario.sh
   - admin can access admin endpoints (`/users`, `/ops/audit/all`, `/ops/risk/daily-compare`)
   - trader is blocked (`403`) on those endpoints
   - optional disabled-user login check (`403 User is disabled`)
+  - asserts that `DUAL_USER1_*` and `DUAL_USER2_*` are actually trader accounts (`/users/me`)
 - Required repository secrets:
   - `SMOKE_BASE_URL` (or manual `base_url` input)
   - `DUAL_ADMIN_EMAIL`
