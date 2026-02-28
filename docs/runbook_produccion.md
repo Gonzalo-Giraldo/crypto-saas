@@ -316,3 +316,25 @@ Recomendacion de activacion:
 1. Habilitar 2FA en cuentas objetivo.
 2. Verificar `GET /ops/security/posture` sin pendientes.
 3. Activar variables de enforcement.
+
+Rotacion trimestral automatizada:
+- Workflow: `.github/workflows/quarterly-rotation.yml`
+- Script: `scripts/quarterly_rotation.sh`
+- El workflow:
+  - abre/actualiza checklist trimestral automaticamente,
+  - aplica nuevas credenciales (`ROTATE_*`) si estan cargadas,
+  - ejecuta validacion automatica post-rotacion,
+  - si falla y hay `ROLLBACK_*`, aplica rollback automatico y revalida,
+  - abre incidente si no se recupera.
+
+Secrets para rotacion:
+- Nuevas credenciales:
+  - `ROTATE_USER1_BINANCE_API_KEY`
+  - `ROTATE_USER1_BINANCE_API_SECRET`
+  - `ROTATE_USER2_IBKR_API_KEY`
+  - `ROTATE_USER2_IBKR_API_SECRET`
+- Credenciales previas para rollback:
+  - `ROLLBACK_USER1_BINANCE_API_KEY`
+  - `ROLLBACK_USER1_BINANCE_API_SECRET`
+  - `ROLLBACK_USER2_IBKR_API_KEY`
+  - `ROLLBACK_USER2_IBKR_API_SECRET`

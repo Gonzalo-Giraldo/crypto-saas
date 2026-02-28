@@ -1,0 +1,231 @@
+name: Quarterly Rotation
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://api.example.com)"
+        required: true
+        type: string
+  schedule:
+    - cron: "0 13 1 */3 *"
+
+jobs:
+  quarterly_rotation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || secrets.SMOKE_BASE_URL }}
+      ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
+      ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
+      USER1_EMAIL: ${{ secrets.DUAL_USER1_EMAIL }}
+      USER1_PASSWORD: ${{ secrets.DUAL_USER1_PASSWORD }}
+      USER1_OTP: ${{ secrets.DUAL_USER1_OTP }}
+      USER1_TOTP_SECRET: ${{ secrets.DUAL_USER1_TOTP_SECRET }}
+      USER2_EMAIL: ${{ secrets.DUAL_USER2_EMAIL }}
+      USER2_PASSWORD: ${{ secrets.DUAL_USER2_PASSWORD }}
+      USER2_OTP: ${{ secrets.DUAL_USER2_OTP }}
+      USER2_TOTP_SECRET: ${{ secrets.DUAL_USER2_TOTP_SECRET }}
+      NEW_USER1_BINANCE_API_KEY: ${{ secrets.ROTATE_USER1_BINANCE_API_KEY }}
+      NEW_USER1_BINANCE_API_SECRET: ${{ secrets.ROTATE_USER1_BINANCE_API_SECRET }}
+      NEW_USER2_IBKR_API_KEY: ${{ secrets.ROTATE_USER2_IBKR_API_KEY }}
+      NEW_USER2_IBKR_API_SECRET: ${{ secrets.ROTATE_USER2_IBKR_API_SECRET }}
+      ROLLBACK_USER1_BINANCE_API_KEY: ${{ secrets.ROLLBACK_USER1_BINANCE_API_KEY }}
+      ROLLBACK_USER1_BINANCE_API_SECRET: ${{ secrets.ROLLBACK_USER1_BINANCE_API_SECRET }}
+      ROLLBACK_USER2_IBKR_API_KEY: ${{ secrets.ROLLBACK_USER2_IBKR_API_KEY }}
+      ROLLBACK_USER2_IBKR_API_SECRET: ${{ secrets.ROLLBACK_USER2_IBKR_API_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Open/refresh quarterly checklist issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Quarterly Rotation] Checklist open';
+            const checklist = [
+              '- [ ] Validar alcance de usuarios operativos y exchanges',
+              '- [ ] Cargar nuevas credenciales de exchange en repository secrets ROTATE_*',
+              '- [ ] Ejecutar workflow Quarterly Rotation',
+              '- [ ] Confirmar validacion post-rotacion en verde',
+              '- [ ] Si fallo, confirmar rollback aplicado',
+              '- [ ] Revocar credenciales antiguas en Binance/IBKR',
+              '- [ ] Registrar evidencia y fecha de siguiente rotacion'
+            ].join('\n');
+            const body = [
+              `Quarterly rotation window started.`,
+              ``,
+              `Run: ${runUrl}`,
+              ``,
+              `Checklist:`,
+              checklist
+            ].join('\n');
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['operations', 'security']
+              });
+            }
+
+      - name: Validate configuration
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "BASE_URL is empty. Set workflow input 'base_url' or repository secret 'SMOKE_BASE_URL'."
+            exit 1
+          fi
+          for v in ADMIN_EMAIL ADMIN_PASSWORD USER1_EMAIL USER1_PASSWORD USER2_EMAIL USER2_PASSWORD; do
+            if [[ -z "${!v:-}" ]]; then
+              echo "Missing required secret: $v"
+              exit 1
+            fi
+          done
+
+      - name: Run quarterly rotation script
+        id: run_rotation
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chmod +x scripts/quarterly_rotation.sh
+          scripts/quarterly_rotation.sh 2>&1 | tee quarterly_rotation_output.log
+
+      - name: Build run summary
+        if: always()
+        run: |
+          {
+            echo "## Quarterly Rotation Result"
+            echo
+            echo "- Repository: \`${{ github.repository }}\`"
+            echo "- Branch: \`${{ github.ref_name }}\`"
+            echo "- Base URL: \`${BASE_URL}\`"
+            echo "- Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- Outcome: \`${{ steps.run_rotation.outcome }}\`"
+            echo
+            if [[ -f quarterly_rotation_output.log ]]; then
+              SUMMARY_LINE=$(grep -E "Summary: PASS=[0-9]+ FAIL=[0-9]+" quarterly_rotation_output.log | tail -n 1 || true)
+              if [[ -n "${SUMMARY_LINE}" ]]; then
+                echo "- ${SUMMARY_LINE}"
+              fi
+              echo
+              echo "### Tail log"
+              echo '```text'
+              tail -n 60 quarterly_rotation_output.log
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quarterly-rotation-${{ github.run_id }}
+          path: quarterly_rotation_output.log
+          if-no-files-found: warn
+
+      - name: Open incident on failure
+        if: steps.run_rotation.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const issueTitle = '[Quarterly Rotation] Incident open';
+            const body = [
+              `Quarterly rotation failed.`,
+              ``,
+              `Run: ${runUrl}`,
+              `Review artifact quarterly_rotation_output.log and apply manual recovery if needed.`
+            ].join('\n');
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = openIssues.find(i => i.title === issueTitle);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body,
+                labels: ['incident', 'security']
+              });
+            }
+
+      - name: Close quarterly checklist on success
+        if: steps.run_rotation.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const checklistTitle = '[Quarterly Rotation] Checklist open';
+            const incidentTitle = '[Quarterly Rotation] Incident open';
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const checklist = openIssues.find(i => i.title === checklistTitle);
+            if (checklist) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: checklist.number,
+                body: `Quarterly rotation completed successfully. Run: ${runUrl}`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: checklist.number,
+                state: 'closed'
+              });
+            }
+            const incident = openIssues.find(i => i.title === incidentTitle);
+            if (incident) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                body: `Quarterly rotation recovered. Run: ${runUrl}`
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: incident.number,
+                state: 'closed'
+              });
+            }
+
+      - name: Fail job if rotation failed
+        if: steps.run_rotation.outcome == 'failure'
+        run: exit 1

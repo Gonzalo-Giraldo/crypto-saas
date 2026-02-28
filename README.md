@@ -169,3 +169,34 @@ scripts/run_scenario.sh
   - Opens issue `[Security Posture Daily] Incident open` when posture fails.
   - Adds comment if incident already exists.
   - Auto-closes incident when posture recovers.
+
+## Quarterly Rotation
+- Quarterly workflow: `.github/workflows/quarterly-rotation.yml`
+- Rotation script: `scripts/quarterly_rotation.sh`
+- Purpose:
+  - open a quarterly checklist issue automatically,
+  - apply new exchange credentials automatically when provided,
+  - validate post-rotation automatically,
+  - attempt rollback automatically if validation fails.
+- Required repository secrets:
+  - `SMOKE_BASE_URL`
+  - `DUAL_ADMIN_EMAIL`
+  - `DUAL_ADMIN_PASSWORD`
+  - `DUAL_USER1_EMAIL`
+  - `DUAL_USER1_PASSWORD`
+  - `DUAL_USER2_EMAIL`
+  - `DUAL_USER2_PASSWORD`
+- Optional auth secrets:
+  - `DUAL_ADMIN_TOTP_SECRET`
+  - `DUAL_USER1_TOTP_SECRET`
+  - `DUAL_USER2_TOTP_SECRET`
+- Rotation payload secrets (new credentials):
+  - `ROTATE_USER1_BINANCE_API_KEY`
+  - `ROTATE_USER1_BINANCE_API_SECRET`
+  - `ROTATE_USER2_IBKR_API_KEY`
+  - `ROTATE_USER2_IBKR_API_SECRET`
+- Rollback payload secrets (previous credentials):
+  - `ROLLBACK_USER1_BINANCE_API_KEY`
+  - `ROLLBACK_USER1_BINANCE_API_SECRET`
+  - `ROLLBACK_USER2_IBKR_API_KEY`
+  - `ROLLBACK_USER2_IBKR_API_SECRET`
