@@ -13,15 +13,18 @@ Este checklist define cuando el backend se considera cerrado para la fase actual
 ## 2) Seguridad base
 
 - [x] JWT login operativo.
+- [x] JWT con `access + refresh`, rotación y revocación de sesión (`logout`, `revoke-all`).
 - [x] 2FA habilitable por usuario.
 - [x] Forzado de 2FA para admins disponible por configuración.
+- [x] Política de expiración de password disponible por configuración.
 - [x] Secretos de exchange cifrados en reposo.
 - [x] Auditoría de eventos críticos.
+- [x] Export de auditoría verificable (JSON + `payload_sha256` + `signature_hmac_sha256`).
 
 ## 3) Gestión de usuarios (sin SQL manual)
 
 - [x] Crear usuario.
-- [x] Cambiar rol (`admin|trader|disabled`).
+- [x] Cambiar rol (`admin|operator|viewer|trader|disabled`).
 - [x] Cambiar email.
 - [x] Cambiar password.
 - [x] Asignar/limpiar perfil de riesgo.
@@ -35,6 +38,9 @@ Este checklist define cuando el backend se considera cerrado para la fase actual
 - [x] Pretrade checks por exchange y estrategia.
 - [x] Exit checks por exchange y estrategia.
 - [x] Segregación por exchange vía strategy assignments.
+- [x] Kill-switch global de trading (`trading_enabled`) con control admin.
+- [x] Límites de exposición agregada (símbolo/exchange) en validaciones de ejecución.
+- [x] Idempotencia en endpoints críticos de ejecución/posiciones (`X-Idempotency-Key`).
 - [x] Dashboard operativo consolidado (`/ops/dashboard`).
 - [x] Tabla consolidada de readiness por usuario (READY/MISSING + razón).
 
@@ -47,15 +53,32 @@ Este checklist define cuando el backend se considera cerrado para la fase actual
 - [x] `Cleanup Smoke Users Weekly`.
 - [x] `Quarterly Rotation` con validación/rollback.
 
-## 6) Pendiente para cierre total de fase
+## 6) SaaS-ready backend (baseline mínima)
+
+- [x] `tenant_id` en entidades clave de identidad (`users`) y claim `tid` en JWT.
+- [x] Aislamiento por tenant en backoffice/admin principal (`users`, `ops`).
+- [x] RBAC por tenant operativo:
+  - [x] `admin` (control total),
+  - [x] `operator` (operación/lectura),
+  - [x] `viewer` (solo lectura),
+  - [x] `trader`,
+  - [x] `disabled`.
+- [x] Endpoints de backoffice de solo lectura por tenant (`/ops/backoffice/*`).
+
+## 7) Pendiente para cierre total de fase
 
 - [ ] Activación de IBKR real para usuario operativo (pendiente aprobación externa de cuenta).
 - [ ] Validación final IBKR real: `pretrade + test-order + exit-check`.
 - [ ] Cierre del issue IBKR en GitHub tras validación exitosa.
 
-## Criterio de cierre
+## 8) Criterio de cierre
 
 El backend se declara **cerrado para esta fase** cuando:
 
-1. Todos los puntos 1–5 estén en `[x]` (actualmente cumplido).
-2. Los tres puntos de la sección 6 estén en `[x]` (pendiente externo IBKR).
+1. Todos los puntos 1–6 estén en `[x]` (actualmente cumplido).
+2. Los tres puntos de la sección 7 estén en `[x]` (pendiente externo IBKR).
+
+## 9) Estado actual
+
+- Backend **congelado en baseline v1** para operación conservadora SaaS.
+- Único bloqueo externo: habilitación final de IBKR real.
