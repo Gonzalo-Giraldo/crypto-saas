@@ -229,3 +229,132 @@ def test_password_max_age_enforcement(client, monkeypatch):
     expired_login = _login(client, "trader@test.com", "TraderPass123!")
     assert expired_login.status_code == 401
     assert "Password expired" in expired_login.json()["detail"]
+
+
+def test_admin_kill_switch_blocks_trading_paths(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    save_binance = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(trader_token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert save_binance.status_code == 201, save_binance.text
+
+    disable = client.post(
+        "/ops/admin/trading-control",
+        headers=_auth(admin_token),
+        json={"trading_enabled": False, "reason": "maintenance"},
+    )
+    assert disable.status_code == 200, disable.text
+    assert disable.json()["trading_enabled"] is False
+
+    blocked_pretrade = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=_auth(trader_token),
+        json={
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "qty": 0.01,
+            "rr_estimate": 1.6,
+            "trend_tf": "4H",
+            "signal_tf": "1H",
+            "timing_tf": "15M",
+            "spread_bps": 7,
+            "slippage_bps": 10,
+            "volume_24h_usdt": 90000000,
+        },
+    )
+    assert blocked_pretrade.status_code == 409
+    assert "globally disabled" in blocked_pretrade.json()["detail"]
+
+    reenable = client.post(
+        "/ops/admin/trading-control",
+        headers=_auth(admin_token),
+        json={"trading_enabled": True, "reason": "resume"},
+    )
+    assert reenable.status_code == 200, reenable.text
+    assert reenable.json()["trading_enabled"] is True
+
+
+def test_idempotency_replay_and_payload_conflict(client):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+
+    save_binance = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert save_binance.status_code == 201, save_binance.text
+
+    headers = {
+        **_auth(token),
+        "X-Idempotency-Key": "same-pretrade-key-1",
+    }
+    payload = {
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "qty": 0.01,
+        "rr_estimate": 1.6,
+        "trend_tf": "4H",
+        "signal_tf": "1H",
+        "timing_tf": "15M",
+        "spread_bps": 7,
+        "slippage_bps": 10,
+        "volume_24h_usdt": 90000000,
+    }
+    first = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=headers,
+        json=payload,
+    )
+    second = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=headers,
+        json=payload,
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json() == second.json()
+
+    conflict = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=headers,
+        json={**payload, "qty": 0.02},
+    )
+    assert conflict.status_code == 409
+    assert "different payload" in conflict.json()["detail"]
+
+
+def test_exposure_limit_per_symbol_blocks_pretrade(client, monkeypatch):
+    import apps.api.app.services.trading_controls as controls
+
+    monkeypatch.setattr(controls.settings, "MAX_OPEN_QTY_PER_SYMBOL", 0.005)
+
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    save_binance = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert save_binance.status_code == 201, save_binance.text
+
+    blocked = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=_auth(token),
+        json={
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "qty": 0.01,
+            "rr_estimate": 1.6,
+            "trend_tf": "4H",
+            "signal_tf": "1H",
+            "timing_tf": "15M",
+            "spread_bps": 7,
+            "slippage_bps": 10,
+            "volume_24h_usdt": 90000000,
+        },
+    )
+    assert blocked.status_code == 409
+    assert "symbol exposure exceeded" in blocked.json()["detail"]

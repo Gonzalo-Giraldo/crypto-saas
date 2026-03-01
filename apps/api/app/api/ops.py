@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -47,6 +47,8 @@ from apps.api.app.schemas.security import (
     SecurityPostureOut,
     SecurityPostureSummaryOut,
     SecurityPostureUserOut,
+    TradingControlOut,
+    TradingControlUpdateRequest,
 )
 from apps.api.app.models.user import User
 from apps.api.app.schemas.audit import AuditOut
@@ -54,6 +56,16 @@ from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
 from apps.api.app.services.risk_profiles import resolve_risk_profile
+from apps.api.app.services.idempotency import (
+    consume_idempotent_response,
+    store_idempotent_response,
+)
+from apps.api.app.services.trading_controls import (
+    assert_exposure_limits,
+    assert_trading_enabled,
+    get_trading_enabled,
+    set_trading_enabled,
+)
 from apps.api.app.services.strategy_assignments import (
     is_exchange_enabled_for_user,
     resolve_strategy_for_user_exchange,
@@ -508,6 +520,44 @@ def ops_health():
     return {"system_state": "OK", "note": "placeholder"}
 
 
+@router.get("/admin/trading-control", response_model=TradingControlOut)
+def get_admin_trading_control(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    enabled = get_trading_enabled(db)
+    return TradingControlOut(
+        trading_enabled=enabled,
+        updated_by=current_user.email,
+        reason=None,
+    )
+
+
+@router.post("/admin/trading-control", response_model=TradingControlOut)
+def update_admin_trading_control(
+    payload: TradingControlUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    set_trading_enabled(db, enabled=payload.trading_enabled)
+    log_audit_event(
+        db,
+        action="security.trading_control.updated",
+        user_id=current_user.id,
+        entity_type="security",
+        details={
+            "trading_enabled": payload.trading_enabled,
+            "reason": payload.reason,
+        },
+    )
+    db.commit()
+    return TradingControlOut(
+        trading_enabled=payload.trading_enabled,
+        updated_by=current_user.email,
+        reason=payload.reason,
+    )
+
+
 @router.get("/audit/me", response_model=list[AuditOut])
 def my_audit(
     limit: int = 50,
@@ -708,29 +758,99 @@ def list_strategy_assignments(
 @router.post("/execution/pretrade/binance/check", response_model=PretradeCheckOut)
 def pretrade_binance_check(
     payload: PretradeCheckRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _evaluate_pretrade_for_user(
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="pretrade_check",
+        exchange="BINANCE",
+    )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+        symbol=payload.symbol,
+        qty=payload.qty,
+        price_estimate=0.0,
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/binance/check",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
+    result = _evaluate_pretrade_for_user(
         db=db,
         current_user=current_user,
         exchange="BINANCE",
         payload=payload,
     )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/binance/check",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=result,
+    )
+    return result
 
 
 @router.post("/execution/pretrade/ibkr/check", response_model=PretradeCheckOut)
 def pretrade_ibkr_check(
     payload: PretradeCheckRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _evaluate_pretrade_for_user(
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="pretrade_check",
+        exchange="IBKR",
+    )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+        symbol=payload.symbol,
+        qty=payload.qty,
+        price_estimate=0.0,
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/ibkr/check",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
+    result = _evaluate_pretrade_for_user(
         db=db,
         current_user=current_user,
         exchange="IBKR",
         payload=payload,
     )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/ibkr/check",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=result,
+    )
+    return result
 
 
 @router.post("/execution/exit/binance/check", response_model=ExitCheckOut)
@@ -830,14 +950,40 @@ def exit_ibkr_check(
 @router.post("/execution/prepare", response_model=ExecutionPrepareOut)
 def prepare_execution(
     payload: ExecutionPrepareRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="execution_prepare",
+        exchange=payload.exchange,
+    )
     _assert_exchange_enabled(
         db=db,
         current_user=current_user,
         exchange=payload.exchange,
     )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange=payload.exchange,
+        symbol=payload.symbol,
+        qty=payload.qty,
+        price_estimate=0.0,
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/prepare",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
     result = prepare_execution_for_user(
         user_id=current_user.id,
         exchange=payload.exchange,
@@ -845,25 +991,67 @@ def prepare_execution(
         side=payload.side,
         qty=payload.qty,
     )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/prepare",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=result,
+    )
     return result
 
 
 @router.post("/execution/binance/test-order", response_model=BinanceTestOrderOut)
 def execution_binance_test_order(
     payload: BinanceTestOrderRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="test_order",
+        exchange="BINANCE",
+    )
     _assert_exchange_enabled(
         db=db,
         current_user=current_user,
         exchange="BINANCE",
     )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+        symbol=payload.symbol,
+        qty=payload.qty,
+        price_estimate=0.0,
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/binance/test-order",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
     result = execute_binance_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
         side=payload.side,
         qty=payload.qty,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/binance/test-order",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=result,
     )
     return result
 
@@ -871,19 +1059,53 @@ def execution_binance_test_order(
 @router.post("/execution/ibkr/test-order", response_model=IbkrTestOrderOut)
 def execution_ibkr_test_order(
     payload: IbkrTestOrderRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="test_order",
+        exchange="IBKR",
+    )
     _assert_exchange_enabled(
         db=db,
         current_user=current_user,
         exchange="IBKR",
     )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+        symbol=payload.symbol,
+        qty=payload.qty,
+        price_estimate=0.0,
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/ibkr/test-order",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
     result = execute_ibkr_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
         side=payload.side,
         qty=payload.qty,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/ibkr/test-order",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=result,
     )
     return result
 

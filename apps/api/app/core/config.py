@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     ENFORCE_2FA_EMAILS: str = ""
     PASSWORD_MAX_AGE_DAYS: int = 0
     ENFORCE_PASSWORD_MAX_AGE: bool = False
+    TRADING_ENABLED_DEFAULT: bool = True
+    MAX_OPEN_QTY_PER_SYMBOL: float = 0.0
+    MAX_OPEN_NOTIONAL_PER_EXCHANGE: float = 0.0
+    IDEMPOTENCY_KEY_MAX_AGE_DAYS: int = 30
 
     model_config = ConfigDict(
         env_file=".env",

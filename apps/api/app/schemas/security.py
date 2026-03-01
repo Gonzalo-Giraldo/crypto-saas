@@ -116,3 +116,14 @@ class DashboardSummaryOut(BaseModel):
     profile_productivity: list[DashboardProfileProductivityOut]
     trends_7d: list[DashboardTrendDayOut]
     users: list[DashboardUserOut]
+
+
+class TradingControlUpdateRequest(BaseModel):
+    trading_enabled: bool
+    reason: Optional[str] = None
+
+
+class TradingControlOut(BaseModel):
+    trading_enabled: bool
+    updated_by: Optional[str] = None
+    reason: Optional[str] = None

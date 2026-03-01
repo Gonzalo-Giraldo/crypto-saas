@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
 from datetime import datetime, timezone
@@ -16,6 +16,15 @@ from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.risk_profiles import (
     apply_profile_daily_limits,
     resolve_risk_profile,
+)
+from apps.api.app.services.idempotency import (
+    consume_idempotent_response,
+    store_idempotent_response,
+)
+from apps.api.app.services.trading_controls import (
+    assert_exposure_limits,
+    assert_trading_enabled,
+    infer_exchange_from_symbol,
 )
 
 router = APIRouter(prefix="/positions", tags=["positions"])
@@ -43,9 +52,21 @@ def _log_and_raise_risk_block(
 def open_from_signal(
     signal_id: str,
     qty: float,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    req_payload = {"signal_id": signal_id, "qty": float(qty)}
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/positions/open_from_signal",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
     profile = resolve_risk_profile(db, current_user.id, current_user.email)
     s = db.execute(select(Signal).where(Signal.id == signal_id)).scalar_one_or_none()
     if not s:
@@ -57,6 +78,22 @@ def open_from_signal(
 
     if s.entry_price is None:
         raise HTTPException(status_code=400, detail="Signal missing entry_price")
+
+    inferred_exchange = infer_exchange_from_symbol(s.symbol)
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="position_open",
+        exchange=inferred_exchange,
+    )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange=inferred_exchange,
+        symbol=s.symbol,
+        qty=float(qty),
+        price_estimate=float(s.entry_price),
+    )
 
     open_positions = (
         db.execute(
@@ -157,6 +194,14 @@ def open_from_signal(
 
     db.commit()
     db.refresh(p)
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/positions/open_from_signal",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=PositionOut.model_validate(p).model_dump(),
+    )
     return p
 
 
