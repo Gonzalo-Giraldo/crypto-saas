@@ -328,6 +328,67 @@ curl -s -X POST "$BASE_URL/ops/strategy/assign" \
 Nota:
 - Con esta segregacion, la API bloquea `exchange-secrets` y `execution` cuando el exchange esta deshabilitado para el usuario.
 
+## 5.1 Prueba manual kill-switch (ON/OFF)
+
+Objetivo:
+- Validar bloqueo global de trading por admin.
+- Validar retorno a flujo normal tras reactivar.
+
+Precondiciones:
+- `ADMIN_TOKEN` valido (admin operativo).
+- `TOKEN` valido de trader operativo.
+- Se usa endpoint de pretrade como verificacion no destructiva.
+
+1) Ver estado actual:
+
+```bash
+curl -s "$BASE_URL/ops/admin/trading-control" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+2) Apagar trading:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/trading-control" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"trading_enabled":false,"reason":"manual kill-switch test"}'
+```
+
+3) Validar bloqueo en pretrade:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/execution/pretrade/binance/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01,"rr_estimate":1.6,"trend_tf":"4H","signal_tf":"1H","timing_tf":"15M","spread_bps":7,"slippage_bps":10,"volume_24h_usdt":90000000}'
+```
+
+Esperado:
+- `detail` contiene `Trading is globally disabled by admin kill-switch`.
+
+4) Encender trading:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/trading-control" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"trading_enabled":true,"reason":"manual kill-switch test end"}'
+```
+
+5) Reprobar pretrade:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/execution/pretrade/binance/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"symbol":"BTCUSDT","side":"BUY","qty":0.01,"rr_estimate":1.6,"trend_tf":"4H","signal_tf":"1H","timing_tf":"15M","spread_bps":7,"slippage_bps":10,"volume_24h_usdt":90000000}'
+```
+
+Esperado:
+- Ya no aparece error de kill-switch.
+- Si falla, debe ser por regla operativa normal (por ejemplo estrategia/secretos/configuracion de exchange).
+
 ## 6) Rotacion de clave de cifrado (cambio controlado)
 
 Precondiciones:
