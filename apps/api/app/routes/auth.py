@@ -89,17 +89,17 @@ def _issued_at_after_revocation(
     user_id: str,
 ) -> datetime:
     now = datetime.utcnow()
+    now_ts = int(now.timestamp())
     row = (
         db.query(SessionRevocation)
         .filter(SessionRevocation.user_id == user_id)
         .first()
     )
     if not row:
-        return now
-    marker = row.revoked_after.replace(tzinfo=None)
-    if now <= marker:
-        return marker + timedelta(seconds=1)
-    return now
+        return datetime.utcfromtimestamp(now_ts)
+    marker_ts = int(row.revoked_after.replace(tzinfo=None).timestamp())
+    target_ts = max(now_ts, marker_ts + 1)
+    return datetime.utcfromtimestamp(target_ts)
 
 
 @router.post("/login")
@@ -251,10 +251,12 @@ def refresh_tokens(
     token_iat = token_payload.get("iat")
     if session_revoke and token_iat:
         try:
-            iat_dt = datetime.utcfromtimestamp(int(token_iat))
+            iat_ts = int(token_iat)
+            revoke_cutoff_ts = int(session_revoke.revoked_after.replace(tzinfo=None).timestamp())
         except Exception:
-            iat_dt = None
-        if iat_dt and iat_dt <= session_revoke.revoked_after.replace(tzinfo=None):
+            iat_ts = None
+            revoke_cutoff_ts = None
+        if iat_ts is not None and revoke_cutoff_ts is not None and iat_ts <= revoke_cutoff_ts:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session revoked",

@@ -81,10 +81,12 @@ def get_current_user(
     )
     if session_revoke and token_iat:
         try:
-            iat_dt = datetime.utcfromtimestamp(int(token_iat))
+            iat_ts = int(token_iat)
+            revoke_cutoff_ts = int(session_revoke.revoked_after.replace(tzinfo=None).timestamp())
         except Exception:
-            iat_dt = None
-        if iat_dt and iat_dt <= session_revoke.revoked_after.replace(tzinfo=None):
+            iat_ts = None
+            revoke_cutoff_ts = None
+        if iat_ts is not None and revoke_cutoff_ts is not None and iat_ts <= revoke_cutoff_ts:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session revoked",
