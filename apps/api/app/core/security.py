@@ -24,22 +24,26 @@ def get_password_hash(password: str) -> str:
 def create_access_token(
     data: dict,
     expires_delta: Optional[timedelta] = None,
+    issued_at: Optional[datetime] = None,
 ):
     return create_token(
         data=data,
         token_type="access",
         expires_delta=expires_delta or timedelta(minutes=60),
+        issued_at=issued_at,
     )
 
 
 def create_refresh_token(
     data: dict,
     expires_delta: Optional[timedelta] = None,
+    issued_at: Optional[datetime] = None,
 ):
     return create_token(
         data=data,
         token_type="refresh",
         expires_delta=expires_delta or timedelta(days=7),
+        issued_at=issued_at,
     )
 
 
@@ -47,13 +51,15 @@ def create_token(
     data: dict,
     token_type: str,
     expires_delta: timedelta,
+    issued_at: Optional[datetime] = None,
 ):
     to_encode = data.copy()
-    expire = datetime.utcnow() + expires_delta
+    iat = issued_at or datetime.utcnow()
+    expire = iat + expires_delta
     to_encode.update(
         {
             "exp": expire,
-            "iat": datetime.utcnow(),
+            "iat": iat,
             "typ": token_type,
             "jti": str(uuid.uuid4()),
         }

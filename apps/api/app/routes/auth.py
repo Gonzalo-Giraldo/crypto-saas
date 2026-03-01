@@ -84,6 +84,24 @@ def _enforced_2fa_emails() -> set[str]:
     }
 
 
+def _issued_at_after_revocation(
+    db: Session,
+    user_id: str,
+) -> datetime:
+    now = datetime.utcnow()
+    row = (
+        db.query(SessionRevocation)
+        .filter(SessionRevocation.user_id == user_id)
+        .first()
+    )
+    if not row:
+        return now
+    marker = row.revoked_after.replace(tzinfo=None)
+    if now <= marker:
+        return marker + timedelta(seconds=1)
+    return now
+
+
 @router.post("/login")
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -143,6 +161,7 @@ def login(
                 detail="Invalid OTP",
             )
 
+    issued_at = _issued_at_after_revocation(db, user.id)
     access_token = create_access_token(
         data={
             "sub": user.email,
@@ -150,6 +169,7 @@ def login(
             "uid": user.id,
         },
         expires_delta=timedelta(minutes=60),
+        issued_at=issued_at,
     )
     refresh_token = create_refresh_token(
         data={
@@ -158,6 +178,7 @@ def login(
             "uid": user.id,
         },
         expires_delta=timedelta(days=7),
+        issued_at=issued_at,
     )
 
     log_audit_event(
@@ -240,6 +261,7 @@ def refresh_tokens(
             )
 
     _revoke_token_payload(db, token_payload, user.id)
+    issued_at = _issued_at_after_revocation(db, user.id)
     new_access = create_access_token(
         data={
             "sub": user.email,
@@ -247,6 +269,7 @@ def refresh_tokens(
             "uid": user.id,
         },
         expires_delta=timedelta(minutes=60),
+        issued_at=issued_at,
     )
     new_refresh = create_refresh_token(
         data={
@@ -255,6 +278,7 @@ def refresh_tokens(
             "uid": user.id,
         },
         expires_delta=timedelta(days=7),
+        issued_at=issued_at,
     )
     log_audit_event(
         db,
