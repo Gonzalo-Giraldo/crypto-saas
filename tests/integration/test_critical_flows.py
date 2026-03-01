@@ -403,3 +403,24 @@ def test_idempotency_admin_stats_and_cleanup_admin_only(client):
     cleaned = client.post("/ops/admin/idempotency/cleanup", headers=_auth(admin_token))
     assert cleaned.status_code == 200, cleaned.text
     assert "deleted" in cleaned.json()
+
+
+def test_backoffice_rbac_viewer_readonly(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    viewer_token = _token(client, "viewer@test.com", "ViewerPass123!")
+
+    summary = client.get("/ops/backoffice/summary", headers=_auth(viewer_token))
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["tenant_id"] == "default"
+    assert summary.json()["viewers"] >= 1
+
+    users = client.get("/ops/backoffice/users", headers=_auth(viewer_token))
+    assert users.status_code == 200, users.text
+    assert any(row["email"] == "viewer@test.com" for row in users.json())
+
+    blocked_admin_control = client.get("/ops/admin/trading-control", headers=_auth(viewer_token))
+    assert blocked_admin_control.status_code == 403
+
+    # Admin still has access to sensitive admin endpoint.
+    allowed_admin_control = client.get("/ops/admin/trading-control", headers=_auth(admin_token))
+    assert allowed_admin_control.status_code == 200

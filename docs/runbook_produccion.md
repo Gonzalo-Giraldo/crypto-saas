@@ -171,6 +171,26 @@ UI web:
   - razon principal de bloqueo,
   - 2FA, asignaciones y secretos en una sola vista.
 
+RBAC operativo por tenant:
+- roles soportados: `admin`, `operator`, `viewer`, `trader`, `disabled`.
+- `admin`: gestion completa.
+- `operator`: lectura de backoffice y operacion diaria sin cambios sensibles de seguridad.
+- `viewer`: solo lectura de backoffice.
+- `trader`: operacion de su propia cuenta.
+- `disabled`: acceso bloqueado.
+
+Backoffice de solo lectura (admin/operator/viewer):
+
+```bash
+curl -s "$BASE_URL/ops/backoffice/summary?real_only=true" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```bash
+curl -s "$BASE_URL/ops/backoffice/users?real_only=true" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 Artifact diario de snapshot:
 - Workflow: `Security Posture Daily`
 - Artifact: `security-posture-daily-<run_id>`

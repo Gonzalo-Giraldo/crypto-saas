@@ -28,6 +28,7 @@ from apps.api.app.services.risk_profiles import list_profile_names, resolve_risk
 from apps.api.app.services.strategy_assignments import is_exchange_enabled_for_user
 
 router = APIRouter(prefix="/users", tags=["users"])
+ALLOWED_USER_ROLES = {"admin", "operator", "viewer", "trader", "disabled"}
 
 
 def _tenant_id(user: User) -> str:
@@ -82,7 +83,7 @@ def _build_user_readiness(db: Session, user: User) -> dict:
     checks.append(
         {
             "name": "role_allowed",
-            "passed": user.role in {"admin", "trader", "disabled"},
+            "passed": user.role in ALLOWED_USER_ROLES,
             "detail": user.role,
         }
     )
@@ -211,10 +212,10 @@ def update_user_role(
     current_user: User = Depends(require_role("admin")),
 ):
     normalized_role = (payload.role or "").strip().lower()
-    if normalized_role not in {"admin", "trader", "disabled"}:
+    if normalized_role not in ALLOWED_USER_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="role must be admin, trader, or disabled",
+            detail="role must be one of: admin, operator, viewer, trader, disabled",
         )
 
     user = _tenant_user_or_404(db, user_id, current_user)

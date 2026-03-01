@@ -64,6 +64,13 @@ def client():
                 role="trader",
             )
         )
+        db.add(
+            User(
+                email="viewer@test.com",
+                hashed_password=get_password_hash("ViewerPass123!"),
+                role="viewer",
+            )
+        )
         db.commit()
     finally:
         db.close()

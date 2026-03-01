@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from apps.api.app.api.deps import get_current_user, require_role
+from apps.api.app.api.deps import get_current_user, require_any_role, require_role
 from apps.api.app.db.session import get_db
 from apps.api.app.models.audit_log import AuditLog
 from apps.api.app.models.daily_risk import DailyRiskState
@@ -52,6 +52,8 @@ from apps.api.app.schemas.security import (
     TradingControlUpdateRequest,
     IdempotencyStatsOut,
     IdempotencyCleanupOut,
+    BackofficeSummaryOut,
+    BackofficeUserOut,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -148,7 +150,7 @@ def _build_security_posture_rows(
         if stale:
             stale_secrets += 1
 
-        if user.role in {"admin", "trader"} and not two_factor_enabled:
+        if user.role in {"admin", "operator", "viewer", "trader"} and not two_factor_enabled:
             missing_2fa += 1
 
         posture_rows.append(
@@ -531,6 +533,105 @@ def _build_exit_checks(
 @router.get("/health")
 def ops_health():
     return {"system_state": "OK", "note": "placeholder"}
+
+
+@router.get("/backoffice/summary", response_model=BackofficeSummaryOut)
+def backoffice_summary(
+    real_only: bool = True,
+    max_secret_age_days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("admin", "operator", "viewer")),
+):
+    tenant = _tenant_id(current_user)
+    now, posture_rows, missing_2fa, stale_secrets = _build_security_posture_rows(
+        db,
+        tenant_id=tenant,
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+    )
+    _ = now
+    counts = {"admin": 0, "operator": 0, "viewer": 0, "trader": 0, "disabled": 0}
+    for row in posture_rows:
+        role = (row.role or "").lower()
+        if role in counts:
+            counts[role] += 1
+
+    return BackofficeSummaryOut(
+        tenant_id=tenant,
+        total_users=len(posture_rows),
+        admins=counts["admin"],
+        operators=counts["operator"],
+        viewers=counts["viewer"],
+        traders=counts["trader"],
+        disabled=counts["disabled"],
+        users_missing_2fa=missing_2fa,
+        users_with_stale_secrets=stale_secrets,
+    )
+
+
+@router.get("/backoffice/users", response_model=list[BackofficeUserOut])
+def backoffice_users(
+    real_only: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_role("admin", "operator", "viewer")),
+):
+    tenant = _tenant_id(current_user)
+    users = db.execute(
+        select(User)
+        .where(User.tenant_id == tenant)
+        .order_by(User.email.asc())
+    ).scalars().all()
+
+    out = []
+    for u in users:
+        if real_only and not _is_real_user_email(u.email):
+            continue
+
+        user_2fa = (
+            db.execute(select(UserTwoFactor).where(UserTwoFactor.user_id == u.id))
+            .scalar_one_or_none()
+        )
+        two_factor_enabled = bool(user_2fa and user_2fa.enabled)
+
+        secrets = db.execute(
+            select(ExchangeSecret.exchange).where(ExchangeSecret.user_id == u.id)
+        ).all()
+        secret_set = {row[0] for row in secrets}
+        binance_secret = "BINANCE" in secret_set
+        ibkr_secret = "IBKR" in secret_set
+
+        assignment_rows = db.execute(
+            select(StrategyAssignment.exchange, StrategyAssignment.enabled).where(
+                StrategyAssignment.user_id == u.id
+            )
+        ).all()
+        enabled_map = {exchange: bool(enabled) for exchange, enabled in assignment_rows}
+        binance_enabled = bool(enabled_map.get("BINANCE", False))
+        ibkr_enabled = bool(enabled_map.get("IBKR", False))
+
+        checks = []
+        if u.role in {"admin", "operator", "viewer", "trader"}:
+            checks.append(two_factor_enabled)
+        if binance_enabled:
+            checks.append(binance_secret)
+        if ibkr_enabled:
+            checks.append(ibkr_secret)
+        readiness = "READY" if all(checks) else "MISSING"
+
+        out.append(
+            BackofficeUserOut(
+                user_id=u.id,
+                email=u.email,
+                role=u.role,
+                two_factor_enabled=two_factor_enabled,
+                binance_enabled=binance_enabled,
+                ibkr_enabled=ibkr_enabled,
+                binance_secret_configured=binance_secret,
+                ibkr_secret_configured=ibkr_secret,
+                readiness=readiness,
+            )
+        )
+    return out
 
 
 @router.get("/admin/trading-control", response_model=TradingControlOut)

@@ -139,3 +139,27 @@ class IdempotencyStatsOut(BaseModel):
 class IdempotencyCleanupOut(BaseModel):
     deleted: int
     max_age_days: int
+
+
+class BackofficeSummaryOut(BaseModel):
+    tenant_id: str
+    total_users: int
+    admins: int
+    operators: int
+    viewers: int
+    traders: int
+    disabled: int
+    users_missing_2fa: int
+    users_with_stale_secrets: int
+
+
+class BackofficeUserOut(BaseModel):
+    user_id: str
+    email: str
+    role: str
+    two_factor_enabled: bool
+    binance_enabled: bool
+    ibkr_enabled: bool
+    binance_secret_configured: bool
+    ibkr_secret_configured: bool
+    readiness: str

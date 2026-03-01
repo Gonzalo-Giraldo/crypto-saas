@@ -120,3 +120,21 @@ def require_role(required_role: str):
         return current_user
 
     return role_checker
+
+
+def require_any_role(*allowed_roles: str):
+    allowed = {r.strip().lower() for r in allowed_roles if r and r.strip()}
+    if not allowed:
+        raise ValueError("require_any_role needs at least one role")
+
+    def role_checker(
+        current_user: User = Depends(get_current_user),
+    ):
+        if current_user.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return current_user
+
+    return role_checker
