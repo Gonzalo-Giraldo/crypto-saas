@@ -36,6 +36,11 @@ uvicorn apps.api.app.main:app --reload
 scripts/run_scenario.sh
 ```
 
+6. Run integration tests:
+```bash
+pytest -q tests/integration
+```
+
 ## Main endpoints
 - `POST /auth/register`
 - `POST /auth/login`
@@ -137,7 +142,16 @@ scripts/run_scenario.sh
   - Automatic remediation after final failure (redeploy hook + one extra smoke attempt)
   - Automatic issue creation only after 2 consecutive smoke failures
   - Automatic issue close when smoke recovers
-  - Fixed CI smoke user (`SMOKE_EMAIL` optional; defaults to `smoke.ci@example.com`)
+- Fixed CI smoke user (`SMOKE_EMAIL` optional; defaults to `smoke.ci@example.com`)
+
+## Integration Tests
+- Workflow: `.github/workflows/integration-tests.yml`
+- Scope (`tests/integration`):
+  - auth + 2FA flow
+  - exchange secrets lifecycle
+  - pretrade checks
+  - binance/ibkr test-order endpoints (stubbed runtime)
+  - security posture admin-only access
 
 ## Dual Ops Daily
 - Automated two-user daily validation script: `scripts/dual_ops_daily.sh`
