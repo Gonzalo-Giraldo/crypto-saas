@@ -1526,23 +1526,27 @@ def dashboard_page():
         .join("");
     }
 
-    function renderAdminUsers() {
+    function renderAdminUsers(preferredUserId = "") {
       const users = adminState.users || [];
+      const current = preferredUserId || selectedUserId();
       byId("adminUserSelect").innerHTML = users
         .map((u) => `<option value="${u.id}">${u.email} | ${u.role} | ${u.risk_profile}</option>`)
         .join("");
+      if (current && users.some((u) => u.id === current)) {
+        byId("adminUserSelect").value = current;
+      }
 
       byId("adminUsersBody").innerHTML = users.map((u) => `<tr>
         <td>${u.email}</td><td>${u.role}</td><td>${u.risk_profile || "-"}</td><td>${u.risk_profile_source || "-"}</td>
       </tr>`).join("") || '<tr><td colspan="4" class="muted">No users found</td></tr>';
     }
 
-    async function loadAdminUsers() {
+    async function loadAdminUsers(preferredUserId = "") {
       const token = byId("token").value.trim();
       if (!token) return;
       const users = await apiJson("/users", token, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
       adminState.users = users || [];
-      renderAdminUsers();
+      renderAdminUsers(preferredUserId);
     }
 
     async function runReadinessCheck(userId) {
@@ -1635,7 +1639,8 @@ def dashboard_page():
     });
     byId("refreshUsersBtn").addEventListener("click", async () => {
       try {
-        await loadAdminUsers();
+        const keepId = selectedUserId();
+        await loadAdminUsers(keepId);
         await runReadinessCheck(selectedUserId());
         setAdminMsg("Users refreshed.");
       } catch (e) {
@@ -1654,7 +1659,7 @@ def dashboard_page():
           body: JSON.stringify({ email, password }),
         });
         byId("newUserPassword").value = "";
-        await loadAdminUsers();
+        await loadAdminUsers(selectedUserId());
         await runReadinessCheck(selectedUserId());
         setAdminMsg(`User created: ${email}`);
       } catch (e) {
@@ -1672,7 +1677,7 @@ def dashboard_page():
           method: "PATCH",
           body: JSON.stringify({ role }),
         });
-        await loadAdminUsers();
+        await loadAdminUsers(user.id);
         setAdminMsg(`Role updated for ${user.email}: ${role}`);
         await runReadinessCheck(user.id);
       } catch (e) {
@@ -1692,7 +1697,7 @@ def dashboard_page():
           body: JSON.stringify({ email }),
         });
         byId("newEmailInput").value = "";
-        await loadAdminUsers();
+        await loadAdminUsers(user.id);
         setAdminMsg(`Email updated for user id ${user.id}`);
         await runReadinessCheck(user.id);
       } catch (e) {
@@ -1710,7 +1715,7 @@ def dashboard_page():
           method: "PUT",
           body: JSON.stringify({ profile_name }),
         });
-        await loadAdminUsers();
+        await loadAdminUsers(user.id);
         setAdminMsg(`Risk profile updated for ${user.email}: ${profile_name}`);
         await runReadinessCheck(user.id);
       } catch (e) {
@@ -1727,7 +1732,7 @@ def dashboard_page():
           method: "PUT",
           body: JSON.stringify({ profile_name: null }),
         });
-        await loadAdminUsers();
+        await loadAdminUsers(user.id);
         setAdminMsg(`Risk override cleared for ${user.email}`);
         await runReadinessCheck(user.id);
       } catch (e) {
