@@ -27,5 +27,6 @@ jobs:
 
       - name: Run integration tests
         run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          python -c "import sys; print(sys.path[0]); import apps; print('apps import ok')"
           pytest -q tests/integration
-
