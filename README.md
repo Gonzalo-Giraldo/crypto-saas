@@ -44,6 +44,9 @@ pytest -q tests/integration
 ## Main endpoints
 - `POST /auth/register`
 - `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/revoke-all`
 - `POST /auth/2fa/setup`
 - `POST /auth/2fa/verify-enable`
 - `POST /auth/2fa/disable`
@@ -89,6 +92,10 @@ pytest -q tests/integration
 - Current focus is crypto flow.
 - Worker notifications support Telegram via optional env vars.
 - If 2FA is enabled for a user, `/auth/login` requires the `otp` form field.
+- `/auth/login` now returns `access_token` + `refresh_token`.
+- `/auth/refresh` rotates refresh token and returns a new pair.
+- `/auth/logout` revokes current access token (and optional refresh token).
+- `/auth/revoke-all` revokes all previous sessions for current user.
 - Optional hardening:
   - `ENFORCE_2FA_FOR_ADMINS=true` forces admins to have 2FA enabled.
   - `ENFORCE_2FA_EMAILS=user1@dominio.com,user2@dominio.com` forces those accounts to have 2FA enabled.

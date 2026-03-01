@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import uuid
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -24,14 +25,39 @@ def create_access_token(
     data: dict,
     expires_delta: Optional[timedelta] = None,
 ):
+    return create_token(
+        data=data,
+        token_type="access",
+        expires_delta=expires_delta or timedelta(minutes=60),
+    )
+
+
+def create_refresh_token(
+    data: dict,
+    expires_delta: Optional[timedelta] = None,
+):
+    return create_token(
+        data=data,
+        token_type="refresh",
+        expires_delta=expires_delta or timedelta(days=7),
+    )
+
+
+def create_token(
+    data: dict,
+    token_type: str,
+    expires_delta: timedelta,
+):
     to_encode = data.copy()
-
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=60)
-
-    to_encode.update({"exp": expire})
+    expire = datetime.utcnow() + expires_delta
+    to_encode.update(
+        {
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "typ": token_type,
+            "jti": str(uuid.uuid4()),
+        }
+    )
 
     encoded_jwt = jwt.encode(
         to_encode,

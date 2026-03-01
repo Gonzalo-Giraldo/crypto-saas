@@ -1,14 +1,15 @@
 import pyotp
+from typing import Optional
 
 
-def _login(client, username: str, password: str, otp: str | None = None):
+def _login(client, username: str, password: str, otp: Optional[str] = None):
     data = {"username": username, "password": password}
     if otp:
         data["otp"] = otp
     return client.post("/auth/login", data=data)
 
 
-def _token(client, username: str, password: str, otp: str | None = None) -> str:
+def _token(client, username: str, password: str, otp: Optional[str] = None) -> str:
     resp = _login(client, username, password, otp)
     assert resp.status_code == 200, resp.text
     return resp.json()["access_token"]
@@ -153,3 +154,55 @@ def test_security_posture_admin_only(client):
     assert "summary" in data
     assert "users" in data
     assert data["summary"]["total_users"] >= 1
+
+
+def test_refresh_token_rotation_and_logout_revocation(client):
+    login = _login(client, "trader@test.com", "TraderPass123!")
+    assert login.status_code == 200, login.text
+    login_data = login.json()
+    access = login_data["access_token"]
+    refresh = login_data["refresh_token"]
+
+    refreshed = client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert refreshed.status_code == 200, refreshed.text
+    refreshed_data = refreshed.json()
+    new_access = refreshed_data["access_token"]
+    new_refresh = refreshed_data["refresh_token"]
+    assert new_access != access
+    assert new_refresh != refresh
+
+    # Old refresh token must be revoked after rotation.
+    old_refresh_reuse = client.post("/auth/refresh", json={"refresh_token": refresh})
+    assert old_refresh_reuse.status_code == 401
+
+    # Logout revokes active access + refresh.
+    logout = client.post(
+        "/auth/logout",
+        headers=_auth(new_access),
+        json={"refresh_token": new_refresh},
+    )
+    assert logout.status_code == 200, logout.text
+
+    me_after_logout = client.get("/users/me", headers=_auth(new_access))
+    assert me_after_logout.status_code == 401
+
+
+def test_revoke_all_invalidates_previous_sessions(client):
+    login1 = _login(client, "admin@test.com", "AdminPass123!")
+    assert login1.status_code == 200, login1.text
+    old_access = login1.json()["access_token"]
+    old_refresh = login1.json()["refresh_token"]
+
+    revoke_all = client.post("/auth/revoke-all", headers=_auth(old_access))
+    assert revoke_all.status_code == 200, revoke_all.text
+
+    me_old = client.get("/users/me", headers=_auth(old_access))
+    assert me_old.status_code == 401
+
+    refresh_old = client.post("/auth/refresh", json={"refresh_token": old_refresh})
+    assert refresh_old.status_code == 401
+
+    login2 = _login(client, "admin@test.com", "AdminPass123!")
+    assert login2.status_code == 200, login2.text
+    me_new = client.get("/users/me", headers=_auth(login2.json()["access_token"]))
+    assert me_new.status_code == 200

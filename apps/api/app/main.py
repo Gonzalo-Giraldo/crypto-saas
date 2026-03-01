@@ -10,6 +10,8 @@ import apps.api.app.models.audit_log
 import apps.api.app.models.exchange_secret
 import apps.api.app.models.strategy_assignment
 import apps.api.app.models.user_risk_profile
+import apps.api.app.models.revoked_token
+import apps.api.app.models.session_revocation
 
 from fastapi import FastAPI
 

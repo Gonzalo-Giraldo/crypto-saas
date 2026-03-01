@@ -1,8 +1,12 @@
+from datetime import datetime
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from apps.api.app.db.session import get_db
+from apps.api.app.models.session_revocation import SessionRevocation
+from apps.api.app.models.revoked_token import RevokedToken
 from apps.api.app.models.user import User
 from apps.api.app.core.security import decode_token
 
@@ -27,12 +31,31 @@ def get_current_user(
         )
 
     user_email = payload.get("sub")
+    token_type = payload.get("typ")
+    token_jti = payload.get("jti")
+    token_iat = payload.get("iat")
 
     if user_email is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
         )
+    if token_type != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+    if token_jti:
+        revoked = (
+            db.query(RevokedToken)
+            .filter(RevokedToken.jti == token_jti)
+            .first()
+        )
+        if revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token revoked",
+            )
 
     user = (
         db.query(User)
@@ -50,6 +73,22 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is disabled",
         )
+
+    session_revoke = (
+        db.query(SessionRevocation)
+        .filter(SessionRevocation.user_id == user.id)
+        .first()
+    )
+    if session_revoke and token_iat:
+        try:
+            iat_dt = datetime.utcfromtimestamp(int(token_iat))
+        except Exception:
+            iat_dt = None
+        if iat_dt and iat_dt <= session_revoke.revoked_after.replace(tzinfo=None):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session revoked",
+            )
 
     return user
 

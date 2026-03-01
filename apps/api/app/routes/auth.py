@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, status
@@ -7,14 +7,18 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 import pyotp
 
-from apps.api.app.api.deps import get_current_user
+from apps.api.app.api.deps import get_current_user, oauth2_scheme
 from apps.api.app.db.session import get_db
+from apps.api.app.models.session_revocation import SessionRevocation
 from apps.api.app.models.user_2fa import UserTwoFactor
+from apps.api.app.models.revoked_token import RevokedToken
 from apps.api.app.models.user import User
 from apps.api.app.core.security import (
     verify_password,
     get_password_hash,
     create_access_token,
+    create_refresh_token,
+    decode_token,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.services.audit import log_audit_event
@@ -29,6 +33,46 @@ class RegisterRequest(BaseModel):
 
 class Enable2FARequest(BaseModel):
     otp: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
+def _token_exp_to_datetime(exp_value) -> Optional[datetime]:
+    try:
+        return datetime.utcfromtimestamp(int(exp_value))
+    except Exception:
+        return None
+
+
+def _revoke_token_payload(
+    db: Session,
+    payload: dict,
+    user_id: str,
+):
+    jti = payload.get("jti")
+    if not jti:
+        return
+    exists = (
+        db.query(RevokedToken)
+        .filter(RevokedToken.jti == jti)
+        .first()
+    )
+    if exists:
+        return
+    db.add(
+        RevokedToken(
+            jti=jti,
+            user_id=user_id,
+            token_type=str(payload.get("typ") or "unknown"),
+            expires_at=_token_exp_to_datetime(payload.get("exp")),
+        )
+    )
 
 
 def _enforced_2fa_emails() -> set[str]:
@@ -103,8 +147,17 @@ def login(
         data={
             "sub": user.email,
             "role": user.role,
+            "uid": user.id,
         },
         expires_delta=timedelta(minutes=60),
+    )
+    refresh_token = create_refresh_token(
+        data={
+            "sub": user.email,
+            "role": user.role,
+            "uid": user.id,
+        },
+        expires_delta=timedelta(days=7),
     )
 
     log_audit_event(
@@ -119,8 +172,171 @@ def login(
 
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
     }
+
+
+@router.post("/refresh")
+def refresh_tokens(
+    payload: RefreshRequest,
+    db: Session = Depends(get_db),
+):
+    token_payload = decode_token(payload.refresh_token)
+    if not token_payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+    if token_payload.get("typ") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+    jti = token_payload.get("jti")
+    if jti:
+        revoked = (
+            db.query(RevokedToken)
+            .filter(RevokedToken.jti == jti)
+            .first()
+        )
+        if revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token revoked",
+            )
+
+    user_email = token_payload.get("sub")
+    user = (
+        db.query(User)
+        .filter(User.email == user_email)
+        .first()
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+    if user.role == "disabled":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is disabled",
+        )
+    session_revoke = (
+        db.query(SessionRevocation)
+        .filter(SessionRevocation.user_id == user.id)
+        .first()
+    )
+    token_iat = token_payload.get("iat")
+    if session_revoke and token_iat:
+        try:
+            iat_dt = datetime.utcfromtimestamp(int(token_iat))
+        except Exception:
+            iat_dt = None
+        if iat_dt and iat_dt <= session_revoke.revoked_after.replace(tzinfo=None):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session revoked",
+            )
+
+    _revoke_token_payload(db, token_payload, user.id)
+    new_access = create_access_token(
+        data={
+            "sub": user.email,
+            "role": user.role,
+            "uid": user.id,
+        },
+        expires_delta=timedelta(minutes=60),
+    )
+    new_refresh = create_refresh_token(
+        data={
+            "sub": user.email,
+            "role": user.role,
+            "uid": user.id,
+        },
+        expires_delta=timedelta(days=7),
+    )
+    log_audit_event(
+        db,
+        action="auth.refresh.success",
+        user_id=user.id,
+        entity_type="user",
+        entity_id=user.id,
+        details={"email": user.email},
+    )
+    db.commit()
+
+    return {
+        "access_token": new_access,
+        "refresh_token": new_refresh,
+        "token_type": "bearer",
+    }
+
+
+@router.post("/logout")
+def logout(
+    payload: LogoutRequest,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    access_payload = decode_token(token)
+    if access_payload:
+        _revoke_token_payload(db, access_payload, current_user.id)
+
+    if payload.refresh_token:
+        refresh_payload = decode_token(payload.refresh_token)
+        if refresh_payload and refresh_payload.get("sub") == current_user.email:
+            _revoke_token_payload(db, refresh_payload, current_user.id)
+
+    log_audit_event(
+        db,
+        action="auth.logout.success",
+        user_id=current_user.id,
+        entity_type="user",
+        entity_id=current_user.id,
+        details={"email": current_user.email},
+    )
+    db.commit()
+    return {"message": "Session revoked"}
+
+
+@router.post("/revoke-all")
+def revoke_all_sessions(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    access_payload = decode_token(token)
+    if access_payload:
+        _revoke_token_payload(db, access_payload, current_user.id)
+
+    row = (
+        db.query(SessionRevocation)
+        .filter(SessionRevocation.user_id == current_user.id)
+        .first()
+    )
+    now = datetime.utcnow()
+    if row:
+        row.revoked_after = now
+    else:
+        db.add(
+            SessionRevocation(
+                user_id=current_user.id,
+                revoked_after=now,
+            )
+        )
+
+    log_audit_event(
+        db,
+        action="auth.revoke_all.requested",
+        user_id=current_user.id,
+        entity_type="user",
+        entity_id=current_user.id,
+        details={"email": current_user.email},
+    )
+    db.commit()
+    return {"message": "All previous sessions revoked"}
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
