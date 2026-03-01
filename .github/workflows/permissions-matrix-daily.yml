@@ -26,10 +26,12 @@ jobs:
       USER1_PASSWORD: ${{ secrets.DUAL_USER1_PASSWORD }}
       USER1_OTP: ${{ secrets.DUAL_USER1_OTP }}
       USER1_TOTP_SECRET: ${{ secrets.DUAL_USER1_TOTP_SECRET }}
+      USER1_EXPECTED_ROLE: ${{ secrets.DUAL_USER1_EXPECTED_ROLE != '' && secrets.DUAL_USER1_EXPECTED_ROLE || 'trader' }}
       USER2_EMAIL: ${{ secrets.DUAL_USER2_EMAIL }}
       USER2_PASSWORD: ${{ secrets.DUAL_USER2_PASSWORD }}
       USER2_OTP: ${{ secrets.DUAL_USER2_OTP }}
       USER2_TOTP_SECRET: ${{ secrets.DUAL_USER2_TOTP_SECRET }}
+      USER2_EXPECTED_ROLE: ${{ secrets.DUAL_USER2_EXPECTED_ROLE != '' && secrets.DUAL_USER2_EXPECTED_ROLE || 'admin' }}
       DISABLED_EMAIL: ${{ secrets.DUAL_DISABLED_EMAIL }}
       DISABLED_PASSWORD: ${{ secrets.DUAL_DISABLED_PASSWORD }}
     steps:
@@ -163,4 +165,3 @@ jobs:
       - name: Fail job if matrix failed
         if: steps.run_matrix.outcome == 'failure'
         run: exit 1
-

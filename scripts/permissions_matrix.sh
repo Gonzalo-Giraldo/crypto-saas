@@ -14,6 +14,8 @@ USER2_EMAIL="${USER2_EMAIL:-}"
 USER2_PASSWORD="${USER2_PASSWORD:-}"
 USER2_OTP="${USER2_OTP:-}"
 USER2_TOTP_SECRET="${USER2_TOTP_SECRET:-}"
+USER1_EXPECTED_ROLE="${USER1_EXPECTED_ROLE:-trader}"
+USER2_EXPECTED_ROLE="${USER2_EXPECTED_ROLE:-admin}"
 DISABLED_EMAIL="${DISABLED_EMAIL:-}"
 DISABLED_PASSWORD="${DISABLED_PASSWORD:-}"
 
@@ -146,6 +148,8 @@ echo "USER1_EMAIL=$USER1_EMAIL"
 if [[ -n "$USER2_EMAIL" ]]; then
   echo "USER2_EMAIL=$USER2_EMAIL"
 fi
+echo "USER1_EXPECTED_ROLE=$USER1_EXPECTED_ROLE"
+echo "USER2_EXPECTED_ROLE=$USER2_EXPECTED_ROLE"
 
 echo
 echo "[A] Health"
@@ -187,7 +191,7 @@ if [[ "${#USER1_TOKEN}" -le 100 && -n "$USER1_TOTP_SECRET" ]]; then
   fi
 fi
 if [[ "${#USER1_TOKEN}" -gt 100 ]]; then
-  pass "user1 login (trader)"
+  pass "user1 login ($USER1_EXPECTED_ROLE)"
 else
   fail "user1 login failed: $USER1_RESP"
 fi
@@ -204,7 +208,7 @@ if [[ -n "$USER2_EMAIL" && -n "$USER2_PASSWORD" ]]; then
     fi
   fi
   if [[ "${#USER2_TOKEN}" -gt 100 ]]; then
-    pass "user2 login (trader)"
+    pass "user2 login ($USER2_EXPECTED_ROLE)"
   else
     fail "user2 login failed: $USER2_RESP"
   fi
@@ -226,18 +230,18 @@ else
 fi
 
 user1_role=$(user_me_field "$USER1_TOKEN" "role")
-if [[ "$user1_role" == "trader" ]]; then
+if [[ "$user1_role" == "$USER1_EXPECTED_ROLE" ]]; then
   pass "user1 role assertion"
 else
-  fail "user1 role assertion failed: expected=trader got=$user1_role (check DUAL_USER1_EMAIL/PASSWORD)"
+  fail "user1 role assertion failed: expected=$USER1_EXPECTED_ROLE got=$user1_role (check DUAL_USER1_EMAIL/PASSWORD)"
 fi
 
 if [[ -n "$USER2_TOKEN" ]]; then
   user2_role=$(user_me_field "$USER2_TOKEN" "role")
-  if [[ "$user2_role" == "trader" ]]; then
+  if [[ "$user2_role" == "$USER2_EXPECTED_ROLE" ]]; then
     pass "user2 role assertion"
   else
-    fail "user2 role assertion failed: expected=trader got=$user2_role (check DUAL_USER2_EMAIL/PASSWORD)"
+    fail "user2 role assertion failed: expected=$USER2_EXPECTED_ROLE got=$user2_role (check DUAL_USER2_EMAIL/PASSWORD)"
   fi
 fi
 
