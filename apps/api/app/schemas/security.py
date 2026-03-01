@@ -127,3 +127,15 @@ class TradingControlOut(BaseModel):
     trading_enabled: bool
     updated_by: Optional[str] = None
     reason: Optional[str] = None
+
+
+class IdempotencyStatsOut(BaseModel):
+    records_total: int
+    max_age_days: int
+    oldest_record_at: Optional[str] = None
+    newest_record_at: Optional[str] = None
+
+
+class IdempotencyCleanupOut(BaseModel):
+    deleted: int
+    max_age_days: int

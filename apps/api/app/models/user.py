@@ -9,6 +9,7 @@ class User(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     email = Column(String, unique=True, index=True, nullable=False)
+    tenant_id = Column(String, index=True, nullable=False, default="default", server_default="default")
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="trader")
     password_changed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -11,6 +11,7 @@ from apps.api.app.db.session import get_db
 from apps.api.app.models.audit_log import AuditLog
 from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.models.exchange_secret import ExchangeSecret
+from apps.api.app.models.idempotency_key import IdempotencyKey
 from apps.api.app.models.position import Position
 from apps.api.app.models.signal import Signal
 from apps.api.app.models.strategy_assignment import StrategyAssignment
@@ -49,7 +50,10 @@ from apps.api.app.schemas.security import (
     SecurityPostureUserOut,
     TradingControlOut,
     TradingControlUpdateRequest,
+    IdempotencyStatsOut,
+    IdempotencyCleanupOut,
 )
+from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
 from apps.api.app.schemas.audit import AuditOut
 from apps.api.app.core.time import today_colombia
@@ -57,6 +61,7 @@ from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
 from apps.api.app.services.risk_profiles import resolve_risk_profile
 from apps.api.app.services.idempotency import (
+    cleanup_old_idempotency_keys,
     consume_idempotent_response,
     store_idempotent_response,
 )
@@ -89,14 +94,22 @@ def _is_real_user_email(email: str) -> bool:
     return True
 
 
+def _tenant_id(user: User) -> str:
+    return (user.tenant_id or "default")
+
+
 def _build_security_posture_rows(
     db: Session,
     *,
+    tenant_id: Optional[str],
     real_only: bool,
     max_secret_age_days: int,
 ):
     now = datetime.now(timezone.utc)
-    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
+    users_q = select(User).order_by(User.email.asc())
+    if tenant_id:
+        users_q = users_q.where(User.tenant_id == tenant_id)
+    users = db.execute(users_q).scalars().all()
     posture_rows: list[SecurityPostureUserOut] = []
     missing_2fa = 0
     stale_secrets = 0
@@ -558,6 +571,55 @@ def update_admin_trading_control(
     )
 
 
+@router.get("/admin/idempotency/stats", response_model=IdempotencyStatsOut)
+def get_idempotency_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    total = int(
+        db.execute(select(func.count()).select_from(IdempotencyKey)).scalar_one()
+    )
+    oldest = db.execute(select(func.min(IdempotencyKey.created_at))).scalar_one_or_none()
+    newest = db.execute(select(func.max(IdempotencyKey.created_at))).scalar_one_or_none()
+    log_audit_event(
+        db,
+        action="security.idempotency.stats.read",
+        user_id=current_user.id,
+        entity_type="security",
+        details={"records_total": total},
+    )
+    db.commit()
+    return IdempotencyStatsOut(
+        records_total=total,
+        max_age_days=int(settings.IDEMPOTENCY_KEY_MAX_AGE_DAYS),
+        oldest_record_at=oldest.isoformat() if oldest else None,
+        newest_record_at=newest.isoformat() if newest else None,
+    )
+
+
+@router.post("/admin/idempotency/cleanup", response_model=IdempotencyCleanupOut)
+def post_idempotency_cleanup(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    deleted = cleanup_old_idempotency_keys(db)
+    log_audit_event(
+        db,
+        action="security.idempotency.cleanup",
+        user_id=current_user.id,
+        entity_type="security",
+        details={
+            "deleted": deleted,
+            "max_age_days": int(settings.IDEMPOTENCY_KEY_MAX_AGE_DAYS),
+        },
+    )
+    db.commit()
+    return IdempotencyCleanupOut(
+        deleted=int(deleted),
+        max_age_days=int(settings.IDEMPOTENCY_KEY_MAX_AGE_DAYS),
+    )
+
+
 @router.get("/audit/me", response_model=list[AuditOut])
 def my_audit(
     limit: int = 50,
@@ -583,9 +645,13 @@ def all_audit(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    tenant_ids = (
+        select(User.id).where(User.tenant_id == _tenant_id(current_user))
+    )
     rows = (
         db.execute(
             select(AuditLog)
+            .where(AuditLog.user_id.in_(tenant_ids))
             .order_by(AuditLog.created_at.desc())
             .limit(limit)
         )
@@ -602,7 +668,11 @@ def daily_risk_compare(
     current_user: User = Depends(require_role("admin")),
 ):
     today = today_colombia()
-    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
+    users = db.execute(
+        select(User)
+        .where(User.tenant_id == _tenant_id(current_user))
+        .order_by(User.email.asc())
+    ).scalars().all()
     rows = []
 
     for user in users:
@@ -696,7 +766,10 @@ def assign_strategy(
     current_user: User = Depends(require_role("admin")),
 ):
     user = db.execute(
-        select(User).where(User.email == payload.user_email)
+        select(User).where(
+            User.email == payload.user_email,
+            User.tenant_id == _tenant_id(current_user),
+        )
     ).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -741,6 +814,7 @@ def list_strategy_assignments(
     rows = db.execute(
         select(StrategyAssignment, User)
         .join(User, StrategyAssignment.user_id == User.id)
+        .where(User.tenant_id == _tenant_id(current_user))
         .order_by(User.email.asc(), StrategyAssignment.exchange.asc())
     ).all()
     return [
@@ -1142,6 +1216,7 @@ def security_posture(
 ):
     now, posture_rows, missing_2fa, stale_secrets = _build_security_posture_rows(
         db,
+        tenant_id=_tenant_id(current_user),
         real_only=real_only,
         max_secret_age_days=max_secret_age_days,
     )
@@ -1194,7 +1269,12 @@ def cleanup_smoke_users(
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=max(0, older_than_days))
     smoke_users = db.execute(
-        select(User).where(User.email.like("smoke.%")).order_by(User.email.asc())
+        select(User)
+        .where(
+            User.email.like("smoke.%"),
+            User.tenant_id == _tenant_id(current_user),
+        )
+        .order_by(User.email.asc())
     ).scalars().all()
 
     rows: list[CleanupSmokeUsersUserOut] = []
@@ -1292,6 +1372,7 @@ def dashboard_summary(
 ):
     now, posture_rows, missing_2fa, stale_secrets = _build_security_posture_rows(
         db,
+        tenant_id=_tenant_id(current_user),
         real_only=real_only,
         max_secret_age_days=max_secret_age_days,
     )
@@ -1304,7 +1385,11 @@ def dashboard_summary(
     open_positions_total = 0
     blocked_open_attempts_total = 0
 
-    users = db.execute(select(User).order_by(User.email.asc())).scalars().all()
+    users = db.execute(
+        select(User)
+        .where(User.tenant_id == _tenant_id(current_user))
+        .order_by(User.email.asc())
+    ).scalars().all()
     for user in users:
         if user.id not in posture_map:
             continue

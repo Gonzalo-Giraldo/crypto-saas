@@ -30,6 +30,22 @@ from apps.api.app.services.strategy_assignments import is_exchange_enabled_for_u
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+def _tenant_id(user: User) -> str:
+    return (user.tenant_id or "default")
+
+
+def _tenant_user_or_404(db: Session, user_id: str, current_user: User) -> User:
+    user = db.execute(
+        select(User).where(
+            User.id == user_id,
+            User.tenant_id == _tenant_id(current_user),
+        )
+    ).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
 def _build_user_readiness(db: Session, user: User) -> dict:
     user_2fa = (
         db.execute(select(UserTwoFactor).where(UserTwoFactor.user_id == user.id))
@@ -132,6 +148,7 @@ def create_user(
 
     new_user = User(
         email=payload.email,
+        tenant_id=_tenant_id(current_user),
         hashed_password=get_password_hash(payload.password),
         role="trader",
         password_changed_at=datetime.now(timezone.utc),
@@ -161,7 +178,9 @@ def list_users(
     current_user: User = Depends(require_role("admin")),
 ):
     user_rows = db.execute(
-        select(User).order_by(User.email.asc())
+        select(User)
+        .where(User.tenant_id == _tenant_id(current_user))
+        .order_by(User.email.asc())
     ).scalars().all()
 
     overrides = db.execute(
@@ -198,9 +217,7 @@ def update_user_role(
             detail="role must be admin, trader, or disabled",
         )
 
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
     if user.id == current_user.id and normalized_role != "admin":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -208,7 +225,10 @@ def update_user_role(
         )
     if user.role == "admin" and normalized_role != "admin":
         admin_count = db.execute(
-            select(func.count()).select_from(User).where(User.role == "admin")
+            select(func.count()).select_from(User).where(
+                User.role == "admin",
+                User.tenant_id == _tenant_id(current_user),
+            )
         ).scalar_one()
         if int(admin_count) <= 1:
             raise HTTPException(
@@ -248,9 +268,7 @@ def update_user_email(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
 
     new_email = payload.email.strip().lower()
     existing = db.execute(
@@ -292,9 +310,7 @@ def update_user_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
 
     new_password = (payload.new_password or "").strip()
     if len(new_password) < 8:
@@ -324,9 +340,7 @@ def set_user_risk_profile(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
 
     row = db.execute(
         select(UserRiskProfileOverride).where(UserRiskProfileOverride.user_id == user.id)
@@ -390,9 +404,7 @@ def get_user_readiness_check(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
     return _build_user_readiness(db, user)
 
 
@@ -466,9 +478,7 @@ def save_exchange_secret_for_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
 
     row = upsert_exchange_secret(
         db=db,
@@ -496,9 +506,7 @@ def list_exchange_secrets_for_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
 
     rows = (
         db.execute(
@@ -594,9 +602,7 @@ def delete_exchange_secret_for_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = _tenant_user_or_404(db, user_id, current_user)
 
     normalized_exchange = exchange.upper()
     if normalized_exchange not in {"BINANCE", "IBKR"}:

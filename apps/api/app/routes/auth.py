@@ -187,6 +187,7 @@ def login(
             "sub": user.email,
             "role": user.role,
             "uid": user.id,
+            "tid": user.tenant_id,
         },
         expires_delta=timedelta(minutes=60),
         issued_at=issued_at,
@@ -196,6 +197,7 @@ def login(
             "sub": user.email,
             "role": user.role,
             "uid": user.id,
+            "tid": user.tenant_id,
         },
         expires_delta=timedelta(days=7),
         issued_at=issued_at,
@@ -294,6 +296,7 @@ def refresh_tokens(
             "sub": user.email,
             "role": user.role,
             "uid": user.id,
+            "tid": user.tenant_id,
         },
         expires_delta=timedelta(minutes=60),
         issued_at=issued_at,
@@ -303,6 +306,7 @@ def refresh_tokens(
             "sub": user.email,
             "role": user.role,
             "uid": user.id,
+            "tid": user.tenant_id,
         },
         expires_delta=timedelta(days=7),
         issued_at=issued_at,
@@ -409,6 +413,7 @@ def register(
 
     new_user = User(
         email=payload.email,
+        tenant_id="default",
         hashed_password=get_password_hash(payload.password),
         role="trader",
     )

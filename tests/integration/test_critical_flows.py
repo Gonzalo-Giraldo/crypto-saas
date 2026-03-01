@@ -358,3 +358,48 @@ def test_exposure_limit_per_symbol_blocks_pretrade(client, monkeypatch):
     )
     assert blocked.status_code == 409
     assert "symbol exposure exceeded" in blocked.json()["detail"]
+
+
+def test_idempotency_admin_stats_and_cleanup_admin_only(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    save_binance = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(trader_token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert save_binance.status_code == 201, save_binance.text
+
+    key_headers = {**_auth(trader_token), "X-Idempotency-Key": "stats-key-1"}
+    pretrade = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=key_headers,
+        json={
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "qty": 0.01,
+            "rr_estimate": 1.6,
+            "trend_tf": "4H",
+            "signal_tf": "1H",
+            "timing_tf": "15M",
+            "spread_bps": 7,
+            "slippage_bps": 10,
+            "volume_24h_usdt": 90000000,
+        },
+    )
+    assert pretrade.status_code == 200, pretrade.text
+
+    blocked_stats = client.get("/ops/admin/idempotency/stats", headers=_auth(trader_token))
+    assert blocked_stats.status_code == 403
+
+    stats = client.get("/ops/admin/idempotency/stats", headers=_auth(admin_token))
+    assert stats.status_code == 200, stats.text
+    assert stats.json()["records_total"] >= 1
+
+    blocked_cleanup = client.post("/ops/admin/idempotency/cleanup", headers=_auth(trader_token))
+    assert blocked_cleanup.status_code == 403
+
+    cleaned = client.post("/ops/admin/idempotency/cleanup", headers=_auth(admin_token))
+    assert cleaned.status_code == 200, cleaned.text
+    assert "deleted" in cleaned.json()

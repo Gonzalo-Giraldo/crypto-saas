@@ -111,10 +111,11 @@ def store_idempotent_response(
         raise
 
 
-def cleanup_old_idempotency_keys(db: Session):
+def cleanup_old_idempotency_keys(db: Session) -> int:
     max_days = max(1, int(settings.IDEMPOTENCY_KEY_MAX_AGE_DAYS))
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
-    db.execute(
+    result = db.execute(
         delete(IdempotencyKey).where(IdempotencyKey.created_at < cutoff)
     )
     db.commit()
+    return int(result.rowcount or 0)

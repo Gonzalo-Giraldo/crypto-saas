@@ -34,6 +34,7 @@ def get_current_user(
     token_type = payload.get("typ")
     token_jti = payload.get("jti")
     token_iat = payload.get("iat")
+    token_tid = payload.get("tid")
 
     if user_email is None:
         raise HTTPException(
@@ -67,6 +68,11 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
+        )
+    if token_tid and token_tid != user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token tenant",
         )
     if user.role == "disabled":
         raise HTTPException(
