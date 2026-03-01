@@ -137,6 +137,7 @@ pytest -q tests/integration
 - Daily one-page checklist: `docs/checklist_operativa_1pagina.md`
 - NOC-lite decision table: `docs/noc_lite.md`
 - Backend Definition of Done: `docs/backend_definition_of_done.md`
+- IBKR real go-live package: `docs/ibkr_real_go_live_checklist.md`
 
 ## Smoke Script
 - Automated production smoke checks: `scripts/smoke_prod.sh`
