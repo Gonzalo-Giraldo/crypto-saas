@@ -119,6 +119,7 @@ scripts/run_scenario.sh
 - Staging/production operations: `docs/runbook_produccion.md`
 - Daily one-page checklist: `docs/checklist_operativa_1pagina.md`
 - NOC-lite decision table: `docs/noc_lite.md`
+- Backend Definition of Done: `docs/backend_definition_of_done.md`
 
 ## Smoke Script
 - Automated production smoke checks: `scripts/smoke_prod.sh`
