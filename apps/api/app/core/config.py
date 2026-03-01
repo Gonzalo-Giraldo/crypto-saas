@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     MAX_TRADES: int
     ENFORCE_2FA_FOR_ADMINS: bool = False
     ENFORCE_2FA_EMAILS: str = ""
+    PASSWORD_MAX_AGE_DAYS: int = 0
+    ENFORCE_PASSWORD_MAX_AGE: bool = False
 
     model_config = ConfigDict(
         env_file=".env",

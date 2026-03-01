@@ -99,6 +99,8 @@ pytest -q tests/integration
 - Optional hardening:
   - `ENFORCE_2FA_FOR_ADMINS=true` forces admins to have 2FA enabled.
   - `ENFORCE_2FA_EMAILS=user1@dominio.com,user2@dominio.com` forces those accounts to have 2FA enabled.
+  - `ENFORCE_PASSWORD_MAX_AGE=true` enforces password age policy on login/refresh.
+  - `PASSWORD_MAX_AGE_DAYS=90` max password age in days (used when enforcement is enabled).
 - Exchange credentials are stored encrypted at rest with `ENCRYPTION_KEY`.
 - Binance live trading is not enabled here; only testnet `order/test` endpoint is wired.
 - IBKR test-order supports:

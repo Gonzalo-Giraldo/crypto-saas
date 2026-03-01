@@ -27,6 +27,8 @@ os.environ["DAILY_STOP"] = "3"
 os.environ["MAX_TRADES"] = "5"
 os.environ["ENFORCE_2FA_FOR_ADMINS"] = "false"
 os.environ["ENFORCE_2FA_EMAILS"] = ""
+os.environ["PASSWORD_MAX_AGE_DAYS"] = "0"
+os.environ["ENFORCE_PASSWORD_MAX_AGE"] = "false"
 
 from apps.api.app.main import app
 from apps.api.app.core.security import get_password_hash

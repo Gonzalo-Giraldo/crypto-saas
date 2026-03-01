@@ -1,5 +1,6 @@
 import pyotp
 from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 
 def _login(client, username: str, password: str, otp: Optional[str] = None):
@@ -206,3 +207,25 @@ def test_revoke_all_invalidates_previous_sessions(client):
     assert login2.status_code == 200, login2.text
     me_new = client.get("/users/me", headers=_auth(login2.json()["access_token"]))
     assert me_new.status_code == 200
+
+
+def test_password_max_age_enforcement(client, monkeypatch):
+    import apps.api.app.routes.auth as auth_api
+    from apps.api.app.db.session import SessionLocal
+    from apps.api.app.models.user import User
+
+    monkeypatch.setattr(auth_api.settings, "ENFORCE_PASSWORD_MAX_AGE", True)
+    monkeypatch.setattr(auth_api.settings, "PASSWORD_MAX_AGE_DAYS", 30)
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == "trader@test.com").first()
+        assert user is not None
+        user.password_changed_at = datetime.now(timezone.utc) - timedelta(days=45)
+        db.commit()
+    finally:
+        db.close()
+
+    expired_login = _login(client, "trader@test.com", "TraderPass123!")
+    assert expired_login.status_code == 401
+    assert "Password expired" in expired_login.json()["detail"]

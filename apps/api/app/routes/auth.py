@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, status
@@ -84,6 +84,21 @@ def _enforced_2fa_emails() -> set[str]:
     }
 
 
+def _is_password_expired(user: User) -> bool:
+    if not settings.ENFORCE_PASSWORD_MAX_AGE:
+        return False
+    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+    if max_age_days <= 0:
+        return False
+    changed_at = user.password_changed_at
+    if changed_at is None:
+        return True
+    if changed_at.tzinfo is None:
+        changed_at = changed_at.replace(tzinfo=timezone.utc)
+    age_days = (datetime.now(timezone.utc) - changed_at.astimezone(timezone.utc)).days
+    return age_days > max_age_days
+
+
 def _issued_at_after_revocation(
     db: Session,
     user_id: str,
@@ -126,6 +141,11 @@ def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is disabled",
+        )
+    if _is_password_expired(user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password expired. Contact admin to reset credentials",
         )
 
     user_2fa = (
@@ -242,6 +262,11 @@ def refresh_tokens(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User is disabled",
+        )
+    if _is_password_expired(user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password expired. Contact admin to reset credentials",
         )
     session_revoke = (
         db.query(SessionRevocation)

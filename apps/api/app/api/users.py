@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
@@ -18,6 +20,7 @@ from apps.api.app.schemas.user import (
     UserPasswordUpdate,
 )
 from apps.api.app.api.deps import get_current_user, require_role
+from apps.api.app.core.config import settings
 from apps.api.app.core.security import get_password_hash
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import upsert_exchange_secret
@@ -50,11 +53,28 @@ def _build_user_readiness(db: Session, user: User) -> dict:
     }
 
     checks: list[dict] = []
+    changed_at = user.password_changed_at
+    if changed_at is not None and changed_at.tzinfo is None:
+        changed_at = changed_at.replace(tzinfo=timezone.utc)
+    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+    enforce_max_age = bool(settings.ENFORCE_PASSWORD_MAX_AGE and max_age_days > 0)
+    if changed_at is None:
+        password_age_days = None
+    else:
+        password_age_days = max(0, (datetime.now(timezone.utc) - changed_at.astimezone(timezone.utc)).days)
+
     checks.append(
         {
             "name": "role_allowed",
             "passed": user.role in {"admin", "trader", "disabled"},
             "detail": user.role,
+        }
+    )
+    checks.append(
+        {
+            "name": "password_not_expired",
+            "passed": (not enforce_max_age) or (password_age_days is not None and password_age_days <= max_age_days),
+            "detail": f"age_days={password_age_days} max_age_days={max_age_days} enforced={enforce_max_age}",
         }
     )
     checks.append(
@@ -79,6 +99,8 @@ def _build_user_readiness(db: Session, user: User) -> dict:
         "user_id": user.id,
         "email": user.email,
         "role": user.role,
+        "password_age_days": password_age_days,
+        "password_max_age_days": max_age_days if enforce_max_age else None,
         "two_factor_enabled": two_factor_enabled,
         "assignments": assignment_enabled,
         "secrets_configured": sorted(secret_set),
@@ -112,6 +134,7 @@ def create_user(
         email=payload.email,
         hashed_password=get_password_hash(payload.password),
         role="trader",
+        password_changed_at=datetime.now(timezone.utc),
     )
 
     db.add(new_user)
@@ -281,6 +304,7 @@ def update_user_password(
         )
 
     user.hashed_password = get_password_hash(new_password)
+    user.password_changed_at = datetime.now(timezone.utc)
     log_audit_event(
         db,
         action="user.password.updated",
