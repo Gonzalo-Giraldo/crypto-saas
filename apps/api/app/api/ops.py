@@ -1545,6 +1545,22 @@ def dashboard_page():
       renderAdminUsers();
     }
 
+    async function runReadinessCheck(userId) {
+      const token = byId("token").value.trim();
+      if (!token || !userId) return;
+      const readiness = await apiJson(`/users/${userId}/readiness-check`, token, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const failed = (readiness.checks || []).filter((c) => !c.passed);
+      if (!failed.length) {
+        setAdminMsg(`Readiness OK for ${readiness.email}`);
+        return;
+      }
+      const first = failed[0];
+      setAdminMsg(`Readiness warning for ${readiness.email}: ${first.name} (${first.detail})`, true);
+    }
+
     async function loadRiskProfiles() {
       const token = byId("token").value.trim();
       if (!token) return;
@@ -1620,6 +1636,7 @@ def dashboard_page():
     byId("refreshUsersBtn").addEventListener("click", async () => {
       try {
         await loadAdminUsers();
+        await runReadinessCheck(selectedUserId());
         setAdminMsg("Users refreshed.");
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
@@ -1638,6 +1655,7 @@ def dashboard_page():
         });
         byId("newUserPassword").value = "";
         await loadAdminUsers();
+        await runReadinessCheck(selectedUserId());
         setAdminMsg(`User created: ${email}`);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
@@ -1656,6 +1674,7 @@ def dashboard_page():
         });
         await loadAdminUsers();
         setAdminMsg(`Role updated for ${user.email}: ${role}`);
+        await runReadinessCheck(user.id);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }
@@ -1675,6 +1694,7 @@ def dashboard_page():
         byId("newEmailInput").value = "";
         await loadAdminUsers();
         setAdminMsg(`Email updated for user id ${user.id}`);
+        await runReadinessCheck(user.id);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }
@@ -1692,6 +1712,7 @@ def dashboard_page():
         });
         await loadAdminUsers();
         setAdminMsg(`Risk profile updated for ${user.email}: ${profile_name}`);
+        await runReadinessCheck(user.id);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }
@@ -1708,6 +1729,7 @@ def dashboard_page():
         });
         await loadAdminUsers();
         setAdminMsg(`Risk override cleared for ${user.email}`);
+        await runReadinessCheck(user.id);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }
@@ -1726,6 +1748,7 @@ def dashboard_page():
         });
         byId("newPasswordInput").value = "";
         setAdminMsg(`Password updated for ${user.email}`);
+        await runReadinessCheck(user.id);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }
@@ -1746,6 +1769,7 @@ def dashboard_page():
         });
         byId("adminApiSecret").value = "";
         setAdminMsg(`Secret saved for ${user.email} (${exchange})`);
+        await runReadinessCheck(user.id);
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }
@@ -1762,6 +1786,14 @@ def dashboard_page():
           headers: { Authorization: `Bearer ${token}` },
         });
         setAdminMsg(`Secret deleted for ${user.email} (${exchange})`);
+        await runReadinessCheck(user.id);
+      } catch (e) {
+        setAdminMsg(String(e.message || e), true);
+      }
+    });
+    byId("adminUserSelect").addEventListener("change", async () => {
+      try {
+        await runReadinessCheck(selectedUserId());
       } catch (e) {
         setAdminMsg(String(e.message || e), true);
       }

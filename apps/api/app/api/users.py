@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from apps.api.app.db.session import get_db
 from apps.api.app.models.exchange_secret import ExchangeSecret
+from apps.api.app.models.strategy_assignment import StrategyAssignment
+from apps.api.app.models.user_2fa import UserTwoFactor
 from apps.api.app.models.user_risk_profile import UserRiskProfileOverride
 from apps.api.app.models.user import User
 from apps.api.app.schemas.exchange_secret import ExchangeSecretOut, ExchangeSecretUpsert
@@ -23,6 +25,66 @@ from apps.api.app.services.risk_profiles import list_profile_names, resolve_risk
 from apps.api.app.services.strategy_assignments import is_exchange_enabled_for_user
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _build_user_readiness(db: Session, user: User) -> dict:
+    user_2fa = (
+        db.execute(select(UserTwoFactor).where(UserTwoFactor.user_id == user.id))
+        .scalar_one_or_none()
+    )
+    two_factor_enabled = bool(user_2fa and user_2fa.enabled)
+
+    secret_rows = db.execute(
+        select(ExchangeSecret.exchange).where(ExchangeSecret.user_id == user.id)
+    ).all()
+    secret_set = {row[0] for row in secret_rows}
+
+    assignment_rows = db.execute(
+        select(StrategyAssignment.exchange, StrategyAssignment.enabled).where(
+            StrategyAssignment.user_id == user.id
+        )
+    ).all()
+    assignment_enabled = {
+        exchange: bool(enabled)
+        for exchange, enabled in assignment_rows
+    }
+
+    checks: list[dict] = []
+    checks.append(
+        {
+            "name": "role_allowed",
+            "passed": user.role in {"admin", "trader", "disabled"},
+            "detail": user.role,
+        }
+    )
+    checks.append(
+        {
+            "name": "admin_has_2fa",
+            "passed": (user.role != "admin") or two_factor_enabled,
+            "detail": f"two_factor_enabled={two_factor_enabled}",
+        }
+    )
+    for exchange in ("BINANCE", "IBKR"):
+        enabled_for_user = assignment_enabled.get(exchange, False)
+        has_secret = exchange in secret_set
+        checks.append(
+            {
+                "name": f"{exchange.lower()}_enabled_has_secret",
+                "passed": (not enabled_for_user) or has_secret,
+                "detail": f"enabled={enabled_for_user} secret_configured={has_secret}",
+            }
+        )
+
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "role": user.role,
+        "two_factor_enabled": two_factor_enabled,
+        "assignments": assignment_enabled,
+        "secrets_configured": sorted(secret_set),
+        "checks": checks,
+        "ready": all(bool(c["passed"]) for c in checks),
+    }
 
 
 # 🔹 Crear usuario (solo admin)
@@ -116,6 +178,20 @@ def update_user_role(
     user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.id == current_user.id and normalized_role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot remove your own admin role",
+        )
+    if user.role == "admin" and normalized_role != "admin":
+        admin_count = db.execute(
+            select(func.count()).select_from(User).where(User.role == "admin")
+        ).scalar_one()
+        if int(admin_count) <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot demote/disable the last admin",
+            )
 
     user.role = normalized_role
     log_audit_event(
@@ -282,6 +358,18 @@ def get_risk_profiles(
     current_user: User = Depends(require_role("admin")),
 ):
     return list_profile_names()
+
+
+@router.get("/{user_id}/readiness-check")
+def get_user_readiness_check(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    user = db.execute(select(User).where(User.id == user_id)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return _build_user_readiness(db, user)
 
 
 # 🔹 Usuario autenticado actual

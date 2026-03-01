@@ -165,6 +165,7 @@ UI web:
   - actualizar rol/email/password,
   - asignar/limpiar perfil de riesgo,
   - guardar/eliminar secretos BINANCE/IBKR por usuario.
+  - validar automaticamente readiness del usuario despues de cada cambio.
 
 Artifact diario de snapshot:
 - Workflow: `Security Posture Daily`

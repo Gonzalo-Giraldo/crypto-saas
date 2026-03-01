@@ -48,6 +48,7 @@ scripts/run_scenario.sh
 - `PUT /users/{user_id}/password` (admin)
 - `PUT /users/{user_id}/risk-profile` (admin, set/clear override)
 - `GET /users/risk-profiles` (admin)
+- `GET /users/{user_id}/readiness-check` (admin, auto validation after changes)
 - `PUT /users/{user_id}/exchange-secrets` (admin)
 - `GET /users/{user_id}/exchange-secrets` (admin)
 - `DELETE /users/{user_id}/exchange-secrets/{exchange}` (admin)
@@ -99,6 +100,8 @@ scripts/run_scenario.sh
 - User lifecycle hardening:
   - `PATCH /users/{user_id}/role` accepts `admin`, `trader`, `disabled`.
   - users with role `disabled` cannot login and cannot use existing tokens.
+  - cannot demote/disable the last admin.
+  - admin cannot remove own admin role.
 - `pretrade` now applies strategy-specific entry rules:
   - `SWING_V1` and `INTRADAY_V1`
   - timeframe checks (`trend_tf`, `signal_tf`, `timing_tf`)
