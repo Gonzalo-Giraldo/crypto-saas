@@ -166,6 +166,10 @@ UI web:
   - asignar/limpiar perfil de riesgo,
   - guardar/eliminar secretos BINANCE/IBKR por usuario.
   - validar automaticamente readiness del usuario despues de cada cambio.
+- panel `User Readiness` para ver estado consolidado por usuario:
+  - READY/MISSING,
+  - razon principal de bloqueo,
+  - 2FA, asignaciones y secretos en una sola vista.
 
 Artifact diario de snapshot:
 - Workflow: `Security Posture Daily`

@@ -59,7 +59,7 @@ scripts/run_scenario.sh
 - `GET /ops/audit/all` (admin)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
  - `GET /ops/dashboard/summary` (admin, single-screen status summary)
- - `GET /ops/dashboard` (simple web dashboard UI)
+- `GET /ops/dashboard` (simple web dashboard UI)
 - `POST /ops/strategy/assign` (admin)
 - `GET /ops/strategy/assignments` (admin)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
@@ -243,6 +243,7 @@ scripts/run_scenario.sh
   - paste token and click `Load`,
   - dashboard refreshes every 60 seconds.
   - `Open Incident` button opens a prefilled GitHub issue.
+  - `User Readiness` table shows per-user READY/MISSING with main blocking reason.
 
 Security posture artifact:
 - `Security Posture Daily` now exports `security_dashboard_snapshot.json` as workflow artifact.

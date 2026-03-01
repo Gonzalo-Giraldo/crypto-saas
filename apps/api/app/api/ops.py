@@ -1447,6 +1447,16 @@ def dashboard_page():
         <tbody id="adminUsersBody"><tr><td colspan="4" class="muted">Load dashboard first</td></tr></tbody>
       </table>
     </div>
+    <div class="card">
+      <strong>User Readiness</strong>
+      <div class="muted" style="margin:4px 0 10px">Single table with operability status by user.</div>
+      <table>
+        <thead>
+          <tr><th>User</th><th>Role</th><th>2FA</th><th>Assignments</th><th>Secrets</th><th>Status</th><th>Main reason</th></tr>
+        </thead>
+        <tbody id="readinessBody"><tr><td colspan="7" class="muted">Load dashboard first</td></tr></tbody>
+      </table>
+    </div>
   </div>
   <script>
     const byId = (id) => document.getElementById(id);
@@ -1547,6 +1557,60 @@ def dashboard_page():
       const users = await apiJson("/users", token, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
       adminState.users = users || [];
       renderAdminUsers(preferredUserId);
+      await renderReadinessTable();
+    }
+
+    function fmtAssignments(a) {
+      const keys = Object.keys(a || {}).sort();
+      if (!keys.length) return "none";
+      return keys.map((k) => `${k}:${a[k] ? "on" : "off"}`).join(" | ");
+    }
+
+    async function renderReadinessTable() {
+      const token = byId("token").value.trim();
+      if (!token) return;
+      const users = adminState.users || [];
+      if (!users.length) {
+        byId("readinessBody").innerHTML = '<tr><td colspan="7" class="muted">No users</td></tr>';
+        return;
+      }
+      const rows = await Promise.all(users.map(async (u) => {
+        try {
+          const r = await apiJson(`/users/${u.id}/readiness-check`, token, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const failed = (r.checks || []).find((c) => !c.passed);
+          return {
+            email: r.email,
+            role: r.role,
+            two_factor_enabled: r.two_factor_enabled,
+            assignments: fmtAssignments(r.assignments),
+            secrets: (r.secrets_configured || []).join(", ") || "none",
+            ready: !!r.ready,
+            reason: failed ? `${failed.name}: ${failed.detail}` : "ok",
+          };
+        } catch (e) {
+          return {
+            email: u.email,
+            role: u.role,
+            two_factor_enabled: false,
+            assignments: "n/a",
+            secrets: "n/a",
+            ready: false,
+            reason: String(e.message || e),
+          };
+        }
+      }));
+      byId("readinessBody").innerHTML = rows.map((r) => `<tr>
+        <td>${r.email}</td>
+        <td>${r.role}</td>
+        <td>${r.two_factor_enabled ? "yes" : "no"}</td>
+        <td>${r.assignments}</td>
+        <td>${r.secrets}</td>
+        <td><span class="badge ${r.ready ? "green" : "red"}">${r.ready ? "READY" : "MISSING"}</span></td>
+        <td>${r.reason}</td>
+      </tr>`).join("");
     }
 
     async function runReadinessCheck(userId) {
