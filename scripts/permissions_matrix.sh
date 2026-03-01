@@ -47,6 +47,15 @@ if [[ -z "$BASE_URL" || -z "$ADMIN_EMAIL" || -z "$ADMIN_PASSWORD" || -z "$USER1_
   exit 1
 fi
 
+lower() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+if [[ -n "$USER2_EMAIL" && "$(lower "$USER1_EMAIL")" == "$(lower "$USER2_EMAIL")" ]]; then
+  echo "Invalid configuration: USER1_EMAIL and USER2_EMAIL must be different users"
+  exit 1
+fi
+
 json_get() {
   local key="$1"
   python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1], ""))' "$key"
@@ -222,11 +231,25 @@ if [[ "${#ADMIN_TOKEN}" -le 100 || "${#USER1_TOKEN}" -le 100 ]]; then
   exit 1
 fi
 
+admin_email_actual=$(user_me_field "$ADMIN_TOKEN" "email")
+if [[ "$(lower "$admin_email_actual")" == "$(lower "$ADMIN_EMAIL")" ]]; then
+  pass "admin identity assertion"
+else
+  fail "admin identity assertion failed: expected=$ADMIN_EMAIL got=$admin_email_actual"
+fi
+
 admin_role=$(user_me_field "$ADMIN_TOKEN" "role")
 if [[ "$admin_role" == "admin" ]]; then
   pass "admin role assertion"
 else
   fail "admin role assertion failed: expected=admin got=$admin_role"
+fi
+
+user1_email_actual=$(user_me_field "$USER1_TOKEN" "email")
+if [[ "$(lower "$user1_email_actual")" == "$(lower "$USER1_EMAIL")" ]]; then
+  pass "user1 identity assertion"
+else
+  fail "user1 identity assertion failed: expected=$USER1_EMAIL got=$user1_email_actual (check DUAL_USER1_EMAIL/PASSWORD/TOTP_SECRET)"
 fi
 
 user1_role=$(user_me_field "$USER1_TOKEN" "role")
@@ -237,6 +260,13 @@ else
 fi
 
 if [[ -n "$USER2_TOKEN" ]]; then
+  user2_email_actual=$(user_me_field "$USER2_TOKEN" "email")
+  if [[ "$(lower "$user2_email_actual")" == "$(lower "$USER2_EMAIL")" ]]; then
+    pass "user2 identity assertion"
+  else
+    fail "user2 identity assertion failed: expected=$USER2_EMAIL got=$user2_email_actual (check DUAL_USER2_EMAIL/PASSWORD/TOTP_SECRET)"
+  fi
+
   user2_role=$(user_me_field "$USER2_TOKEN" "role")
   if [[ "$user2_role" == "$USER2_EXPECTED_ROLE" ]]; then
     pass "user2 role assertion"
