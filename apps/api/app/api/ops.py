@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
@@ -107,7 +108,7 @@ def _build_security_posture_rows(
         ).all()
         configured_exchanges = {row[0] for row in secret_rows}
 
-        oldest_days: int | None = None
+        oldest_days: Optional[int] = None
         for _, updated_at in secret_rows:
             if updated_at is None:
                 continue
@@ -1061,7 +1062,7 @@ def dashboard_summary(
     real_only: bool = True,
     max_secret_age_days: int = 30,
     recent_hours: int = 24,
-    email_contains: str | None = None,
+    email_contains: Optional[str] = None,
     exchange: str = "ALL",
     include_service_users: bool = False,
     db: Session = Depends(get_db),

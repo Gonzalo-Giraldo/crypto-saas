@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -16,7 +18,7 @@ class ReencryptSecretsOut(BaseModel):
 class CleanupSmokeUsersUserOut(BaseModel):
     user_id: str
     email: str
-    last_activity_at: str | None
+    last_activity_at: Optional[str]
     eligible_for_delete: bool
 
 
@@ -36,7 +38,7 @@ class SecurityPostureUserOut(BaseModel):
     two_factor_enabled: bool
     binance_secret_configured: bool
     ibkr_secret_configured: bool
-    oldest_secret_age_days: int | None
+    oldest_secret_age_days: Optional[int]
     stale_secret: bool
 
 

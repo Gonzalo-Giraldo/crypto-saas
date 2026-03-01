@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
 from datetime import datetime, timezone
+from typing import Optional
 
 from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.db.session import get_db
@@ -25,7 +26,7 @@ def _log_and_raise_risk_block(
     current_user: User,
     detail: str,
     action: str,
-    extra: dict | None = None,
+    extra: Optional[dict] = None,
 ):
     log_audit_event(
         db,
