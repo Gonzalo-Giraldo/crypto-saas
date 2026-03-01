@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     MAX_OPEN_QTY_PER_SYMBOL: float = 0.0
     MAX_OPEN_NOTIONAL_PER_EXCHANGE: float = 0.0
     IDEMPOTENCY_KEY_MAX_AGE_DAYS: int = 30
+    AUDIT_EXPORT_SIGNING_KEY: str = ""
 
     model_config = ConfigDict(
         env_file=".env",

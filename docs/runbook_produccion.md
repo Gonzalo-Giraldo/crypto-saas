@@ -117,6 +117,17 @@ Eventos esperados despues de pruebas:
 - `execution.binance.test_order.success` o `.error`
 - `execution.ibkr.test_order.success` o `.error`
 
+Export de auditoria verificable (admin):
+
+```bash
+curl -s "$BASE_URL/ops/admin/audit/export?limit=500" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Resultado:
+- `payload_sha256`: hash verificable del contenido exportado.
+- `signature_hmac_sha256`: firma HMAC SHA-256 con clave del servidor.
+
 Comparativo diario (admin):
 
 ```bash

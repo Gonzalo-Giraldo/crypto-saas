@@ -1,6 +1,8 @@
 import pyotp
 from typing import Optional
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 
 
 def _login(client, username: str, password: str, otp: Optional[str] = None):
@@ -424,3 +426,36 @@ def test_backoffice_rbac_viewer_readonly(client):
     # Admin still has access to sensitive admin endpoint.
     allowed_admin_control = client.get("/ops/admin/trading-control", headers=_auth(admin_token))
     assert allowed_admin_control.status_code == 200
+
+
+def test_audit_export_hash_and_signature_admin_only(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    # Create some audit activity.
+    _ = client.get("/ops/audit/me?limit=5", headers=_auth(trader_token))
+
+    blocked = client.get("/ops/admin/audit/export", headers=_auth(trader_token))
+    assert blocked.status_code == 403
+
+    exported = client.get("/ops/admin/audit/export?limit=50", headers=_auth(admin_token))
+    assert exported.status_code == 200, exported.text
+    data = exported.json()
+    assert "meta" in data and "records" in data
+    assert data["meta"]["tenant_id"] == "default"
+    assert data["meta"]["records_count"] == len(data["records"])
+    assert len(data["payload_sha256"]) == 64
+    assert len(data["signature_hmac_sha256"]) == 64
+
+    canonical_payload = {
+        "meta": data["meta"],
+        "records": data["records"],
+    }
+    canonical_json = json.dumps(
+        canonical_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    expected_sha = hashlib.sha256(canonical_json).hexdigest()
+    assert expected_sha == data["payload_sha256"]

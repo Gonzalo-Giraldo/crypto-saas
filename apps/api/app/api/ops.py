@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -57,7 +60,7 @@ from apps.api.app.schemas.security import (
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
-from apps.api.app.schemas.audit import AuditOut
+from apps.api.app.schemas.audit import AuditExportMetaOut, AuditExportOut, AuditOut
 from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
@@ -760,6 +763,82 @@ def all_audit(
         .all()
     )
     return rows
+
+
+@router.get("/admin/audit/export", response_model=AuditExportOut)
+def export_audit(
+    limit: int = 500,
+    from_iso: Optional[str] = None,
+    to_iso: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    tenant = _tenant_id(current_user)
+    tenant_ids = select(User.id).where(User.tenant_id == tenant)
+
+    q = select(AuditLog).where(AuditLog.user_id.in_(tenant_ids))
+    if from_iso:
+        try:
+            from_dt = datetime.fromisoformat(from_iso.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid from_iso")
+        q = q.where(AuditLog.created_at >= from_dt)
+    if to_iso:
+        try:
+            to_dt = datetime.fromisoformat(to_iso.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid to_iso")
+        q = q.where(AuditLog.created_at <= to_dt)
+
+    rows = (
+        db.execute(
+            q.order_by(AuditLog.created_at.desc()).limit(max(1, min(limit, 5000)))
+        )
+        .scalars()
+        .all()
+    )
+    records = [AuditOut.model_validate(r) for r in rows]
+    meta = AuditExportMetaOut(
+        exported_at=datetime.now(timezone.utc).isoformat(),
+        exported_by=current_user.email,
+        tenant_id=tenant,
+        limit=max(1, min(limit, 5000)),
+        from_iso=from_iso,
+        to_iso=to_iso,
+        records_count=len(records),
+        algorithm="sha256+hmac-sha256",
+    )
+
+    payload = {
+        "meta": meta.model_dump(),
+        "records": [r.model_dump(mode="json") for r in records],
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    payload_sha256 = hashlib.sha256(canonical).hexdigest()
+    signing_key = (settings.AUDIT_EXPORT_SIGNING_KEY or settings.SECRET_KEY).encode("utf-8")
+    signature = hmac.new(signing_key, canonical, hashlib.sha256).hexdigest()
+
+    log_audit_event(
+        db,
+        action="security.audit.export",
+        user_id=current_user.id,
+        entity_type="security",
+        details={
+            "tenant_id": tenant,
+            "records_count": len(records),
+            "from_iso": from_iso,
+            "to_iso": to_iso,
+            "limit": max(1, min(limit, 5000)),
+        },
+    )
+    db.commit()
+
+    return AuditExportOut(
+        meta=meta,
+        records=records,
+        payload_sha256=payload_sha256,
+        signature_hmac_sha256=signature,
+    )
 
 
 @router.get("/risk/daily-compare")

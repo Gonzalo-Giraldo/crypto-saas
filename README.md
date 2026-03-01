@@ -65,6 +65,9 @@ pytest -q tests/integration
 - `DELETE /users/exchange-secrets/{exchange}`
 - `GET /ops/audit/me`
 - `GET /ops/audit/all` (admin)
+- `GET /ops/admin/audit/export` (admin, signed+hash export)
+- `GET /ops/backoffice/summary` (admin/operator/viewer)
+- `GET /ops/backoffice/users` (admin/operator/viewer)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
  - `GET /ops/dashboard/summary` (admin, single-screen status summary)
 - `GET /ops/dashboard` (simple web dashboard UI)
@@ -112,7 +115,7 @@ pytest -q tests/integration
 - Exchange segregation is enforced by strategy assignment:
   - if exchange is disabled for the user, `exchange-secrets` upsert and execution endpoints are blocked.
 - User lifecycle hardening:
-  - `PATCH /users/{user_id}/role` accepts `admin`, `trader`, `disabled`.
+  - `PATCH /users/{user_id}/role` accepts `admin`, `operator`, `viewer`, `trader`, `disabled`.
   - users with role `disabled` cannot login and cannot use existing tokens.
   - cannot demote/disable the last admin.
   - admin cannot remove own admin role.
