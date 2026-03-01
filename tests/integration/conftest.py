@@ -1,9 +1,15 @@
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Ensure project root is importable in local and CI runs.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Force test config before importing app modules.
 TEST_DB_PATH = Path(tempfile.gettempdir()) / "crypto_saas_integration_test.db"
