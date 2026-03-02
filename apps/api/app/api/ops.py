@@ -2531,6 +2531,31 @@ def ops_console_page():
             </tbody>
           </table>
         </div>
+        <div id="execLabCtl" class="card" style="margin-top:10px;display:none">
+          <div class="row">
+            <strong>Execution Lab</strong>
+            <span class="muted">Runs with current signed-in user token</span>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <select id="execExchange">
+              <option value="BINANCE">BINANCE</option>
+              <option value="IBKR">IBKR</option>
+            </select>
+            <input id="execSymbol" placeholder="symbol" value="BTCUSDT" style="max-width:160px" />
+            <select id="execSide">
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+            <input id="execQty" type="number" step="0.0001" value="0.01" style="max-width:120px" />
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button id="execPretradeBtn" class="ghost mini">Pretrade check</button>
+            <button id="execExitBtn" class="ghost mini">Exit check</button>
+            <button id="execTestOrderBtn" class="mini">Test order</button>
+          </div>
+          <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
+          <pre id="execLabOut" class="mono" style="white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;">{}</pre>
+        </div>
       </div>
     </div>
 
@@ -2627,6 +2652,17 @@ def ops_console_page():
       el.style.color = bad ? "var(--bad)" : "var(--muted)";
     }
 
+    function setExecLabMsg(msg, bad=false) {
+      const el = byId("execLabMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
+    function setExecLabOut(payload) {
+      byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
+    }
+
     function renderTradingControl(control, canEdit) {
       const wrap = byId("tradingCtl");
       if (!wrap) return;
@@ -2657,6 +2693,17 @@ def ops_console_page():
       wrap.style.display = canEdit ? "block" : "none";
       if (canEdit) setIncidentAuditMsg("Ready");
       if (!canEdit) byId("auditBody").innerHTML = '<tr><td colspan="4" class="muted">No audit loaded</td></tr>';
+    }
+
+    function renderExecLab(canUse) {
+      const wrap = byId("execLabCtl");
+      if (!wrap) return;
+      wrap.style.display = canUse ? "block" : "none";
+      if (canUse) {
+        setExecLabMsg("Ready");
+      } else {
+        setExecLabOut({});
+      }
     }
 
     function authHeaders(token, isForm=false) {
@@ -2714,6 +2761,7 @@ def ops_console_page():
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
+      renderExecLab(false);
     }
 
     function fillHome(d) {
@@ -3060,11 +3108,13 @@ def ops_console_page():
           renderTradingControl(tradingControl, true);
           renderMaintenance(true);
           renderIncidentAudit(true);
+          renderExecLab(true);
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
           renderMaintenance(false);
           renderIncidentAudit(false);
+          renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
@@ -3077,6 +3127,7 @@ def ops_console_page():
         renderTradingControl(null, false);
         renderMaintenance(false);
         renderIncidentAudit(false);
+        renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
       }
     }
 
@@ -3227,6 +3278,108 @@ def ops_console_page():
         setIncidentAuditMsg(`Audit export downloaded (records=${(out.meta && out.meta.records_count) || 0})`);
       } catch (e) {
         setIncidentAuditMsg(String(e.message || e), true);
+      }
+    });
+    byId("execExchange").addEventListener("change", () => {
+      const ex = byId("execExchange").value;
+      byId("execSymbol").value = ex === "IBKR" ? "AAPL" : "BTCUSDT";
+      byId("execQty").value = ex === "IBKR" ? "1" : "0.01";
+    });
+    byId("execPretradeBtn").addEventListener("click", async () => {
+      try {
+        const exchange = byId("execExchange").value;
+        const payload = {
+          symbol: (byId("execSymbol").value || "").trim(),
+          side: byId("execSide").value,
+          qty: Number(byId("execQty").value || "0"),
+          rr_estimate: exchange === "IBKR" ? 1.4 : 1.6,
+          trend_tf: "4H",
+          signal_tf: "1H",
+          timing_tf: "15M",
+          spread_bps: 7,
+          slippage_bps: 10,
+          volume_24h_usdt: exchange === "IBKR" ? 0 : 90000000,
+          in_rth: true,
+          macro_event_block: false,
+          earnings_within_24h: false,
+        };
+        const path = exchange === "IBKR"
+          ? "/ops/execution/pretrade/ibkr/check"
+          : "/ops/execution/pretrade/binance/check";
+        const out = await api(path, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setExecLabOut(out);
+        setExecLabMsg(`Pretrade ${exchange} completed`);
+      } catch (e) {
+        setExecLabMsg(String(e.message || e), true);
+      }
+    });
+    byId("execExitBtn").addEventListener("click", async () => {
+      try {
+        const exchange = byId("execExchange").value;
+        const symbol = (byId("execSymbol").value || "").trim();
+        const payload = exchange === "IBKR"
+          ? {
+              symbol,
+              side: byId("execSide").value,
+              entry_price: 180,
+              current_price: 179,
+              stop_loss: 178,
+              take_profit: 183,
+              opened_minutes: 500,
+              trend_break: false,
+              signal_reverse: false,
+              macro_event_block: true,
+              earnings_within_24h: false,
+            }
+          : {
+              symbol,
+              side: byId("execSide").value,
+              entry_price: 50000,
+              current_price: 50750,
+              stop_loss: 49500,
+              take_profit: 51000,
+              opened_minutes: 180,
+              trend_break: false,
+              signal_reverse: false,
+            };
+        const path = exchange === "IBKR"
+          ? "/ops/execution/exit/ibkr/check"
+          : "/ops/execution/exit/binance/check";
+        const out = await api(path, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setExecLabOut(out);
+        setExecLabMsg(`Exit check ${exchange} completed`);
+      } catch (e) {
+        setExecLabMsg(String(e.message || e), true);
+      }
+    });
+    byId("execTestOrderBtn").addEventListener("click", async () => {
+      try {
+        const exchange = byId("execExchange").value;
+        const payload = {
+          symbol: (byId("execSymbol").value || "").trim(),
+          side: byId("execSide").value,
+          qty: Number(byId("execQty").value || "0"),
+        };
+        const path = exchange === "IBKR"
+          ? "/ops/execution/ibkr/test-order"
+          : "/ops/execution/binance/test-order";
+        const out = await api(path, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setExecLabOut(out);
+        setExecLabMsg(`Test order ${exchange} completed`);
+      } catch (e) {
+        setExecLabMsg(String(e.message || e), true);
       }
     });
     byId("boApplyFilterBtn").addEventListener("click", () => {
