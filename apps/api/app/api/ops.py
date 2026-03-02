@@ -3410,6 +3410,28 @@ def ops_console_page():
       }).join("") || '<tr><td colspan="4" class="muted">No users in scope</td></tr>';
     }
 
+    const runtimeVarHelp = {
+      "Permite alcista": "Autoriza operar cuando el mercado viene subiendo.",
+      "Permite bajista": "Autoriza operar cuando el mercado viene bajando.",
+      "Permite lateral": "Autoriza operar cuando el precio va de lado, sin direccion clara.",
+      "R:R minimo alcista": "Ganancia minima esperada frente a la perdida posible cuando el mercado sube.",
+      "R:R minimo bajista": "Ganancia minima esperada frente a la perdida posible cuando el mercado baja.",
+      "R:R minimo lateral": "Ganancia minima esperada frente a la perdida posible cuando el mercado esta lateral.",
+      "Volumen 24h minimo alcista": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado alcista.",
+      "Volumen 24h minimo bajista": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado bajista.",
+      "Volumen 24h minimo lateral": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado lateral.",
+      "Spread maximo (bps) alcista": "Diferencia maxima aceptada entre precio de compra y venta en mercado alcista.",
+      "Spread maximo (bps) bajista": "Diferencia maxima aceptada entre precio de compra y venta en mercado bajista.",
+      "Spread maximo (bps) lateral": "Diferencia maxima aceptada entre precio de compra y venta en mercado lateral.",
+      "Slippage maximo (bps) alcista": "Desviacion maxima permitida entre precio esperado y precio real al ejecutar en mercado alcista.",
+      "Slippage maximo (bps) bajista": "Desviacion maxima permitida entre precio esperado y precio real al ejecutar en mercado bajista.",
+      "Slippage maximo (bps) lateral": "Desviacion maxima permitida entre precio esperado y precio real al ejecutar en mercado lateral.",
+      "Tiempo maximo hold (min) alcista": "Minutos maximos que se permite mantener una operacion abierta en mercado alcista.",
+      "Tiempo maximo hold (min) bajista": "Minutos maximos que se permite mantener una operacion abierta en mercado bajista.",
+      "Tiempo maximo hold (min) lateral": "Minutos maximos que se permite mantener una operacion abierta en mercado lateral.",
+      "Action": "Boton para guardar cambios de la columna seleccionada.",
+    };
+
     function rpKey(strategyId, exchange) {
       return `${(strategyId || "").toUpperCase()}_${(exchange || "").toUpperCase()}`.replaceAll(/[^A-Z0-9_]/g, "_");
     }
@@ -3459,9 +3481,13 @@ def ops_console_page():
         </tr>
       `;
 
+      const labelWithHelp = (labelEs) => `
+        <span>${labelEs}</span>
+        <button class="ghost mini rp-help-btn" data-var="${esc(labelEs)}" style="margin-left:6px;padding:2px 7px;line-height:1.1">?</button>
+      `;
       const checkboxRow = (labelEs, keyName, keyPrefix) => `
         <tr>
-          <td>${labelEs}</td>
+          <td>${labelWithHelp(labelEs)}</td>
           ${ordered.map((p) => {
             const k = rpKey(p.strategy_id, p.exchange);
             return `<td><input id="${keyPrefix}_${k}" type="checkbox" ${p[keyName] ? "checked" : ""} /></td>`;
@@ -3470,7 +3496,7 @@ def ops_console_page():
       `;
       const numRow = (labelEs, keyName, keyPrefix, decimals = 2) => `
         <tr>
-          <td>${labelEs}</td>
+          <td>${labelWithHelp(labelEs)}</td>
           ${ordered.map((p) => {
             const k = rpKey(p.strategy_id, p.exchange);
             return `<td>${runtimeNumInput(`${keyPrefix}_${k}`, p[keyName], decimals)}</td>`;
@@ -3480,7 +3506,7 @@ def ops_console_page():
 
       const actionRow = `
         <tr>
-          <td>Action</td>
+          <td>${labelWithHelp("Action")}</td>
           ${ordered.map((p) => `<td><button class="save-runtime-btn ghost mini" data-strategy="${esc(p.strategy_id)}" data-exchange="${esc(p.exchange)}">Save</button></td>`).join("")}
         </tr>
       `;
@@ -3547,6 +3573,13 @@ def ops_console_page():
             setBoMsg(`Runtime policy save failed: ${String(e.message || e)}`, true);
             btn.disabled = false;
           }
+        });
+      });
+      document.querySelectorAll(".rp-help-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = btn.getAttribute("data-var") || "";
+          const msg = runtimeVarHelp[key] || "Sin definicion para esta variable.";
+          alert(`${key}\n\n${msg}`);
         });
       });
     }
