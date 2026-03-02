@@ -3656,6 +3656,30 @@ def ops_console_page():
         .replaceAll("'", "&#39;");
     }
 
+    function fmtBogotaDateTime(v) {
+      if (!v) return "-";
+      const d = new Date(v);
+      if (Number.isNaN(d.getTime())) return String(v);
+      const parts = new Intl.DateTimeFormat("es-CO", {
+        timeZone: "America/Bogota",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).formatToParts(d);
+      const get = (type) => (parts.find((p) => p.type === type) || {}).value || "00";
+      const year = get("year");
+      const month = get("month");
+      const day = get("day");
+      const hour = get("hour");
+      const minute = get("minute");
+      const second = get("second");
+      return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+    }
+
     function setOverall(v) {
       const el = byId("overall");
       el.textContent = v || "unknown";
@@ -3889,7 +3913,7 @@ def ops_console_page():
       const rows = out.rows || [];
       byId("autoPickReportBody").innerHTML = rows.map((r) => `
         <tr>
-          <td>${esc(r.timestamp)}</td>
+          <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
           <td>${esc(r.user_email)}</td>
           <td>${esc(r.exchange)}</td>
           <td>${esc(r.symbol || "-")}</td>
@@ -3899,7 +3923,7 @@ def ops_console_page():
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>
       `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
-      setAutoPickReportMsg(`Actualizado: ${out.generated_at} | ventana=${out.hours}h | filas=${rows.length}`);
+      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | filas=${rows.length}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -5034,7 +5058,11 @@ def ops_console_page():
     setInterval(renderExecCandidateStatus, 1000);
     setInterval(async () => {
       if (!state.token || !state.me || state.me.role !== "admin") return;
-      try { await loadAutoPickReport(); } catch (_) {}
+      try {
+        await loadAutoPickReport();
+      } catch (e) {
+        setAutoPickReportMsg(`Auto-refresh fallo: ${String(e.message || e)}`, true);
+      }
     }, 5 * 60 * 1000);
   </script>
 </body>
