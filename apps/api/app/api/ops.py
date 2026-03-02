@@ -121,6 +121,13 @@ def _tenant_id(user: User) -> str:
     return (user.tenant_id or "default")
 
 
+def _parse_symbol_allowlist(value: str) -> set[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return set()
+    return {item.strip().upper() for item in raw.split(",") if item.strip()}
+
+
 def _build_operational_readiness_report(
     db: Session,
     *,
@@ -453,6 +460,7 @@ def _evaluate_pretrade_for_user(
         payload=payload,
         market_regime=market_regime,
         runtime_policy=runtime_policy,
+        profile=profile,
     )
     checks.extend(strategy_checks)
 
@@ -475,9 +483,12 @@ def _evaluate_pretrade_for_user(
                 "trend_tf": payload.trend_tf,
                 "signal_tf": payload.signal_tf,
                 "timing_tf": payload.timing_tf,
+                "market_session": payload.market_session,
                 "market_trend_score": payload.market_trend_score,
                 "atr_pct": payload.atr_pct,
                 "momentum_score": payload.momentum_score,
+                "leverage": payload.leverage,
+                "funding_rate_bps": payload.funding_rate_bps,
             },
             "market_regime": market_regime,
             "regime_source": regime_source,
@@ -504,6 +515,7 @@ def _build_strategy_checks(
     payload: PretradeCheckRequest,
     market_regime: str,
     runtime_policy: dict,
+    profile: dict,
 ) -> list[dict]:
     checks: list[dict] = []
     ex = exchange.upper()
@@ -530,6 +542,13 @@ def _build_strategy_checks(
             "name": "market_regime_allowed",
             "passed": allow_regime,
             "detail": f"regime={market_regime} allowed={allow_regime}",
+        }
+    )
+    checks.append(
+        {
+            "name": "max_leverage",
+            "passed": float(payload.leverage) <= float(profile.get("max_leverage", 1.0)),
+            "detail": f"value={payload.leverage} required<={float(profile.get('max_leverage', 1.0))}",
         }
     )
 
@@ -563,9 +582,38 @@ def _build_strategy_checks(
     )
 
     if ex == "BINANCE":
+        allowlist = _parse_symbol_allowlist(settings.ALLOWED_BINANCE_SYMBOLS)
+        symbol_allowed = True if not allowlist else payload.symbol.upper() in allowlist
+        checks.append(
+            {
+                "name": "symbol_allowlist",
+                "passed": symbol_allowed,
+                "detail": payload.symbol.upper(),
+            }
+        )
+        checks.append(
+            {
+                "name": "crypto_event_clear",
+                "passed": not bool(payload.crypto_event_block),
+                "detail": f"crypto_event_block={payload.crypto_event_block}",
+            }
+        )
+
         min_volume = float(runtime_policy.get(f"min_volume_24h_usdt_{market_regime}", 0.0))
         max_spread = float(runtime_policy.get(f"max_spread_bps_{market_regime}", 15.0))
         max_slippage = float(runtime_policy.get(f"max_slippage_bps_{market_regime}", 20.0))
+        if payload.market_session == "OFF_HOURS":
+            min_volume *= 1.3
+            max_spread *= 0.8
+            max_slippage *= 0.8
+
+        # Conservative anti-carry guard for perpetual funding regimes.
+        if market_regime == "range":
+            max_funding = 12.0
+        elif market_regime == "bear":
+            max_funding = 15.0
+        else:
+            max_funding = 20.0
 
         checks.append(
             {
@@ -588,7 +636,23 @@ def _build_strategy_checks(
                 "detail": f"value={payload.slippage_bps} required<={max_slippage}",
             }
         )
+        checks.append(
+            {
+                "name": "funding_rate_bps",
+                "passed": abs(float(payload.funding_rate_bps)) <= max_funding,
+                "detail": f"value={payload.funding_rate_bps} abs_required<={max_funding}",
+            }
+        )
     else:
+        allowlist = _parse_symbol_allowlist(settings.ALLOWED_IBKR_SYMBOLS)
+        symbol_allowed = True if not allowlist else payload.symbol.upper() in allowlist
+        checks.append(
+            {
+                "name": "symbol_allowlist",
+                "passed": symbol_allowed,
+                "detail": payload.symbol.upper(),
+            }
+        )
         max_spread = float(runtime_policy.get(f"max_spread_bps_{market_regime}", 15.0))
         max_slippage = float(runtime_policy.get(f"max_slippage_bps_{market_regime}", 20.0))
         checks.append(

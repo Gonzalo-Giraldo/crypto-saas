@@ -115,6 +115,8 @@ pytest -q tests/integration
   - `ENFORCE_2FA_EMAILS=user1@dominio.com,user2@dominio.com` forces those accounts to have 2FA enabled.
   - `ENFORCE_PASSWORD_MAX_AGE=true` enforces password age policy on login/refresh.
   - `PASSWORD_MAX_AGE_DAYS=90` max password age in days (used when enforcement is enabled).
+  - `ALLOWED_BINANCE_SYMBOLS=BTCUSDT,ETHUSDT` optional allowlist for BINANCE symbols.
+  - `ALLOWED_IBKR_SYMBOLS=AAPL,MSFT,SPY` optional allowlist for IBKR symbols.
 - Exchange credentials are stored encrypted at rest with `ENCRYPTION_KEY`.
 - Binance live trading is not enabled here; only testnet `order/test` endpoint is wired.
 - IBKR test-order supports:
@@ -135,7 +137,9 @@ pytest -q tests/integration
   - timeframe checks (`trend_tf`, `signal_tf`, `timing_tf`)
   - RR threshold (`rr_estimate`)
   - BINANCE liquidity checks (`volume_24h_usdt`, `spread_bps`, `slippage_bps`)
+  - BINANCE extra guards (`crypto_event_block`, `funding_rate_bps`, session-aware stricter checks on `market_session=OFF_HOURS`)
   - IBKR market/event checks (`in_rth`, `macro_event_block`, `earnings_within_24h`)
+  - leverage guard (`leverage <= max_leverage` from risk profile)
   - automatic market regime detection (`bull`, `bear`, `range`) from input scores (`market_trend_score`, `atr_pct`, `momentum_score`)
   - regime-aware policy gates (allowed regime, RR threshold, liquidity/cost thresholds)
 - `exit` check now applies strategy-specific exit triggers:
@@ -157,6 +161,7 @@ pytest -q tests/integration
 - Backend Definition of Done: `docs/backend_definition_of_done.md`
 - IBKR real go-live package: `docs/ibkr_real_go_live_checklist.md`
 - Frontend MVP blueprint: `docs/frontend_mvp_blueprint.md`
+- Market regime matrix (Binance vs IBKR): `docs/market_regime_matrix_binance_ibkr.md`
 
 ## Smoke Script
 - Automated production smoke checks: `scripts/smoke_prod.sh`

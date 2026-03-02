@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     MAX_OPEN_QTY_PER_SYMBOL: float = 0.0
     MAX_OPEN_NOTIONAL_PER_EXCHANGE: float = 0.0
     DEFAULT_CAPITAL_BASE_USD: float = 10000.0
+    ALLOWED_BINANCE_SYMBOLS: str = ""
+    ALLOWED_IBKR_SYMBOLS: str = ""
     IDEMPOTENCY_KEY_MAX_AGE_DAYS: int = 30
     AUDIT_EXPORT_SIGNING_KEY: str = ""
 

@@ -54,6 +54,10 @@ class PretradeCheckRequest(BaseModel):
     in_rth: bool = True
     macro_event_block: bool = False
     earnings_within_24h: bool = False
+    crypto_event_block: bool = False
+    leverage: float = 1.0
+    funding_rate_bps: float = 0.0
+    market_session: str = "AUTO"
     market_trend_score: float = 0.0
     atr_pct: float = 0.0
     momentum_score: float = 0.0
@@ -70,6 +74,14 @@ class PretradeCheckRequest(BaseModel):
     @classmethod
     def normalize_tf(cls, value: str):
         return value.upper().strip()
+
+    @field_validator("market_session")
+    @classmethod
+    def normalize_market_session(cls, value: str):
+        normalized = (value or "AUTO").upper().strip()
+        if normalized not in {"AUTO", "RTH", "OFF_HOURS"}:
+            raise ValueError("market_session must be AUTO, RTH or OFF_HOURS")
+        return normalized
 
 
 class PretradeCheckOut(BaseModel):
