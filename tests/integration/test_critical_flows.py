@@ -141,6 +141,113 @@ def test_exchange_secrets_pretrade_and_test_orders(client, monkeypatch):
     assert deleted.status_code == 200, deleted.text
 
 
+def test_pretrade_scan_ranking_and_timing(client):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    saved = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert saved.status_code == 201, saved.text
+
+    scan = client.post(
+        "/ops/execution/pretrade/binance/scan",
+        headers=_auth(token),
+        json={
+            "top_n": 5,
+            "include_blocked": True,
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                },
+                {
+                    "symbol": "ETHUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 2.2,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.0,
+                    "atr_pct": 8.0,
+                    "momentum_score": 0.0,
+                },
+            ],
+        },
+    )
+    assert scan.status_code == 200, scan.text
+    data = scan.json()
+    assert data["exchange"] == "BINANCE"
+    assert data["scanned_assets"] == 2
+    assert data["returned_assets"] == 2
+    assert data["duration_ms_total"] >= 0
+    assert data["duration_ms_avg"] >= 0
+    assert len(data["assets"]) == 2
+    assert data["assets"][0]["score"] >= data["assets"][1]["score"]
+    assert data["assets"][0]["duration_ms"] >= 0
+    assert data["assets"][0]["total_checks"] >= data["assets"][0]["passed_checks"]
+
+    scan_only_passed = client.post(
+        "/ops/execution/pretrade/binance/scan",
+        headers=_auth(token),
+        json={
+            "top_n": 5,
+            "include_blocked": False,
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                },
+                {
+                    "symbol": "ETHUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 2.2,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.0,
+                    "atr_pct": 8.0,
+                    "momentum_score": 0.0,
+                },
+            ],
+        },
+    )
+    assert scan_only_passed.status_code == 200, scan_only_passed.text
+    only_passed = scan_only_passed.json()
+    assert only_passed["returned_assets"] >= 1
+    assert all(asset["passed"] for asset in only_passed["assets"])
+
+
 def test_security_posture_admin_only(client):
     admin_token = _token(client, "admin@test.com", "AdminPass123!")
     trader_token = _token(client, "trader@test.com", "TraderPass123!")

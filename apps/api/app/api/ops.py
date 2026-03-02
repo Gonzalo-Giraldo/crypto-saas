@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -32,6 +33,8 @@ from apps.api.app.schemas.strategy import (
     ExitCheckRequest,
     PretradeCheckOut,
     PretradeCheckRequest,
+    PretradeScanOut,
+    PretradeScanRequest,
     StrategyAssignmentOut,
     StrategyAssignOut,
     StrategyAssignRequest,
@@ -339,6 +342,7 @@ def _evaluate_pretrade_for_user(
     current_user: User,
     exchange: str,
     payload: PretradeCheckRequest,
+    log_event: bool = True,
 ):
     strategy = resolve_strategy_for_user_exchange(
         db=db,
@@ -465,37 +469,38 @@ def _evaluate_pretrade_for_user(
     checks.extend(strategy_checks)
 
     passed = all(bool(c["passed"]) for c in checks)
-    action = "pretrade.check.passed" if passed else "pretrade.check.blocked"
-    log_audit_event(
-        db,
-        action=action,
-        user_id=current_user.id,
-        entity_type="pretrade",
-        details={
-            "exchange": exchange,
-            "strategy_id": strategy_id,
-            "strategy_source": strategy["source"],
-            "request": {
-                "symbol": payload.symbol,
-                "side": payload.side,
-                "qty": payload.qty,
-                "rr_estimate": payload.rr_estimate,
-                "trend_tf": payload.trend_tf,
-                "signal_tf": payload.signal_tf,
-                "timing_tf": payload.timing_tf,
-                "market_session": payload.market_session,
-                "market_trend_score": payload.market_trend_score,
-                "atr_pct": payload.atr_pct,
-                "momentum_score": payload.momentum_score,
-                "leverage": payload.leverage,
-                "funding_rate_bps": payload.funding_rate_bps,
+    if log_event:
+        action = "pretrade.check.passed" if passed else "pretrade.check.blocked"
+        log_audit_event(
+            db,
+            action=action,
+            user_id=current_user.id,
+            entity_type="pretrade",
+            details={
+                "exchange": exchange,
+                "strategy_id": strategy_id,
+                "strategy_source": strategy["source"],
+                "request": {
+                    "symbol": payload.symbol,
+                    "side": payload.side,
+                    "qty": payload.qty,
+                    "rr_estimate": payload.rr_estimate,
+                    "trend_tf": payload.trend_tf,
+                    "signal_tf": payload.signal_tf,
+                    "timing_tf": payload.timing_tf,
+                    "market_session": payload.market_session,
+                    "market_trend_score": payload.market_trend_score,
+                    "atr_pct": payload.atr_pct,
+                    "momentum_score": payload.momentum_score,
+                    "leverage": payload.leverage,
+                    "funding_rate_bps": payload.funding_rate_bps,
+                },
+                "market_regime": market_regime,
+                "regime_source": regime_source,
+                "checks": checks,
             },
-            "market_regime": market_regime,
-            "regime_source": regime_source,
-            "checks": checks,
-        },
-    )
-    db.commit()
+        )
+        db.commit()
 
     return {
         "passed": passed,
@@ -506,6 +511,104 @@ def _evaluate_pretrade_for_user(
         "market_regime": market_regime,
         "regime_source": regime_source,
         "checks": checks,
+    }
+
+
+def _pretrade_score(result: dict, payload: PretradeCheckRequest) -> float:
+    checks = result.get("checks", [])
+    total = max(1, len(checks))
+    passed_count = sum(1 for c in checks if bool(c.get("passed")))
+    ratio = passed_count / total
+    # Base technical score from gate quality + moderate bias for momentum/trend and cost control.
+    score = ratio * 70.0
+    score += max(-1.0, min(1.0, float(payload.market_trend_score))) * 10.0
+    score += max(-1.0, min(1.0, float(payload.momentum_score))) * 8.0
+    score += max(0.0, min(3.0, float(payload.rr_estimate))) * 4.0
+    score -= max(0.0, float(payload.spread_bps)) * 0.4
+    score -= max(0.0, float(payload.slippage_bps)) * 0.35
+    score = max(0.0, min(100.0, score))
+    return round(score, 2)
+
+
+def _scan_pretrade_candidates(
+    db: Session,
+    current_user: User,
+    exchange: str,
+    payload: PretradeScanRequest,
+) -> dict:
+    started = time.perf_counter()
+    rows = []
+    passed_assets = 0
+    blocked_assets = 0
+
+    for candidate in payload.candidates:
+        tick = time.perf_counter()
+        exposure_check = {"name": "exposure_limits", "passed": True, "detail": "ok"}
+        try:
+            assert_exposure_limits(
+                db=db,
+                current_user=current_user,
+                exchange=exchange,
+                symbol=candidate.symbol,
+                qty=candidate.qty,
+                price_estimate=0.0,
+            )
+        except HTTPException as e:
+            exposure_check = {
+                "name": "exposure_limits",
+                "passed": False,
+                "detail": str(e.detail),
+            }
+        result = _evaluate_pretrade_for_user(
+            db=db,
+            current_user=current_user,
+            exchange=exchange,
+            payload=candidate,
+            log_event=False,
+        )
+        result["checks"].append(exposure_check)
+        result["passed"] = all(bool(c.get("passed")) for c in result.get("checks", []))
+        duration_ms = round((time.perf_counter() - tick) * 1000.0, 2)
+        checks = result.get("checks", [])
+        failed_checks = [str(c.get("name")) for c in checks if not bool(c.get("passed"))]
+        passed = bool(result.get("passed"))
+        if passed:
+            passed_assets += 1
+        else:
+            blocked_assets += 1
+        rows.append(
+            {
+                "symbol": candidate.symbol,
+                "side": candidate.side,
+                "qty": candidate.qty,
+                "passed": passed,
+                "score": _pretrade_score(result, candidate),
+                "market_regime": result.get("market_regime", "range"),
+                "regime_source": result.get("regime_source", "legacy"),
+                "passed_checks": len(checks) - len(failed_checks),
+                "total_checks": len(checks),
+                "failed_checks": failed_checks,
+                "duration_ms": duration_ms,
+                "pretrade": result,
+            }
+        )
+
+    rows.sort(key=lambda r: (r["passed"], r["score"]), reverse=True)
+    if not payload.include_blocked:
+        rows = [r for r in rows if bool(r["passed"])]
+    rows = rows[: payload.top_n]
+
+    total_ms = round((time.perf_counter() - started) * 1000.0, 2)
+    avg_ms = round(total_ms / max(1, len(payload.candidates)), 2)
+    return {
+        "exchange": exchange,
+        "scanned_assets": len(payload.candidates),
+        "returned_assets": len(rows),
+        "passed_assets": passed_assets,
+        "blocked_assets": blocked_assets,
+        "duration_ms_total": total_ms,
+        "duration_ms_avg": avg_ms,
+        "assets": rows,
     }
 
 
@@ -1458,6 +1561,80 @@ def pretrade_ibkr_check(
         response_payload=result,
     )
     return result
+
+
+@router.post("/execution/pretrade/binance/scan", response_model=PretradeScanOut)
+def pretrade_binance_scan(
+    payload: PretradeScanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="pretrade_scan",
+        exchange="BINANCE",
+    )
+    out = _scan_pretrade_candidates(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+        payload=payload,
+    )
+    log_audit_event(
+        db,
+        action="pretrade.scan.completed",
+        user_id=current_user.id,
+        entity_type="pretrade_scan",
+        details={
+            "exchange": "BINANCE",
+            "scanned_assets": out["scanned_assets"],
+            "returned_assets": out["returned_assets"],
+            "passed_assets": out["passed_assets"],
+            "blocked_assets": out["blocked_assets"],
+            "duration_ms_total": out["duration_ms_total"],
+            "duration_ms_avg": out["duration_ms_avg"],
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post("/execution/pretrade/ibkr/scan", response_model=PretradeScanOut)
+def pretrade_ibkr_scan(
+    payload: PretradeScanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="pretrade_scan",
+        exchange="IBKR",
+    )
+    out = _scan_pretrade_candidates(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+        payload=payload,
+    )
+    log_audit_event(
+        db,
+        action="pretrade.scan.completed",
+        user_id=current_user.id,
+        entity_type="pretrade_scan",
+        details={
+            "exchange": "IBKR",
+            "scanned_assets": out["scanned_assets"],
+            "returned_assets": out["returned_assets"],
+            "passed_assets": out["passed_assets"],
+            "blocked_assets": out["blocked_assets"],
+            "duration_ms_total": out["duration_ms_total"],
+            "duration_ms_avg": out["duration_ms_avg"],
+        },
+    )
+    db.commit()
+    return out
 
 
 @router.post("/execution/exit/binance/check", response_model=ExitCheckOut)

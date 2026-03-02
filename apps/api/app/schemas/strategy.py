@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import Field
 
 
 class StrategyAssignRequest(BaseModel):
@@ -93,6 +94,45 @@ class PretradeCheckOut(BaseModel):
     market_regime: str = "range"
     regime_source: str = "legacy"
     checks: list[dict]
+
+
+class PretradeScanRequest(BaseModel):
+    candidates: list[PretradeCheckRequest] = Field(default_factory=list)
+    top_n: int = 10
+    include_blocked: bool = True
+
+    @field_validator("top_n")
+    @classmethod
+    def validate_top_n(cls, value: int):
+        if value < 1 or value > 200:
+            raise ValueError("top_n must be between 1 and 200")
+        return value
+
+
+class PretradeScanAssetOut(BaseModel):
+    symbol: str
+    side: str
+    qty: float
+    passed: bool
+    score: float
+    market_regime: str
+    regime_source: str
+    passed_checks: int
+    total_checks: int
+    failed_checks: list[str]
+    duration_ms: float
+    pretrade: PretradeCheckOut
+
+
+class PretradeScanOut(BaseModel):
+    exchange: str
+    scanned_assets: int
+    returned_assets: int
+    passed_assets: int
+    blocked_assets: int
+    duration_ms_total: float
+    duration_ms_avg: float
+    assets: list[PretradeScanAssetOut]
 
 
 class ExitCheckRequest(BaseModel):
