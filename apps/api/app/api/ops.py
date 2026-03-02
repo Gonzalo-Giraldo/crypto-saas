@@ -2439,6 +2439,7 @@ def ops_console_page():
     table { width:100%; border-collapse:collapse; }
     th,td { border-bottom:1px solid var(--line); text-align:left; padding:8px 6px; font-size:13px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
+    .mini { padding:6px 8px; border-radius:8px; font-size:12px; }
   </style>
 </head>
 <body>
@@ -2515,6 +2516,7 @@ def ops_console_page():
       token: "",
       riskProfiles: [],
       usersById: {},
+      assignments: {},
     };
 
     function esc(v) {
@@ -2587,6 +2589,7 @@ def ops_console_page():
       state.token = "";
       state.riskProfiles = [];
       state.usersById = {};
+      state.assignments = {};
     }
 
     function fillHome(d) {
@@ -2614,6 +2617,11 @@ def ops_console_page():
       return values.map((v) => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
     }
 
+    function assignmentFor(userEmail, exchange) {
+      const k = `${(userEmail || "").toLowerCase()}|${exchange}`;
+      return state.assignments[k] || null;
+    }
+
     function fillBackofficeUsers(rows) {
       const canEdit = state.me && state.me.role === "admin";
       const riskProfiles = state.riskProfiles || [];
@@ -2627,8 +2635,23 @@ def ops_console_page():
         const riskCell = canEdit
           ? `<select id="risk_${u.user_id}">${_options(riskProfiles, risk)}</select>`
           : esc(risk);
+        const aBinance = assignmentFor(u.email, "BINANCE");
+        const aIbkr = assignmentFor(u.email, "IBKR");
+        const binanceCurrent = aBinance ? Boolean(aBinance.enabled) : Boolean(u.binance_enabled);
+        const ibkrCurrent = aIbkr ? Boolean(aIbkr.enabled) : Boolean(u.ibkr_enabled);
+        const binanceStrategy = (aBinance && aBinance.strategy_id) ? aBinance.strategy_id : "SWING_V1";
+        const ibkrStrategy = (aIbkr && aIbkr.strategy_id) ? aIbkr.strategy_id : "SWING_V1";
         const actionCell = canEdit
-          ? `<button class="save-user-btn ghost" data-user-id="${esc(u.user_id)}">Save</button>`
+          ? `
+            <div class="row">
+              <button class="save-user-btn ghost mini" data-user-id="${esc(u.user_id)}">Save</button>
+              <button class="set-pass-btn ghost mini" data-user-id="${esc(u.user_id)}">Set password</button>
+            </div>
+            <div class="row" style="margin-top:6px">
+              <button class="toggle-ex-btn ghost mini" data-user-email="${esc(u.email)}" data-exchange="BINANCE" data-next-enabled="${binanceCurrent ? "false" : "true"}" data-strategy-id="${esc(binanceStrategy)}">BINANCE ${binanceCurrent ? "off" : "on"}</button>
+              <button class="toggle-ex-btn ghost mini" data-user-email="${esc(u.email)}" data-exchange="IBKR" data-next-enabled="${ibkrCurrent ? "false" : "true"}" data-strategy-id="${esc(ibkrStrategy)}">IBKR ${ibkrCurrent ? "off" : "on"}</button>
+            </div>
+          `
           : '<span class="muted">readonly</span>';
         return `
         <tr>
@@ -2674,6 +2697,60 @@ def ops_console_page():
             }
           });
         });
+        document.querySelectorAll(".set-pass-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userId = btn.getAttribute("data-user-id");
+            if (!userId) return;
+            const user = state.usersById[userId];
+            const nextPassword = prompt(`New password for ${user ? user.email : userId} (min 8 chars):`);
+            if (nextPassword === null) return;
+            if (!nextPassword || nextPassword.length < 8) {
+              setBoMsg("Password must be at least 8 characters", true);
+              return;
+            }
+            btn.disabled = true;
+            setBoMsg("Updating password...");
+            try {
+              await api(`/users/${userId}/password`, {
+                method: "PUT",
+                headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ new_password: nextPassword }),
+              });
+              setBoMsg(`Password updated for ${user ? user.email : userId}`);
+            } catch (e) {
+              setBoMsg(`Password update failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
+        document.querySelectorAll(".toggle-ex-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userEmail = btn.getAttribute("data-user-email");
+            const exchange = btn.getAttribute("data-exchange");
+            const strategyId = btn.getAttribute("data-strategy-id") || "SWING_V1";
+            const nextEnabled = btn.getAttribute("data-next-enabled") === "true";
+            if (!userEmail || !exchange) return;
+            btn.disabled = true;
+            setBoMsg(`Updating ${exchange} assignment...`);
+            try {
+              await api("/ops/strategy/assign", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  user_email: userEmail,
+                  exchange,
+                  strategy_id: strategyId,
+                  enabled: nextEnabled,
+                }),
+              });
+              setBoMsg(`Assignment updated: ${userEmail} ${exchange}=${nextEnabled ? "on" : "off"}`);
+              await loadAll();
+            } catch (e) {
+              setBoMsg(`Assignment update failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
       }
     }
 
@@ -2695,6 +2772,7 @@ def ops_console_page():
         if (me.role === "admin") {
           reqs.push(api("/users", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/users/risk-profiles", { headers: { Authorization: `Bearer ${token}` } }));
+          reqs.push(api("/ops/strategy/assignments", { headers: { Authorization: `Bearer ${token}` } }));
         }
         const results = await Promise.all(reqs);
         const home = results[0];
@@ -2705,8 +2783,14 @@ def ops_console_page():
         if (me.role === "admin") {
           const users = results[3] || [];
           const profiles = results[4] || [];
+          const assignments = results[5] || [];
           users.forEach((u) => { state.usersById[u.id] = u; });
           state.riskProfiles = profiles;
+          state.assignments = {};
+          assignments.forEach((a) => {
+            const k = `${(a.user_email || "").toLowerCase()}|${a.exchange}`;
+            state.assignments[k] = a;
+          });
           setBoMsg("Admin edit mode enabled");
         } else {
           setBoMsg("Readonly mode");
