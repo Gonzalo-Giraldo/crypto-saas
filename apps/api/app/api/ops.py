@@ -3109,6 +3109,39 @@ def ops_console_page():
           </tbody>
         </table>
       </div>
+      <div class="card">
+        <strong>Readiness Table</strong>
+        <div class="muted" id="boReadySummary" style="margin-top:6px">Load readiness report to view details.</div>
+        <table style="margin-top:8px">
+          <thead>
+            <tr><th>Email</th><th>Role</th><th>Status</th><th>Main reason</th></tr>
+          </thead>
+          <tbody id="boReadyBody">
+            <tr><td colspan="4" class="muted">No readiness data</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" id="runtimePolicyCard" style="display:none">
+        <strong>Runtime Policies (Strategy x Exchange x Regime)</strong>
+        <div class="muted" style="margin-top:6px">Admin-defined policy table that controls automatic pretrade/exit decisions.</div>
+        <table style="margin-top:8px">
+          <thead>
+            <tr>
+              <th>Strategy</th><th>Exchange</th>
+              <th>Allow bull</th><th>Allow bear</th><th>Allow range</th>
+              <th>RR bull</th><th>RR bear</th><th>RR range</th>
+              <th>Vol bull</th><th>Vol bear</th><th>Vol range</th>
+              <th>Spread bull</th><th>Spread bear</th><th>Spread range</th>
+              <th>Slip bull</th><th>Slip bear</th><th>Slip range</th>
+              <th>Hold bull</th><th>Hold bear</th><th>Hold range</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="runtimePolicyBody">
+            <tr><td colspan="21" class="muted">No runtime policies loaded</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
   <script>
@@ -3124,6 +3157,7 @@ def ops_console_page():
       usersById: {},
       assignments: {},
       tradingControl: null,
+      runtimePolicies: [],
       backofficeUsers: [],
       refreshToken: "",
       snapshotData: null,
@@ -3307,6 +3341,7 @@ def ops_console_page():
       state.usersById = {};
       state.assignments = {};
       state.tradingControl = null;
+      state.runtimePolicies = [];
       state.backofficeUsers = [];
       state.refreshToken = "";
       state.snapshotData = null;
@@ -3317,6 +3352,8 @@ def ops_console_page():
       renderIncidentAudit(false);
       renderExecLab(false);
       renderSnapshot(false);
+      renderRuntimePolicies(false);
+      renderReadinessReportTable();
     }
 
     async function refreshSession() {
@@ -3357,6 +3394,120 @@ def ops_console_page():
         <tr><td><strong>Disabled</strong></td><td>${s.disabled}</td></tr>
         <tr><td><strong>Missing 2FA</strong></td><td>${s.users_missing_2fa}</td></tr>
         <tr><td><strong>Stale secrets</strong></td><td>${s.users_with_stale_secrets}</td></tr>`;
+    }
+
+    function renderReadinessReportTable() {
+      const data = state.readinessReportData;
+      if (!data || !Array.isArray(data.users)) {
+        byId("boReadySummary").textContent = "Load readiness report to view details.";
+        byId("boReadyBody").innerHTML = '<tr><td colspan="4" class="muted">No readiness data</td></tr>';
+        return;
+      }
+      const s = data.summary || {};
+      byId("boReadySummary").textContent = `total=${s.total_users || 0} ready=${s.ready_users || 0} missing=${s.missing_users || 0}`;
+      byId("boReadyBody").innerHTML = (data.users || []).map((u) => {
+        const failed = (u.checks || []).find((c) => !c.passed);
+        const reason = failed ? `${failed.name}: ${failed.detail}` : "ok";
+        return `
+          <tr>
+            <td>${esc(u.email || "")}</td>
+            <td>${esc(u.role || "")}</td>
+            <td><span class="badge ${u.ready ? "green" : "red"}">${u.ready ? "READY" : "MISSING"}</span></td>
+            <td>${esc(reason)}</td>
+          </tr>
+        `;
+      }).join("") || '<tr><td colspan="4" class="muted">No users in scope</td></tr>';
+    }
+
+    function rpKey(strategyId, exchange) {
+      return `${(strategyId || "").toUpperCase()}_${(exchange || "").toUpperCase()}`.replaceAll(/[^A-Z0-9_]/g, "_");
+    }
+
+    function runtimeNumInput(id, value, step="0.1") {
+      return `<input id="${id}" type="number" step="${step}" value="${Number(value || 0)}" style="max-width:100px" />`;
+    }
+
+    function renderRuntimePolicies(canEdit) {
+      const wrap = byId("runtimePolicyCard");
+      if (!wrap) return;
+      if (!canEdit) {
+        wrap.style.display = "none";
+        byId("runtimePolicyBody").innerHTML = '<tr><td colspan="21" class="muted">Admin only</td></tr>';
+        return;
+      }
+      wrap.style.display = "block";
+      const rows = state.runtimePolicies || [];
+      byId("runtimePolicyBody").innerHTML = rows.map((p) => {
+        const k = rpKey(p.strategy_id, p.exchange);
+        return `
+          <tr>
+            <td>${esc(p.strategy_id)}</td>
+            <td>${esc(p.exchange)}</td>
+            <td><input id="rp_allow_bull_${k}" type="checkbox" ${p.allow_bull ? "checked" : ""} /></td>
+            <td><input id="rp_allow_bear_${k}" type="checkbox" ${p.allow_bear ? "checked" : ""} /></td>
+            <td><input id="rp_allow_range_${k}" type="checkbox" ${p.allow_range ? "checked" : ""} /></td>
+            <td>${runtimeNumInput(`rp_rr_bull_${k}`, p.rr_min_bull)}</td>
+            <td>${runtimeNumInput(`rp_rr_bear_${k}`, p.rr_min_bear)}</td>
+            <td>${runtimeNumInput(`rp_rr_range_${k}`, p.rr_min_range)}</td>
+            <td>${runtimeNumInput(`rp_vol_bull_${k}`, p.min_volume_24h_usdt_bull, "1")}</td>
+            <td>${runtimeNumInput(`rp_vol_bear_${k}`, p.min_volume_24h_usdt_bear, "1")}</td>
+            <td>${runtimeNumInput(`rp_vol_range_${k}`, p.min_volume_24h_usdt_range, "1")}</td>
+            <td>${runtimeNumInput(`rp_spread_bull_${k}`, p.max_spread_bps_bull)}</td>
+            <td>${runtimeNumInput(`rp_spread_bear_${k}`, p.max_spread_bps_bear)}</td>
+            <td>${runtimeNumInput(`rp_spread_range_${k}`, p.max_spread_bps_range)}</td>
+            <td>${runtimeNumInput(`rp_slip_bull_${k}`, p.max_slippage_bps_bull)}</td>
+            <td>${runtimeNumInput(`rp_slip_bear_${k}`, p.max_slippage_bps_bear)}</td>
+            <td>${runtimeNumInput(`rp_slip_range_${k}`, p.max_slippage_bps_range)}</td>
+            <td>${runtimeNumInput(`rp_hold_bull_${k}`, p.max_hold_minutes_bull, "1")}</td>
+            <td>${runtimeNumInput(`rp_hold_bear_${k}`, p.max_hold_minutes_bear, "1")}</td>
+            <td>${runtimeNumInput(`rp_hold_range_${k}`, p.max_hold_minutes_range, "1")}</td>
+            <td><button class="save-runtime-btn ghost mini" data-strategy="${esc(p.strategy_id)}" data-exchange="${esc(p.exchange)}">Save</button></td>
+          </tr>
+        `;
+      }).join("") || '<tr><td colspan="21" class="muted">No runtime policies loaded</td></tr>';
+
+      document.querySelectorAll(".save-runtime-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const strategyId = btn.getAttribute("data-strategy");
+          const exchange = btn.getAttribute("data-exchange");
+          if (!strategyId || !exchange) return;
+          const k = rpKey(strategyId, exchange);
+          const payload = {
+            allow_bull: byId(`rp_allow_bull_${k}`).checked,
+            allow_bear: byId(`rp_allow_bear_${k}`).checked,
+            allow_range: byId(`rp_allow_range_${k}`).checked,
+            rr_min_bull: Number(byId(`rp_rr_bull_${k}`).value || "0"),
+            rr_min_bear: Number(byId(`rp_rr_bear_${k}`).value || "0"),
+            rr_min_range: Number(byId(`rp_rr_range_${k}`).value || "0"),
+            min_volume_24h_usdt_bull: Number(byId(`rp_vol_bull_${k}`).value || "0"),
+            min_volume_24h_usdt_bear: Number(byId(`rp_vol_bear_${k}`).value || "0"),
+            min_volume_24h_usdt_range: Number(byId(`rp_vol_range_${k}`).value || "0"),
+            max_spread_bps_bull: Number(byId(`rp_spread_bull_${k}`).value || "0"),
+            max_spread_bps_bear: Number(byId(`rp_spread_bear_${k}`).value || "0"),
+            max_spread_bps_range: Number(byId(`rp_spread_range_${k}`).value || "0"),
+            max_slippage_bps_bull: Number(byId(`rp_slip_bull_${k}`).value || "0"),
+            max_slippage_bps_bear: Number(byId(`rp_slip_bear_${k}`).value || "0"),
+            max_slippage_bps_range: Number(byId(`rp_slip_range_${k}`).value || "0"),
+            max_hold_minutes_bull: Number(byId(`rp_hold_bull_${k}`).value || "0"),
+            max_hold_minutes_bear: Number(byId(`rp_hold_bear_${k}`).value || "0"),
+            max_hold_minutes_range: Number(byId(`rp_hold_range_${k}`).value || "0"),
+          };
+          btn.disabled = true;
+          setBoMsg(`Saving runtime policy ${strategyId}/${exchange}...`);
+          try {
+            await api(`/ops/admin/strategy-runtime-policies/${strategyId}/${exchange}`, {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            setBoMsg(`Runtime policy saved: ${strategyId}/${exchange}`);
+            await loadAll();
+          } catch (e) {
+            setBoMsg(`Runtime policy save failed: ${String(e.message || e)}`, true);
+            btn.disabled = false;
+          }
+        });
+      });
     }
 
     function _options(values, selected) {
@@ -3657,6 +3808,8 @@ def ops_console_page():
           reqs.push(api("/users/risk-profiles", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/ops/strategy/assignments", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/ops/admin/trading-control", { headers: { Authorization: `Bearer ${token}` } }));
+          reqs.push(api("/ops/admin/strategy-runtime-policies", { headers: { Authorization: `Bearer ${token}` } }));
+          reqs.push(api("/users/readiness/report?real_only=true&include_service_users=false", { headers: { Authorization: `Bearer ${token}` } }));
         }
         const results = await Promise.all(reqs);
         const home = results[0];
@@ -3670,6 +3823,8 @@ def ops_console_page():
           const profiles = results[4] || [];
           const assignments = results[5] || [];
           const tradingControl = results[6] || null;
+          const runtimePolicies = results[7] || [];
+          const readinessReport = results[8] || null;
           users.forEach((u) => { state.usersById[u.id] = u; });
           state.riskProfiles = profiles;
           state.assignments = {};
@@ -3678,12 +3833,16 @@ def ops_console_page():
             state.assignments[k] = a;
           });
           state.tradingControl = tradingControl;
+          state.runtimePolicies = runtimePolicies;
+          state.readinessReportData = readinessReport;
           setBoMsg("Admin edit mode enabled");
           renderTradingControl(tradingControl, true);
           renderMaintenance(true);
           renderIncidentAudit(true);
           renderExecLab(true);
           renderSnapshot(true);
+          renderRuntimePolicies(true);
+          renderReadinessReportTable();
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
@@ -3691,6 +3850,9 @@ def ops_console_page():
           renderIncidentAudit(false);
           renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
           renderSnapshot(false);
+          renderRuntimePolicies(false);
+          state.readinessReportData = null;
+          renderReadinessReportTable();
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
@@ -4034,6 +4196,7 @@ def ops_console_page():
         state.readinessReportData = out;
         const s = out.summary || {};
         setBoMsg(`Readiness report: total=${s.total_users || 0} ready=${s.ready_users || 0} missing=${s.missing_users || 0}`);
+        renderReadinessReportTable();
       } catch (e) {
         setBoMsg(String(e.message || e), true);
       }
