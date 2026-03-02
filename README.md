@@ -54,6 +54,7 @@ pytest -q tests/integration
 - `PATCH /users/{user_id}/role` (admin)
 - `PATCH /users/{user_id}/email` (admin)
 - `PUT /users/{user_id}/password` (admin)
+- `POST /users/{user_id}/2fa/reset` (admin; rotates and re-enables 2FA with new secret)
 - `PUT /users/{user_id}/risk-profile` (admin, set/clear override)
 - `GET /users/risk-profiles` (admin)
 - `GET /users/{user_id}/readiness-check` (admin, auto validation after changes)

@@ -465,3 +465,35 @@ def test_ops_console_page_served(client):
     res = client.get("/ops/console")
     assert res.status_code == 200
     assert "Ops Console v1" in res.text
+
+
+def test_admin_can_reset_user_2fa(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+
+    users = client.get("/users", headers=_auth(admin_token))
+    assert users.status_code == 200, users.text
+    trader = next((u for u in users.json() if u["email"] == "trader@test.com"), None)
+    assert trader is not None
+
+    reset = client.post(
+        f"/users/{trader['id']}/2fa/reset",
+        headers=_auth(admin_token),
+    )
+    assert reset.status_code == 200, reset.text
+    payload = reset.json()
+    assert payload["enabled"] is True
+    assert payload["email"] == "trader@test.com"
+    assert payload["secret"]
+    assert "otpauth://" in payload["otpauth_uri"]
+
+    no_otp = _login(client, "trader@test.com", "TraderPass123!")
+    assert no_otp.status_code == 401
+    assert no_otp.json()["detail"] == "OTP required"
+
+    with_otp = _login(
+        client,
+        "trader@test.com",
+        "TraderPass123!",
+        otp=pyotp.TOTP(payload["secret"]).now(),
+    )
+    assert with_otp.status_code == 200, with_otp.text

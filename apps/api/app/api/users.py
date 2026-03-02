@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func, select
+import pyotp
 
 from apps.api.app.db.session import get_db
 from apps.api.app.models.exchange_secret import ExchangeSecret
@@ -18,6 +19,7 @@ from apps.api.app.schemas.user import (
     UserRiskProfileUpdate,
     UserEmailUpdate,
     UserPasswordUpdate,
+    User2FAResetOut,
 )
 from apps.api.app.api.deps import get_current_user, require_role
 from apps.api.app.core.config import settings
@@ -332,6 +334,48 @@ def update_user_password(
     )
     db.commit()
     return {"message": "Password updated"}
+
+
+@router.post("/{user_id}/2fa/reset", response_model=User2FAResetOut)
+def reset_user_2fa(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    user = _tenant_user_or_404(db, user_id, current_user)
+    secret = pyotp.random_base32()
+    issuer = getattr(settings, "APP_2FA_ISSUER", None) or "crypto-saas"
+    otpauth_uri = pyotp.TOTP(secret).provisioning_uri(
+        name=user.email,
+        issuer_name=issuer,
+    )
+
+    row = db.execute(
+        select(UserTwoFactor).where(UserTwoFactor.user_id == user.id)
+    ).scalar_one_or_none()
+    if row:
+        row.secret = secret
+        row.enabled = True
+    else:
+        db.add(UserTwoFactor(user_id=user.id, secret=secret, enabled=True))
+
+    log_audit_event(
+        db,
+        action="user.2fa.reset",
+        user_id=current_user.id,
+        entity_type="user",
+        entity_id=user.id,
+        details={"target_email": user.email},
+    )
+    db.commit()
+    return User2FAResetOut(
+        user_id=user.id,
+        email=user.email,
+        enabled=True,
+        secret=secret,
+        otpauth_uri=otpauth_uri,
+        message="2FA reset and enabled with new secret",
+    )
 
 
 @router.put("/{user_id}/risk-profile", response_model=UserOut)

@@ -36,3 +36,12 @@ class UserEmailUpdate(BaseModel):
 
 class UserPasswordUpdate(BaseModel):
     new_password: str
+
+
+class User2FAResetOut(BaseModel):
+    user_id: str
+    email: str
+    enabled: bool
+    secret: str
+    otpauth_uri: str
+    message: str

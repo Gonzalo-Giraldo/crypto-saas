@@ -2686,6 +2686,7 @@ def ops_console_page():
             <div class="row">
               <button class="save-user-btn ghost mini" data-user-id="${esc(u.user_id)}">Save</button>
               <button class="set-pass-btn ghost mini" data-user-id="${esc(u.user_id)}">Set password</button>
+              <button class="reset-2fa-btn ghost mini" data-user-id="${esc(u.user_id)}">Reset 2FA</button>
             </div>
             <div class="row" style="margin-top:6px">
               <button class="toggle-ex-btn ghost mini" data-user-email="${esc(u.email)}" data-exchange="BINANCE" data-next-enabled="${binanceCurrent ? "false" : "true"}" data-strategy-id="${esc(binanceStrategy)}">BINANCE ${binanceCurrent ? "off" : "on"}</button>
@@ -2759,6 +2760,34 @@ def ops_console_page():
               setBoMsg(`Password updated for ${user ? user.email : userId}`);
             } catch (e) {
               setBoMsg(`Password update failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
+        document.querySelectorAll(".reset-2fa-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userId = btn.getAttribute("data-user-id");
+            if (!userId) return;
+            const user = state.usersById[userId];
+            const ok = confirm(`Reset 2FA for ${user ? user.email : userId}?`);
+            if (!ok) return;
+            btn.disabled = true;
+            setBoMsg("Resetting 2FA...");
+            try {
+              const out = await api(`/users/${userId}/2fa/reset`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${state.token}` },
+              });
+              setBoMsg(`2FA reset ok for ${out.email}`);
+              alert(
+                `2FA reset for ${out.email}\\n\\n` +
+                `SECRET: ${out.secret}\\n\\n` +
+                `OTPAUTH URI: ${out.otpauth_uri}\\n\\n` +
+                `Add this as a NEW account in Authenticator.`
+              );
+              await loadAll();
+            } catch (e) {
+              setBoMsg(`2FA reset failed: ${String(e.message || e)}`, true);
               btn.disabled = false;
             }
           });
