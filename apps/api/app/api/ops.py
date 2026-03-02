@@ -2508,6 +2508,29 @@ def ops_console_page():
           </div>
           <div id="maintMsg" class="muted" style="margin-top:6px">No data</div>
         </div>
+        <div id="incidentAuditCtl" class="card" style="margin-top:10px;display:none">
+          <div class="row">
+            <strong>Incident & Audit</strong>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="incidentTitle" placeholder="incident title (optional)" style="min-width:320px" />
+            <button id="openIncidentBtn" class="mini">Open Incident</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="auditLimit" type="number" min="1" max="200" value="20" style="max-width:120px" />
+            <button id="auditLoadBtn" class="ghost mini">Load audit</button>
+            <button id="auditExportBtn" class="ghost mini">Export signed JSON</button>
+          </div>
+          <div id="incidentAuditMsg" class="muted" style="margin-top:6px">No data</div>
+          <table style="margin-top:8px">
+            <thead>
+              <tr><th>When</th><th>User</th><th>Action</th><th>Entity</th></tr>
+            </thead>
+            <tbody id="auditBody">
+              <tr><td colspan="4" class="muted">No audit loaded</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -2597,6 +2620,13 @@ def ops_console_page():
       el.style.color = bad ? "var(--bad)" : "var(--muted)";
     }
 
+    function setIncidentAuditMsg(msg, bad=false) {
+      const el = byId("incidentAuditMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
     function renderTradingControl(control, canEdit) {
       const wrap = byId("tradingCtl");
       if (!wrap) return;
@@ -2619,6 +2649,14 @@ def ops_console_page():
       if (!wrap) return;
       wrap.style.display = canEdit ? "block" : "none";
       if (canEdit) setMaintMsg("Ready");
+    }
+
+    function renderIncidentAudit(canEdit) {
+      const wrap = byId("incidentAuditCtl");
+      if (!wrap) return;
+      wrap.style.display = canEdit ? "block" : "none";
+      if (canEdit) setIncidentAuditMsg("Ready");
+      if (!canEdit) byId("auditBody").innerHTML = '<tr><td colspan="4" class="muted">No audit loaded</td></tr>';
     }
 
     function authHeaders(token, isForm=false) {
@@ -2675,6 +2713,7 @@ def ops_console_page():
       state.backofficeUsers = [];
       renderTradingControl(null, false);
       renderMaintenance(false);
+      renderIncidentAudit(false);
     }
 
     function fillHome(d) {
@@ -3020,10 +3059,12 @@ def ops_console_page():
           setBoMsg("Admin edit mode enabled");
           renderTradingControl(tradingControl, true);
           renderMaintenance(true);
+          renderIncidentAudit(true);
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
           renderMaintenance(false);
+          renderIncidentAudit(false);
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
@@ -3035,6 +3076,7 @@ def ops_console_page():
         setBoMsg("No backoffice access for this role", true);
         renderTradingControl(null, false);
         renderMaintenance(false);
+        renderIncidentAudit(false);
       }
     }
 
@@ -3132,6 +3174,59 @@ def ops_console_page():
         setMaintMsg(`Idempotency cleanup: deleted=${d.deleted} max_age_days=${d.max_age_days}`);
       } catch (e) {
         setMaintMsg(String(e.message || e), true);
+      }
+    });
+    byId("openIncidentBtn").addEventListener("click", () => {
+      try {
+        const ts = new Date().toISOString();
+        const customTitle = (byId("incidentTitle").value || "").trim();
+        const title = encodeURIComponent(customTitle || `[Ops Console] Incident ${ts}`);
+        const body = encodeURIComponent(
+          `Opened from /ops/console\n\n- Timestamp: ${ts}\n- Context: console incident action\n`
+        );
+        window.open(`https://github.com/Gonzalo-Giraldo/crypto-saas/issues/new?title=${title}&body=${body}`, "_blank");
+        setIncidentAuditMsg("Incident form opened in GitHub");
+      } catch (e) {
+        setIncidentAuditMsg(String(e.message || e), true);
+      }
+    });
+    byId("auditLoadBtn").addEventListener("click", async () => {
+      try {
+        const limit = Math.min(200, Math.max(1, parseInt(byId("auditLimit").value || "20", 10)));
+        const rows = await api(`/ops/audit/all?limit=${limit}`, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        byId("auditBody").innerHTML = (rows || []).map((r) => `
+          <tr>
+            <td class="mono">${esc(r.created_at || "")}</td>
+            <td class="mono">${esc(r.user_id || "")}</td>
+            <td>${esc(r.action || "")}</td>
+            <td>${esc(r.entity_type || "")}</td>
+          </tr>
+        `).join("") || '<tr><td colspan="4" class="muted">No audit rows</td></tr>';
+        setIncidentAuditMsg(`Audit loaded: ${rows.length || 0} rows`);
+      } catch (e) {
+        setIncidentAuditMsg(String(e.message || e), true);
+      }
+    });
+    byId("auditExportBtn").addEventListener("click", async () => {
+      try {
+        const limit = Math.min(2000, Math.max(1, parseInt(byId("auditLimit").value || "20", 10) * 10));
+        const out = await api(`/ops/admin/audit/export?limit=${limit}`, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `audit_export_${new Date().toISOString().replaceAll(":", "-")}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setIncidentAuditMsg(`Audit export downloaded (records=${(out.meta && out.meta.records_count) || 0})`);
+      } catch (e) {
+        setIncidentAuditMsg(String(e.message || e), true);
       }
     });
     byId("boApplyFilterBtn").addEventListener("click", () => {
