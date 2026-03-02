@@ -2480,6 +2480,19 @@ def ops_console_page():
           <div class="kpi"><div class="muted">Blocked opens</div><div id="k_blocked" class="v">-</div></div>
         </div>
         <div id="homeMsg" class="muted" style="margin-top:8px">Load data to start.</div>
+        <div id="tradingCtl" class="card" style="margin-top:10px;display:none">
+          <div class="row">
+            <strong>Global Trading Control</strong>
+            <span id="tradingCtlBadge" class="badge yellow">unknown</span>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="tradingCtlReason" placeholder="reason (required to disable)" style="min-width:320px" />
+            <button id="tradingCtlDisableBtn" class="mini">Disable</button>
+            <button id="tradingCtlEnableBtn" class="ghost mini">Enable</button>
+            <button id="tradingCtlRefreshBtn" class="ghost mini">Refresh</button>
+          </div>
+          <div id="tradingCtlMsg" class="muted" style="margin-top:6px">No data</div>
+        </div>
       </div>
     </div>
 
@@ -2517,6 +2530,7 @@ def ops_console_page():
       riskProfiles: [],
       usersById: {},
       assignments: {},
+      tradingControl: null,
     };
 
     function esc(v) {
@@ -2538,6 +2552,30 @@ def ops_console_page():
       const el = byId("boMsg");
       el.textContent = msg;
       el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
+    function setTradingCtlMsg(msg, bad=false) {
+      const el = byId("tradingCtlMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
+    function renderTradingControl(control, canEdit) {
+      const wrap = byId("tradingCtl");
+      if (!wrap) return;
+      if (!canEdit) {
+        wrap.style.display = "none";
+        return;
+      }
+      wrap.style.display = "block";
+      const badge = byId("tradingCtlBadge");
+      const enabled = Boolean(control && control.trading_enabled);
+      badge.textContent = enabled ? "enabled" : "disabled";
+      badge.className = "badge " + (enabled ? "green" : "red");
+      const by = control && control.updated_by ? control.updated_by : "unknown";
+      const reason = control && control.reason ? control.reason : "-";
+      setTradingCtlMsg(`updated_by=${by} | reason=${reason}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -2590,6 +2628,8 @@ def ops_console_page():
       state.riskProfiles = [];
       state.usersById = {};
       state.assignments = {};
+      state.tradingControl = null;
+      renderTradingControl(null, false);
     }
 
     function fillHome(d) {
@@ -2773,6 +2813,7 @@ def ops_console_page():
           reqs.push(api("/users", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/users/risk-profiles", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/ops/strategy/assignments", { headers: { Authorization: `Bearer ${token}` } }));
+          reqs.push(api("/ops/admin/trading-control", { headers: { Authorization: `Bearer ${token}` } }));
         }
         const results = await Promise.all(reqs);
         const home = results[0];
@@ -2784,6 +2825,7 @@ def ops_console_page():
           const users = results[3] || [];
           const profiles = results[4] || [];
           const assignments = results[5] || [];
+          const tradingControl = results[6] || null;
           users.forEach((u) => { state.usersById[u.id] = u; });
           state.riskProfiles = profiles;
           state.assignments = {};
@@ -2791,9 +2833,12 @@ def ops_console_page():
             const k = `${(a.user_email || "").toLowerCase()}|${a.exchange}`;
             state.assignments[k] = a;
           });
+          state.tradingControl = tradingControl;
           setBoMsg("Admin edit mode enabled");
+          renderTradingControl(tradingControl, true);
         } else {
           setBoMsg("Readonly mode");
+          renderTradingControl(null, false);
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
@@ -2803,7 +2848,23 @@ def ops_console_page():
         byId("boSummary").innerHTML = '<tr><td class="muted">No access to backoffice summary for this role</td></tr>';
         byId("boUsers").innerHTML = '<tr><td colspan="8" class="muted">No access to backoffice users for this role</td></tr>';
         setBoMsg("No backoffice access for this role", true);
+        renderTradingControl(null, false);
       }
+    }
+
+    async function updateTradingControl(nextEnabled) {
+      if (!state.token) throw new Error("Token required");
+      if (!state.me || state.me.role !== "admin") throw new Error("Admin required");
+      const reason = (byId("tradingCtlReason").value || "").trim();
+      if (!nextEnabled && !reason) throw new Error("Reason is required to disable trading");
+      const resp = await api("/ops/admin/trading-control", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ trading_enabled: nextEnabled, reason: reason || null }),
+      });
+      state.tradingControl = resp;
+      renderTradingControl(resp, true);
+      setTradingCtlMsg(`Trading ${nextEnabled ? "enabled" : "disabled"} successfully`);
     }
 
     document.querySelectorAll(".tab").forEach((b) => {
@@ -2822,6 +2883,21 @@ def ops_console_page():
       try { await loadAll(); } catch (e) { byId("sessionInfo").textContent = String(e.message || e); setOverall("red"); }
     });
     byId("logoutBtn").addEventListener("click", () => logout());
+    byId("tradingCtlDisableBtn").addEventListener("click", async () => {
+      try { await updateTradingControl(false); } catch (e) { setTradingCtlMsg(String(e.message || e), true); }
+    });
+    byId("tradingCtlEnableBtn").addEventListener("click", async () => {
+      try { await updateTradingControl(true); } catch (e) { setTradingCtlMsg(String(e.message || e), true); }
+    });
+    byId("tradingCtlRefreshBtn").addEventListener("click", async () => {
+      try {
+        const d = await api("/ops/admin/trading-control", { headers: { Authorization: `Bearer ${state.token}` } });
+        state.tradingControl = d;
+        renderTradingControl(d, true);
+      } catch (e) {
+        setTradingCtlMsg(String(e.message || e), true);
+      }
+    });
 
     const remembered = localStorage.getItem(STORE_TOKEN) || "";
     const rememberedEmail = localStorage.getItem(STORE_EMAIL) || "";
