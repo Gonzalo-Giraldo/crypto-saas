@@ -2692,6 +2692,14 @@ def ops_console_page():
               <button class="toggle-ex-btn ghost mini" data-user-email="${esc(u.email)}" data-exchange="BINANCE" data-next-enabled="${binanceCurrent ? "false" : "true"}" data-strategy-id="${esc(binanceStrategy)}">BINANCE ${binanceCurrent ? "off" : "on"}</button>
               <button class="toggle-ex-btn ghost mini" data-user-email="${esc(u.email)}" data-exchange="IBKR" data-next-enabled="${ibkrCurrent ? "false" : "true"}" data-strategy-id="${esc(ibkrStrategy)}">IBKR ${ibkrCurrent ? "off" : "on"}</button>
             </div>
+            <div class="row" style="margin-top:6px">
+              <button class="seed-secret-btn ghost mini" data-user-id="${esc(u.user_id)}" data-exchange="BINANCE">Set BINANCE secret</button>
+              <button class="del-secret-btn ghost mini" data-user-id="${esc(u.user_id)}" data-exchange="BINANCE">Del BINANCE secret</button>
+            </div>
+            <div class="row" style="margin-top:6px">
+              <button class="seed-secret-btn ghost mini" data-user-id="${esc(u.user_id)}" data-exchange="IBKR">Set IBKR secret</button>
+              <button class="del-secret-btn ghost mini" data-user-id="${esc(u.user_id)}" data-exchange="IBKR">Del IBKR secret</button>
+            </div>
           `
           : '<span class="muted">readonly</span>';
         return `
@@ -2816,6 +2824,63 @@ def ops_console_page():
               await loadAll();
             } catch (e) {
               setBoMsg(`Assignment update failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
+        document.querySelectorAll(".seed-secret-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userId = btn.getAttribute("data-user-id");
+            const exchange = btn.getAttribute("data-exchange");
+            if (!userId || !exchange) return;
+            const user = state.usersById[userId];
+            const apiKey = prompt(`API key for ${exchange} (${user ? user.email : userId}):`);
+            if (apiKey === null) return;
+            const apiSecret = prompt(`API secret for ${exchange} (${user ? user.email : userId}):`);
+            if (apiSecret === null) return;
+            if (!apiKey.trim() || !apiSecret) {
+              setBoMsg("API key and API secret are required", true);
+              return;
+            }
+            btn.disabled = true;
+            setBoMsg(`Saving ${exchange} secret...`);
+            try {
+              await api(`/users/${userId}/exchange-secrets`, {
+                method: "PUT",
+                headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  exchange,
+                  api_key: apiKey.trim(),
+                  api_secret: apiSecret,
+                }),
+              });
+              setBoMsg(`Secret saved for ${user ? user.email : userId} (${exchange})`);
+              await loadAll();
+            } catch (e) {
+              setBoMsg(`Secret save failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
+        document.querySelectorAll(".del-secret-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userId = btn.getAttribute("data-user-id");
+            const exchange = btn.getAttribute("data-exchange");
+            if (!userId || !exchange) return;
+            const user = state.usersById[userId];
+            const ok = confirm(`Delete ${exchange} secret for ${user ? user.email : userId}?`);
+            if (!ok) return;
+            btn.disabled = true;
+            setBoMsg(`Deleting ${exchange} secret...`);
+            try {
+              await api(`/users/${userId}/exchange-secrets/${exchange}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${state.token}` },
+              });
+              setBoMsg(`Secret deleted for ${user ? user.email : userId} (${exchange})`);
+              await loadAll();
+            } catch (e) {
+              setBoMsg(`Secret delete failed: ${String(e.message || e)}`, true);
               btn.disabled = false;
             }
           });
