@@ -3723,7 +3723,6 @@ def ops_console_page():
       const binance = binanceRaw.filter((x) => !!x);
       const ibkr = ibkrRaw.filter((x) => !!x);
       const total = binance.length + ibkr.length;
-      if (total < 1) throw new Error("Configura al menos 1 simbolo");
       if (total > 4) throw new Error("Maximo 4 simbolos");
       if (new Set(binance).size !== binance.length) throw new Error("BINANCE no debe repetir simbolos");
       if (new Set(ibkr).size !== ibkr.length) throw new Error("IBKR no debe repetir simbolos");
@@ -3762,7 +3761,12 @@ def ops_console_page():
         expires_at_ms: Date.now() + EXEC_CANDIDATE_TTL_MS,
       };
       renderExecCandidateStatus();
-      setExecLabMsg("Candidatos aplicados por 5 minutos");
+      const total = (byExchange.BINANCE || []).length + (byExchange.IBKR || []).length;
+      if (total === 0) {
+        setExecLabMsg("No hay simbolos candidatos");
+      } else {
+        setExecLabMsg("Candidatos aplicados por 5 minutos");
+      }
     }
 
     function buildCandidateTemplate(exchange, symbol) {
@@ -4772,14 +4776,13 @@ def ops_console_page():
         return parsed;
       }
       const cfg = state.execCandidateConfig;
-      if (!cfg) throw new Error("Configura candidatos en el panel (2 BINANCE + 2 IBKR) y aplica 5 minutos");
+      if (!cfg) return [];
       if (cfg.expires_at_ms <= Date.now()) {
         state.execCandidateConfig = null;
         renderExecCandidateStatus();
-        throw new Error("La configuracion de candidatos caduco. Vuelve a aplicar 5 minutos");
+        return [];
       }
       const symbols = cfg.by_exchange[exchange] || [];
-      if (!symbols.length) throw new Error(`No hay simbolos configurados para ${exchange}`);
       return symbols.map((symbol) => buildCandidateTemplate(exchange, symbol));
     }
     byId("execApplyCandidatesBtn").addEventListener("click", () => {
@@ -4892,6 +4895,11 @@ def ops_console_page():
         const topN = Number(byId("execAutoTopN").value || "10");
         const dryRun = !!byId("execAutoDryRun").checked;
         const candidates = resolveExecCandidates(exchange);
+        if (!Array.isArray(candidates) || candidates.length === 0) {
+          setExecLabOut({});
+          setExecLabMsg("No hay simbolos candidatos");
+          return;
+        }
         const path = exchange === "IBKR"
           ? "/ops/execution/pretrade/ibkr/auto-pick"
           : "/ops/execution/pretrade/binance/auto-pick";
