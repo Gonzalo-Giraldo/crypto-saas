@@ -3126,7 +3126,7 @@ def ops_console_page():
         <div class="muted" style="margin-top:6px">Admin-defined policy table that controls automatic pretrade/exit decisions.</div>
         <table style="margin-top:8px">
           <thead id="runtimePolicyHead">
-            <tr><th>Variable</th><th class="muted">Load policies first</th></tr>
+            <tr><th>Variable (Finanzas)</th><th class="muted">Load policies first</th></tr>
           </thead>
           <tbody id="runtimePolicyBody">
             <tr><td colspan="2" class="muted">No runtime policies loaded</td></tr>
@@ -3414,8 +3414,24 @@ def ops_console_page():
       return `${(strategyId || "").toUpperCase()}_${(exchange || "").toUpperCase()}`.replaceAll(/[^A-Z0-9_]/g, "_");
     }
 
-    function runtimeNumInput(id, value, step="0.1") {
-      return `<input id="${id}" type="number" step="${step}" value="${Number(value || 0)}" style="max-width:100px" />`;
+    function fmtNumber(value, decimals=2) {
+      const n = Number(value || 0);
+      if (!Number.isFinite(n)) return "0";
+      return n.toLocaleString("en-US", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      });
+    }
+
+    function parseNumberInput(v) {
+      const raw = String(v ?? "").trim();
+      if (!raw) return 0;
+      const n = Number(raw.replaceAll(",", ""));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function runtimeNumInput(id, value, decimals=2) {
+      return `<input id="${id}" type="text" inputmode="decimal" value="${fmtNumber(value, decimals)}" style="max-width:110px" />`;
     }
 
     function renderRuntimePolicies(canEdit) {
@@ -3423,14 +3439,14 @@ def ops_console_page():
       if (!wrap) return;
       if (!canEdit) {
         wrap.style.display = "none";
-        byId("runtimePolicyHead").innerHTML = '<tr><th>Variable</th><th class="muted">Admin only</th></tr>';
+        byId("runtimePolicyHead").innerHTML = '<tr><th>Variable (Finanzas)</th><th class="muted">Admin only</th></tr>';
         byId("runtimePolicyBody").innerHTML = '<tr><td colspan="2" class="muted">Admin only</td></tr>';
         return;
       }
       wrap.style.display = "block";
       const rows = state.runtimePolicies || [];
       if (!rows.length) {
-        byId("runtimePolicyHead").innerHTML = '<tr><th>Variable</th><th class="muted">No data</th></tr>';
+        byId("runtimePolicyHead").innerHTML = '<tr><th>Variable (Finanzas)</th><th class="muted">No data</th></tr>';
         byId("runtimePolicyBody").innerHTML = '<tr><td colspan="2" class="muted">No runtime policies loaded</td></tr>';
         return;
       }
@@ -3438,26 +3454,26 @@ def ops_console_page():
       const ordered = [...rows].sort((a, b) => `${a.strategy_id}_${a.exchange}`.localeCompare(`${b.strategy_id}_${b.exchange}`));
       byId("runtimePolicyHead").innerHTML = `
         <tr>
-          <th>Variable</th>
+          <th>Variable (Finanzas)</th>
           ${ordered.map((p) => `<th>${esc(p.strategy_id)}<br><span class="muted">${esc(p.exchange)}</span></th>`).join("")}
         </tr>
       `;
 
-      const checkboxRow = (label, keyPrefix) => `
+      const checkboxRow = (labelEs, keyName, keyPrefix) => `
         <tr>
-          <td>${label}</td>
+          <td>${labelEs}</td>
           ${ordered.map((p) => {
             const k = rpKey(p.strategy_id, p.exchange);
-            return `<td><input id="${keyPrefix}_${k}" type="checkbox" ${p[label] ? "checked" : ""} /></td>`;
+            return `<td><input id="${keyPrefix}_${k}" type="checkbox" ${p[keyName] ? "checked" : ""} /></td>`;
           }).join("")}
         </tr>
       `;
-      const numRow = (label, keyPrefix, step = "0.1") => `
+      const numRow = (labelEs, keyName, keyPrefix, decimals = 2) => `
         <tr>
-          <td>${label}</td>
+          <td>${labelEs}</td>
           ${ordered.map((p) => {
             const k = rpKey(p.strategy_id, p.exchange);
-            return `<td>${runtimeNumInput(`${keyPrefix}_${k}`, p[label], step)}</td>`;
+            return `<td>${runtimeNumInput(`${keyPrefix}_${k}`, p[keyName], decimals)}</td>`;
           }).join("")}
         </tr>
       `;
@@ -3470,24 +3486,24 @@ def ops_console_page():
       `;
 
       byId("runtimePolicyBody").innerHTML = [
-        checkboxRow("allow_bull", "rp_allow_bull"),
-        checkboxRow("allow_bear", "rp_allow_bear"),
-        checkboxRow("allow_range", "rp_allow_range"),
-        numRow("rr_min_bull", "rp_rr_bull"),
-        numRow("rr_min_bear", "rp_rr_bear"),
-        numRow("rr_min_range", "rp_rr_range"),
-        numRow("min_volume_24h_usdt_bull", "rp_vol_bull", "1"),
-        numRow("min_volume_24h_usdt_bear", "rp_vol_bear", "1"),
-        numRow("min_volume_24h_usdt_range", "rp_vol_range", "1"),
-        numRow("max_spread_bps_bull", "rp_spread_bull"),
-        numRow("max_spread_bps_bear", "rp_spread_bear"),
-        numRow("max_spread_bps_range", "rp_spread_range"),
-        numRow("max_slippage_bps_bull", "rp_slip_bull"),
-        numRow("max_slippage_bps_bear", "rp_slip_bear"),
-        numRow("max_slippage_bps_range", "rp_slip_range"),
-        numRow("max_hold_minutes_bull", "rp_hold_bull", "1"),
-        numRow("max_hold_minutes_bear", "rp_hold_bear", "1"),
-        numRow("max_hold_minutes_range", "rp_hold_range", "1"),
+        checkboxRow("Permite alcista", "allow_bull", "rp_allow_bull"),
+        checkboxRow("Permite bajista", "allow_bear", "rp_allow_bear"),
+        checkboxRow("Permite lateral", "allow_range", "rp_allow_range"),
+        numRow("R:R minimo alcista", "rr_min_bull", "rp_rr_bull", 2),
+        numRow("R:R minimo bajista", "rr_min_bear", "rp_rr_bear", 2),
+        numRow("R:R minimo lateral", "rr_min_range", "rp_rr_range", 2),
+        numRow("Volumen 24h minimo alcista", "min_volume_24h_usdt_bull", "rp_vol_bull", 0),
+        numRow("Volumen 24h minimo bajista", "min_volume_24h_usdt_bear", "rp_vol_bear", 0),
+        numRow("Volumen 24h minimo lateral", "min_volume_24h_usdt_range", "rp_vol_range", 0),
+        numRow("Spread maximo (bps) alcista", "max_spread_bps_bull", "rp_spread_bull", 2),
+        numRow("Spread maximo (bps) bajista", "max_spread_bps_bear", "rp_spread_bear", 2),
+        numRow("Spread maximo (bps) lateral", "max_spread_bps_range", "rp_spread_range", 2),
+        numRow("Slippage maximo (bps) alcista", "max_slippage_bps_bull", "rp_slip_bull", 2),
+        numRow("Slippage maximo (bps) bajista", "max_slippage_bps_bear", "rp_slip_bear", 2),
+        numRow("Slippage maximo (bps) lateral", "max_slippage_bps_range", "rp_slip_range", 2),
+        numRow("Tiempo maximo hold (min) alcista", "max_hold_minutes_bull", "rp_hold_bull", 0),
+        numRow("Tiempo maximo hold (min) bajista", "max_hold_minutes_bear", "rp_hold_bear", 0),
+        numRow("Tiempo maximo hold (min) lateral", "max_hold_minutes_range", "rp_hold_range", 0),
         actionRow,
       ].join("");
 
@@ -3501,21 +3517,21 @@ def ops_console_page():
             allow_bull: byId(`rp_allow_bull_${k}`).checked,
             allow_bear: byId(`rp_allow_bear_${k}`).checked,
             allow_range: byId(`rp_allow_range_${k}`).checked,
-            rr_min_bull: Number(byId(`rp_rr_bull_${k}`).value || "0"),
-            rr_min_bear: Number(byId(`rp_rr_bear_${k}`).value || "0"),
-            rr_min_range: Number(byId(`rp_rr_range_${k}`).value || "0"),
-            min_volume_24h_usdt_bull: Number(byId(`rp_vol_bull_${k}`).value || "0"),
-            min_volume_24h_usdt_bear: Number(byId(`rp_vol_bear_${k}`).value || "0"),
-            min_volume_24h_usdt_range: Number(byId(`rp_vol_range_${k}`).value || "0"),
-            max_spread_bps_bull: Number(byId(`rp_spread_bull_${k}`).value || "0"),
-            max_spread_bps_bear: Number(byId(`rp_spread_bear_${k}`).value || "0"),
-            max_spread_bps_range: Number(byId(`rp_spread_range_${k}`).value || "0"),
-            max_slippage_bps_bull: Number(byId(`rp_slip_bull_${k}`).value || "0"),
-            max_slippage_bps_bear: Number(byId(`rp_slip_bear_${k}`).value || "0"),
-            max_slippage_bps_range: Number(byId(`rp_slip_range_${k}`).value || "0"),
-            max_hold_minutes_bull: Number(byId(`rp_hold_bull_${k}`).value || "0"),
-            max_hold_minutes_bear: Number(byId(`rp_hold_bear_${k}`).value || "0"),
-            max_hold_minutes_range: Number(byId(`rp_hold_range_${k}`).value || "0"),
+            rr_min_bull: parseNumberInput(byId(`rp_rr_bull_${k}`).value),
+            rr_min_bear: parseNumberInput(byId(`rp_rr_bear_${k}`).value),
+            rr_min_range: parseNumberInput(byId(`rp_rr_range_${k}`).value),
+            min_volume_24h_usdt_bull: parseNumberInput(byId(`rp_vol_bull_${k}`).value),
+            min_volume_24h_usdt_bear: parseNumberInput(byId(`rp_vol_bear_${k}`).value),
+            min_volume_24h_usdt_range: parseNumberInput(byId(`rp_vol_range_${k}`).value),
+            max_spread_bps_bull: parseNumberInput(byId(`rp_spread_bull_${k}`).value),
+            max_spread_bps_bear: parseNumberInput(byId(`rp_spread_bear_${k}`).value),
+            max_spread_bps_range: parseNumberInput(byId(`rp_spread_range_${k}`).value),
+            max_slippage_bps_bull: parseNumberInput(byId(`rp_slip_bull_${k}`).value),
+            max_slippage_bps_bear: parseNumberInput(byId(`rp_slip_bear_${k}`).value),
+            max_slippage_bps_range: parseNumberInput(byId(`rp_slip_range_${k}`).value),
+            max_hold_minutes_bull: parseNumberInput(byId(`rp_hold_bull_${k}`).value),
+            max_hold_minutes_bear: parseNumberInput(byId(`rp_hold_bear_${k}`).value),
+            max_hold_minutes_range: parseNumberInput(byId(`rp_hold_range_${k}`).value),
           };
           btn.disabled = true;
           setBoMsg(`Saving runtime policy ${strategyId}/${exchange}...`);
