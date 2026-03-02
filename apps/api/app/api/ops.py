@@ -2940,6 +2940,15 @@ def ops_console_page():
     th,td { border-bottom:1px solid var(--line); text-align:left; padding:8px 6px; font-size:13px; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
     .mini { padding:6px 8px; border-radius:8px; font-size:12px; }
+    .rp-label { display:inline-flex; align-items:center; gap:6px; }
+    .rp-help-btn { opacity:0; visibility:hidden; transition:opacity .15s ease; padding:2px 7px; line-height:1.1; }
+    td:hover .rp-help-btn, .rp-help-btn:focus-visible { opacity:1; visibility:visible; }
+    .modal-backdrop { position:fixed; inset:0; background:rgba(18,32,51,.5); display:none; align-items:center; justify-content:center; z-index:50; padding:14px; }
+    .modal-backdrop.show { display:flex; }
+    .modal-card { width:min(760px,100%); background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px; max-height:85vh; overflow:auto; }
+    .modal-title { margin:0 0 6px; font-size:20px; }
+    .modal-list { margin:10px 0 0; padding-left:18px; }
+    .modal-list li { margin-bottom:8px; }
   </style>
 </head>
 <body>
@@ -3122,7 +3131,10 @@ def ops_console_page():
         </table>
       </div>
       <div class="card" id="runtimePolicyCard" style="display:none">
-        <strong>Runtime Policies (Strategy x Exchange x Regime)</strong>
+        <div class="row">
+          <strong>Runtime Policies (Strategy x Exchange x Regime)</strong>
+          <button id="runtimeGlossaryBtn" class="ghost mini">Ver todas las definiciones</button>
+        </div>
         <div class="muted" style="margin-top:6px">Admin-defined policy table that controls automatic pretrade/exit decisions.</div>
         <table style="margin-top:8px">
           <thead id="runtimePolicyHead">
@@ -3133,6 +3145,15 @@ def ops_console_page():
           </tbody>
         </table>
       </div>
+    </div>
+  </div>
+  <div id="helpModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+    <div class="modal-card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <h3 id="helpModalTitle" class="modal-title">Definicion</h3>
+        <button id="helpModalCloseBtn" class="ghost mini">Cerrar</button>
+      </div>
+      <div id="helpModalBody" class="muted">Sin contenido</div>
     </div>
   </div>
   <script>
@@ -3432,6 +3453,16 @@ def ops_console_page():
       "Action": "Boton para guardar cambios de la columna seleccionada.",
     };
 
+    function openHelpModal(title, htmlBody) {
+      byId("helpModalTitle").textContent = title || "Definicion";
+      byId("helpModalBody").innerHTML = htmlBody || "Sin contenido";
+      byId("helpModal").classList.add("show");
+    }
+
+    function closeHelpModal() {
+      byId("helpModal").classList.remove("show");
+    }
+
     function rpKey(strategyId, exchange) {
       return `${(strategyId || "").toUpperCase()}_${(exchange || "").toUpperCase()}`.replaceAll(/[^A-Z0-9_]/g, "_");
     }
@@ -3482,8 +3513,10 @@ def ops_console_page():
       `;
 
       const labelWithHelp = (labelEs) => `
-        <span>${labelEs}</span>
-        <button class="ghost mini rp-help-btn" data-var="${esc(labelEs)}" style="margin-left:6px;padding:2px 7px;line-height:1.1">?</button>
+        <span class="rp-label">
+          <span>${labelEs}</span>
+          <button class="ghost mini rp-help-btn" data-var="${esc(labelEs)}" title="Ver definicion" aria-label="Ver definicion de ${esc(labelEs)}">?</button>
+        </span>
       `;
       const checkboxRow = (labelEs, keyName, keyPrefix) => `
         <tr>
@@ -3579,9 +3612,18 @@ def ops_console_page():
         btn.addEventListener("click", () => {
           const key = btn.getAttribute("data-var") || "";
           const msg = runtimeVarHelp[key] || "Sin definicion para esta variable.";
-          alert(`${key}\n\n${msg}`);
+          openHelpModal(key, `<p>${esc(msg)}</p>`);
         });
       });
+      const glossaryBtn = byId("runtimeGlossaryBtn");
+      if (glossaryBtn) {
+        glossaryBtn.onclick = () => {
+          const items = Object.entries(runtimeVarHelp)
+            .map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(v)}</li>`)
+            .join("");
+          openHelpModal("Definiciones de variables", `<ul class="modal-list">${items}</ul>`);
+        };
+      }
     }
 
     function _options(values, selected) {
@@ -4291,6 +4333,13 @@ def ops_console_page():
       } catch (e) {
         setBoMsg(String(e.message || e), true);
       }
+    });
+    byId("helpModalCloseBtn").addEventListener("click", closeHelpModal);
+    byId("helpModal").addEventListener("click", (e) => {
+      if (e.target && e.target.id === "helpModal") closeHelpModal();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeHelpModal();
     });
 
     const remembered = localStorage.getItem(STORE_TOKEN) || "";
