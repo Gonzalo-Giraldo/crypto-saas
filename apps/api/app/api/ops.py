@@ -3691,6 +3691,29 @@ def ops_console_page():
       return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
     }
 
+    function bogotaDateParts(ms) {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Bogota",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date(ms));
+      const get = (type) => (parts.find((p) => p.type === type) || {}).value || "00";
+      return {
+        year: Number(get("year")),
+        month: Number(get("month")),
+        day: Number(get("day")),
+      };
+    }
+
+    // Anchor at 18:45:00 in Bogota time (UTC-5 => 23:45:00 UTC).
+    function bogotaAnchor1845Ms(referenceMs) {
+      const d = bogotaDateParts(referenceMs);
+      let anchor = Date.UTC(d.year, d.month - 1, d.day, 23, 45, 0);
+      if (referenceMs < anchor) anchor -= 24 * 60 * 60 * 1000;
+      return anchor;
+    }
+
     function setOverall(v) {
       const el = byId("overall");
       el.textContent = v || "unknown";
@@ -3958,8 +3981,11 @@ def ops_console_page():
       const intervalMinutes = Math.max(1, Number(out.interval_minutes || 5));
       const intervalMs = intervalMinutes * 60 * 1000;
       const periods = Math.max(1, Math.floor((hours * 60) / intervalMinutes));
-      const endTs = new Date(out.window_to || out.generated_at || new Date().toISOString()).getTime();
-      const startTs = endTs - (periods * intervalMs);
+      const referenceTs = new Date(out.window_to || out.generated_at || new Date().toISOString()).getTime();
+      const anchorMs = bogotaAnchor1845Ms(referenceTs);
+      const stepsToRef = Math.max(0, Math.floor((referenceTs - anchorMs) / intervalMs));
+      const lastBucketStart = anchorMs + (stepsToRef * intervalMs);
+      const startTs = lastBucketStart - ((periods - 1) * intervalMs);
       const buckets = [];
       for (let i = 0; i < periods; i += 1) {
         const from = startTs + (i * intervalMs);
@@ -4004,7 +4030,7 @@ def ops_console_page():
       }
       state.autoPickViewRows = buckets;
       renderAutoPickRows();
-      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | filas=${buckets.length}`);
+      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ancla=18:45:00 Bogota | ventana=${out.hours}h | filas=${buckets.length}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -5151,14 +5177,28 @@ def ops_console_page():
     if (rememberedRefresh) state.refreshToken = rememberedRefresh;
     renderExecCandidateStatus();
     setInterval(renderExecCandidateStatus, 1000);
-    setInterval(async () => {
+    async function autoPickRefreshTick() {
       if (!state.token || !state.me || state.me.role !== "admin") return;
       try {
         await loadAutoPickReport();
       } catch (e) {
         setAutoPickReportMsg(`Auto-refresh fallo: ${String(e.message || e)}`, true);
       }
-    }, 5 * 60 * 1000);
+    }
+
+    function scheduleAutoPickRefresh() {
+      const intervalMs = 5 * 60 * 1000;
+      const now = Date.now();
+      const anchor = bogotaAnchor1845Ms(now);
+      const steps = Math.floor((now - anchor) / intervalMs) + 1;
+      const nextTick = anchor + (steps * intervalMs);
+      const delay = Math.max(1000, nextTick - now);
+      setTimeout(async () => {
+        await autoPickRefreshTick();
+        scheduleAutoPickRefresh();
+      }, delay);
+    }
+    scheduleAutoPickRefresh();
   </script>
 </body>
 </html>
