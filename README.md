@@ -70,6 +70,8 @@ pytest -q tests/integration
 - `GET /ops/admin/audit/export` (admin, signed+hash export)
 - `GET /ops/admin/snapshot/daily` (admin, one-call daily ops bundle)
 - `GET /ops/admin/readiness/daily-gate` (admin, pass/fail daily gate)
+- `GET /ops/admin/risk/profiles` (admin, dynamic risk profile table)
+- `PUT /ops/admin/risk/profiles/{profile_name}` (admin, update/create dynamic risk variables)
 - `GET /ops/backoffice/summary` (admin/operator/viewer)
 - `GET /ops/backoffice/users` (admin/operator/viewer)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)

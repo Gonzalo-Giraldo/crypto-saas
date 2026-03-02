@@ -14,6 +14,7 @@ import apps.api.app.models.revoked_token
 import apps.api.app.models.session_revocation
 import apps.api.app.models.runtime_setting
 import apps.api.app.models.idempotency_key
+import apps.api.app.models.risk_profile_config
 
 from fastapi import FastAPI
 

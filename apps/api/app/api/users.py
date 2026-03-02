@@ -413,7 +413,7 @@ def set_user_risk_profile(
         else:
             action = "user.risk_profile.override.noop"
     else:
-        allowed = set(list_profile_names())
+        allowed = set(list_profile_names(db))
         if profile_name not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -452,9 +452,10 @@ def set_user_risk_profile(
 
 @router.get("/risk-profiles", response_model=list[str])
 def get_risk_profiles(
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    return list_profile_names()
+    return list_profile_names(db)
 
 
 @router.get("/{user_id}/readiness-check")

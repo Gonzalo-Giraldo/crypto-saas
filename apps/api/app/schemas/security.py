@@ -163,3 +163,26 @@ class BackofficeUserOut(BaseModel):
     binance_secret_configured: bool
     ibkr_secret_configured: bool
     readiness: str
+
+
+class RiskProfileConfigOut(BaseModel):
+    profile_name: str
+    max_risk_per_trade_pct: float
+    max_daily_loss_pct: float
+    max_trades_per_day: int
+    max_open_positions: int
+    cooldown_between_trades_minutes: float
+    max_leverage: float
+    stop_loss_required: bool
+    min_rr: float
+
+
+class RiskProfileConfigUpdateRequest(BaseModel):
+    max_risk_per_trade_pct: float
+    max_daily_loss_pct: float
+    max_trades_per_day: int
+    max_open_positions: int
+    cooldown_between_trades_minutes: float
+    max_leverage: float = 1.0
+    stop_loss_required: bool = True
+    min_rr: float

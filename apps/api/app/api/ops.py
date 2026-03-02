@@ -57,6 +57,8 @@ from apps.api.app.schemas.security import (
     IdempotencyCleanupOut,
     BackofficeSummaryOut,
     BackofficeUserOut,
+    RiskProfileConfigOut,
+    RiskProfileConfigUpdateRequest,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -64,7 +66,11 @@ from apps.api.app.schemas.audit import AuditExportMetaOut, AuditExportOut, Audit
 from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
-from apps.api.app.services.risk_profiles import resolve_risk_profile
+from apps.api.app.services.risk_profiles import (
+    list_risk_profiles,
+    resolve_risk_profile,
+    upsert_risk_profile_config,
+)
 from apps.api.app.services.idempotency import (
     cleanup_old_idempotency_keys,
     consume_idempotent_response,
@@ -788,6 +794,63 @@ def update_admin_trading_control(
         updated_by=current_user.email,
         reason=payload.reason,
     )
+
+
+@router.get("/admin/risk/profiles", response_model=list[RiskProfileConfigOut])
+def get_admin_risk_profiles(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    return list_risk_profiles(db)
+
+
+@router.put("/admin/risk/profiles/{profile_name}", response_model=RiskProfileConfigOut)
+def put_admin_risk_profile(
+    profile_name: str,
+    payload: RiskProfileConfigUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    name = (profile_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="profile_name is required")
+
+    if not (0.01 <= float(payload.max_risk_per_trade_pct) <= 10.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_risk_per_trade_pct out of range")
+    if not (0.1 <= float(payload.max_daily_loss_pct) <= 50.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_daily_loss_pct out of range")
+    if not (1 <= int(payload.max_trades_per_day) <= 200):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_trades_per_day out of range")
+    if not (1 <= int(payload.max_open_positions) <= 100):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_open_positions out of range")
+    if not (0.0 <= float(payload.cooldown_between_trades_minutes) <= 1440.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="cooldown_between_trades_minutes out of range")
+    if not (0.1 <= float(payload.max_leverage) <= 50.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_leverage out of range")
+    if not (0.1 <= float(payload.min_rr) <= 20.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="min_rr out of range")
+
+    out = upsert_risk_profile_config(
+        db,
+        profile_name=name,
+        max_risk_per_trade_pct=float(payload.max_risk_per_trade_pct),
+        max_daily_loss_pct=float(payload.max_daily_loss_pct),
+        max_trades_per_day=int(payload.max_trades_per_day),
+        max_open_positions=int(payload.max_open_positions),
+        cooldown_between_trades_minutes=float(payload.cooldown_between_trades_minutes),
+        max_leverage=float(payload.max_leverage),
+        stop_loss_required=bool(payload.stop_loss_required),
+        min_rr=float(payload.min_rr),
+    )
+    log_audit_event(
+        db,
+        action="risk.profile.config.updated",
+        user_id=current_user.id,
+        entity_type="risk_profile",
+        details=out,
+    )
+    db.commit()
+    return out
 
 
 @router.get("/admin/idempotency/stats", response_model=IdempotencyStatsOut)

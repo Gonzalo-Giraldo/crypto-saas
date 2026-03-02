@@ -555,3 +555,54 @@ def test_admin_daily_gate_admin_only(client):
     assert "checks" in data
     assert "security_summary" in data
     assert "readiness_summary" in data
+
+
+def test_admin_can_update_dynamic_risk_profile_and_affects_limits(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    blocked = client.put(
+        "/ops/admin/risk/profiles/model2_conservador_productivo",
+        headers=_auth(trader_token),
+        json={
+            "max_risk_per_trade_pct": 0.5,
+            "max_daily_loss_pct": 1.5,
+            "max_trades_per_day": 2,
+            "max_open_positions": 2,
+            "cooldown_between_trades_minutes": 30,
+            "max_leverage": 1.0,
+            "stop_loss_required": True,
+            "min_rr": 1.5,
+        },
+    )
+    assert blocked.status_code == 403
+
+    updated = client.put(
+        "/ops/admin/risk/profiles/model2_conservador_productivo",
+        headers=_auth(admin_token),
+        json={
+            "max_risk_per_trade_pct": 0.4,
+            "max_daily_loss_pct": 1.2,
+            "max_trades_per_day": 2,
+            "max_open_positions": 2,
+            "cooldown_between_trades_minutes": 25,
+            "max_leverage": 1.0,
+            "stop_loss_required": True,
+            "min_rr": 1.6,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["max_trades_per_day"] == 2
+    assert abs(updated.json()["max_daily_loss_pct"] - 1.2) < 1e-9
+
+    profiles = client.get("/ops/admin/risk/profiles", headers=_auth(admin_token))
+    assert profiles.status_code == 200, profiles.text
+    assert any(p["profile_name"] == "model2_conservador_productivo" for p in profiles.json())
+
+    compare = client.get("/ops/risk/daily-compare?real_only=true", headers=_auth(admin_token))
+    assert compare.status_code == 200, compare.text
+    users = compare.json()["users"]
+    admin_row = next((u for u in users if u["email"] == "admin@test.com"), None)
+    assert admin_row is not None
+    assert admin_row["limits"]["max_trades_per_day"] == 2
+    assert abs(admin_row["limits"]["max_daily_loss_pct"] - 1.2) < 1e-9
