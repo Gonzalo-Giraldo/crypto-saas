@@ -3496,7 +3496,7 @@ def ops_console_page():
           </div>
           <div class="card" style="margin-top:8px;padding:10px">
             <div class="row">
-              <strong>Candidatos auto-pick (caducan en 5 minutos)</strong>
+              <strong>Candidatos auto-pick (1 a 4 simbolos, caducan en 5 minutos)</strong>
               <button id="execApplyCandidatesBtn" class="ghost mini">Aplicar 5 minutos</button>
             </div>
             <div class="row" style="margin-top:8px">
@@ -3712,19 +3712,21 @@ def ops_console_page():
     }
 
     function parseExecCandidateInputs() {
-      const binance = [
+      const binanceRaw = [
         normalizeSymbol(byId("execBinance1").value),
         normalizeSymbol(byId("execBinance2").value),
       ];
-      const ibkr = [
+      const ibkrRaw = [
         normalizeSymbol(byId("execIbkr1").value),
         normalizeSymbol(byId("execIbkr2").value),
       ];
-      if (binance.some((x) => !x) || ibkr.some((x) => !x)) {
-        throw new Error("Completa 2 simbolos BINANCE y 2 simbolos IBKR");
-      }
-      if (new Set(binance).size !== 2) throw new Error("BINANCE debe tener 2 simbolos diferentes");
-      if (new Set(ibkr).size !== 2) throw new Error("IBKR debe tener 2 simbolos diferentes");
+      const binance = binanceRaw.filter((x) => !!x);
+      const ibkr = ibkrRaw.filter((x) => !!x);
+      const total = binance.length + ibkr.length;
+      if (total < 1) throw new Error("Configura al menos 1 simbolo");
+      if (total > 4) throw new Error("Maximo 4 simbolos");
+      if (new Set(binance).size !== binance.length) throw new Error("BINANCE no debe repetir simbolos");
+      if (new Set(ibkr).size !== ibkr.length) throw new Error("IBKR no debe repetir simbolos");
       return { BINANCE: binance, IBKR: ibkr };
     }
 
