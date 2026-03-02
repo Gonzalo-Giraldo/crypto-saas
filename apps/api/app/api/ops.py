@@ -2445,7 +2445,7 @@ def ops_console_page():
   <div class="shell">
     <div class="card">
       <h1>Ops Console v1</h1>
-      <div class="muted">Sprint A: Login + Home + Backoffice readonly</div>
+      <div class="muted">Sprint B: Login + Home + Backoffice user management</div>
       <div class="row" style="margin-top:10px">
         <input id="email" placeholder="email" />
         <input id="password" type="password" placeholder="password" />
@@ -2493,12 +2493,13 @@ def ops_console_page():
       </div>
       <div class="card">
         <strong>Backoffice Users</strong>
+        <div id="boMsg" class="muted" style="margin-top:6px">Readonly for operator/viewer. Editable for admin.</div>
         <table style="margin-top:8px">
           <thead>
-            <tr><th>Email</th><th>Role</th><th>2FA</th><th>BINANCE</th><th>IBKR</th><th>Readiness</th></tr>
+            <tr><th>Email</th><th>Role</th><th>Risk profile</th><th>2FA</th><th>BINANCE</th><th>IBKR</th><th>Readiness</th><th>Action</th></tr>
           </thead>
           <tbody id="boUsers">
-            <tr><td colspan="6" class="muted">No data</td></tr>
+            <tr><td colspan="8" class="muted">No data</td></tr>
           </tbody>
         </table>
       </div>
@@ -2508,11 +2509,33 @@ def ops_console_page():
     const byId = (id) => document.getElementById(id);
     const STORE_TOKEN = "ops_console_token";
     const STORE_EMAIL = "ops_console_email";
+    const USER_ROLES = ["admin", "operator", "viewer", "trader", "disabled"];
+    const state = {
+      me: null,
+      token: "",
+      riskProfiles: [],
+      usersById: {},
+    };
+
+    function esc(v) {
+      return String(v ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
 
     function setOverall(v) {
       const el = byId("overall");
       el.textContent = v || "unknown";
       el.className = "badge " + (v === "green" ? "green" : v === "red" ? "red" : "yellow");
+    }
+
+    function setBoMsg(msg, bad=false) {
+      const el = byId("boMsg");
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
     }
 
     function authHeaders(token, isForm=false) {
@@ -2558,8 +2581,12 @@ def ops_console_page():
       byId("sessionInfo").textContent = "No active session";
       setOverall("unknown");
       byId("boSummary").innerHTML = '<tr><td class="muted">No data</td></tr>';
-      byId("boUsers").innerHTML = '<tr><td colspan="6" class="muted">No data</td></tr>';
+      byId("boUsers").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
       byId("homeMsg").textContent = "Logged out";
+      state.me = null;
+      state.token = "";
+      state.riskProfiles = [];
+      state.usersById = {};
     }
 
     function fillHome(d) {
@@ -2583,39 +2610,115 @@ def ops_console_page():
         <tr><td><strong>Stale secrets</strong></td><td>${s.users_with_stale_secrets}</td></tr>`;
     }
 
+    function _options(values, selected) {
+      return values.map((v) => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
+    }
+
     function fillBackofficeUsers(rows) {
-      byId("boUsers").innerHTML = (rows || []).map((u) => `
+      const canEdit = state.me && state.me.role === "admin";
+      const riskProfiles = state.riskProfiles || [];
+      const out = (rows || []).map((u) => {
+        const extra = state.usersById[u.user_id] || {};
+        const role = extra.role || u.role || "trader";
+        const risk = extra.risk_profile || "model2_conservador_productivo";
+        const roleCell = canEdit
+          ? `<select id="role_${u.user_id}">${_options(USER_ROLES, role)}</select>`
+          : esc(role);
+        const riskCell = canEdit
+          ? `<select id="risk_${u.user_id}">${_options(riskProfiles, risk)}</select>`
+          : esc(risk);
+        const actionCell = canEdit
+          ? `<button class="save-user-btn ghost" data-user-id="${esc(u.user_id)}">Save</button>`
+          : '<span class="muted">readonly</span>';
+        return `
         <tr>
-          <td>${u.email}</td>
-          <td>${u.role}</td>
+          <td>${esc(u.email)}</td>
+          <td>${roleCell}</td>
+          <td>${riskCell}</td>
           <td>${u.two_factor_enabled ? "yes" : "no"}</td>
           <td>${u.binance_enabled ? (u.binance_secret_configured ? "enabled+secret" : "enabled/no secret") : "off"}</td>
           <td>${u.ibkr_enabled ? (u.ibkr_secret_configured ? "enabled+secret" : "enabled/no secret") : "off"}</td>
           <td><span class="badge ${u.readiness === "READY" ? "green" : "red"}">${u.readiness}</span></td>
+          <td>${actionCell}</td>
         </tr>
-      `).join("") || '<tr><td colspan="6" class="muted">No users in scope</td></tr>';
+      `;
+      }).join("");
+      byId("boUsers").innerHTML = out || '<tr><td colspan="8" class="muted">No users in scope</td></tr>';
+      if (canEdit) {
+        document.querySelectorAll(".save-user-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userId = btn.getAttribute("data-user-id");
+            const roleSel = byId(`role_${userId}`);
+            const riskSel = byId(`risk_${userId}`);
+            if (!userId || !roleSel || !riskSel) return;
+            const nextRole = roleSel.value;
+            const nextRisk = riskSel.value;
+            btn.disabled = true;
+            setBoMsg("Saving user update...");
+            try {
+              await api(`/users/${userId}/role`, {
+                method: "PATCH",
+                headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ role: nextRole }),
+              });
+              await api(`/users/${userId}/risk-profile`, {
+                method: "PUT",
+                headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ profile_name: nextRisk }),
+              });
+              setBoMsg(`User updated: ${userId}`);
+              await loadAll();
+            } catch (e) {
+              setBoMsg(`Update failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
+      }
     }
 
     async function loadAll() {
       const token = byId("token").value.trim();
       if (!token) throw new Error("Token required");
       localStorage.setItem(STORE_TOKEN, token);
+      state.token = token;
       const me = await api("/users/me", { headers: { Authorization: `Bearer ${token}` } });
+      state.me = me;
       byId("sessionInfo").textContent = `Signed in as ${me.email} (${me.role})`;
 
       if (["admin", "operator", "viewer"].includes(me.role)) {
-        const [home, boSummary, boUsers] = await Promise.all([
+        const reqs = [
           api("/ops/dashboard/summary?real_only=true&include_service_users=false", { headers: { Authorization: `Bearer ${token}` } }),
           api("/ops/backoffice/summary?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
           api("/ops/backoffice/users?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
-        ]);
+        ];
+        if (me.role === "admin") {
+          reqs.push(api("/users", { headers: { Authorization: `Bearer ${token}` } }));
+          reqs.push(api("/users/risk-profiles", { headers: { Authorization: `Bearer ${token}` } }));
+        }
+        const results = await Promise.all(reqs);
+        const home = results[0];
+        const boSummary = results[1];
+        const boUsers = results[2];
+        state.usersById = {};
+        state.riskProfiles = [];
+        if (me.role === "admin") {
+          const users = results[3] || [];
+          const profiles = results[4] || [];
+          users.forEach((u) => { state.usersById[u.id] = u; });
+          state.riskProfiles = profiles;
+          setBoMsg("Admin edit mode enabled");
+        } else {
+          setBoMsg("Readonly mode");
+        }
         fillHome(home);
         fillBackofficeSummary(boSummary);
         fillBackofficeUsers(boUsers);
       } else {
         byId("homeMsg").textContent = `Role ${me.role} has limited UI in Sprint A (backoffice is readonly for admin/operator/viewer).`;
         byId("boSummary").innerHTML = '<tr><td class="muted">No access to backoffice summary for this role</td></tr>';
-        byId("boUsers").innerHTML = '<tr><td colspan="6" class="muted">No access to backoffice users for this role</td></tr>';
+        byId("boUsers").innerHTML = '<tr><td colspan="8" class="muted">No access to backoffice users for this role</td></tr>';
+        setBoMsg("No backoffice access for this role", true);
       }
     }
 
