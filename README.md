@@ -74,6 +74,8 @@ pytest -q tests/integration
 - `GET /ops/admin/readiness/daily-gate` (admin, pass/fail daily gate)
 - `GET /ops/admin/risk/profiles` (admin, dynamic risk profile table)
 - `PUT /ops/admin/risk/profiles/{profile_name}` (admin, update/create dynamic risk variables)
+- `GET /ops/admin/strategy-runtime-policies` (admin, regime-aware runtime policy table)
+- `PUT /ops/admin/strategy-runtime-policies/{strategy_id}/{exchange}` (admin, update regime policy)
 - `GET /ops/backoffice/summary` (admin/operator/viewer)
 - `GET /ops/backoffice/users` (admin/operator/viewer)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
@@ -134,11 +136,14 @@ pytest -q tests/integration
   - RR threshold (`rr_estimate`)
   - BINANCE liquidity checks (`volume_24h_usdt`, `spread_bps`, `slippage_bps`)
   - IBKR market/event checks (`in_rth`, `macro_event_block`, `earnings_within_24h`)
+  - automatic market regime detection (`bull`, `bear`, `range`) from input scores (`market_trend_score`, `atr_pct`, `momentum_score`)
+  - regime-aware policy gates (allowed regime, RR threshold, liquidity/cost thresholds)
 - `exit` check now applies strategy-specific exit triggers:
   - stop loss / take profit hit
   - max holding time by strategy
   - trend break / signal reverse
   - IBKR event risk forced exit
+  - regime-aware max hold time (dynamic by strategy/exchange/regime policy)
 - `open_from_signal` now enforces risk-per-trade with dynamic user capital:
   - `capital_base_usd` from `user_risk_settings` (or `DEFAULT_CAPITAL_BASE_USD`)
   - `max_risk_amount_usd = capital_base_usd * max_risk_per_trade_pct / 100`

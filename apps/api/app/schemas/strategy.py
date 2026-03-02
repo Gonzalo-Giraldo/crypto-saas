@@ -54,6 +54,9 @@ class PretradeCheckRequest(BaseModel):
     in_rth: bool = True
     macro_event_block: bool = False
     earnings_within_24h: bool = False
+    market_trend_score: float = 0.0
+    atr_pct: float = 0.0
+    momentum_score: float = 0.0
 
     @field_validator("side")
     @classmethod
@@ -75,6 +78,8 @@ class PretradeCheckOut(BaseModel):
     strategy_id: str
     strategy_source: str
     risk_profile: str
+    market_regime: str = "range"
+    regime_source: str = "legacy"
     checks: list[dict]
 
 
@@ -90,6 +95,9 @@ class ExitCheckRequest(BaseModel):
     signal_reverse: bool = False
     macro_event_block: bool = False
     earnings_within_24h: bool = False
+    market_trend_score: float = 0.0
+    atr_pct: float = 0.0
+    momentum_score: float = 0.0
 
     @field_validator("side")
     @classmethod
@@ -105,5 +113,7 @@ class ExitCheckOut(BaseModel):
     exchange: str
     strategy_id: str
     strategy_source: str
+    market_regime: str = "range"
+    regime_source: str = "legacy"
     reasons: list[str]
     checks: list[dict]

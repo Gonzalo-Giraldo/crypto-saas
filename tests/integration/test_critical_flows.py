@@ -713,3 +713,188 @@ def test_open_position_blocks_when_risk_per_trade_exceeded(client):
         params={"signal_id": signal_2["id"], "qty": allowed_qty},
     )
     assert allowed_open.status_code == 200, allowed_open.text
+
+
+def test_strategy_runtime_policy_admin_only(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    blocked = client.get("/ops/admin/strategy-runtime-policies", headers=_auth(trader_token))
+    assert blocked.status_code == 403
+
+    listed = client.get("/ops/admin/strategy-runtime-policies", headers=_auth(admin_token))
+    assert listed.status_code == 200, listed.text
+    assert any(p["strategy_id"] == "SWING_V1" and p["exchange"] == "BINANCE" for p in listed.json())
+
+    updated = client.put(
+        "/ops/admin/strategy-runtime-policies/SWING_V1/BINANCE",
+        headers=_auth(admin_token),
+        json={
+            "allow_bull": True,
+            "allow_bear": True,
+            "allow_range": True,
+            "rr_min_bull": 1.5,
+            "rr_min_bear": 1.6,
+            "rr_min_range": 2.2,
+            "min_volume_24h_usdt_bull": 50000000.0,
+            "min_volume_24h_usdt_bear": 70000000.0,
+            "min_volume_24h_usdt_range": 90000000.0,
+            "max_spread_bps_bull": 10.0,
+            "max_spread_bps_bear": 8.0,
+            "max_spread_bps_range": 7.0,
+            "max_slippage_bps_bull": 15.0,
+            "max_slippage_bps_bear": 12.0,
+            "max_slippage_bps_range": 10.0,
+            "max_hold_minutes_bull": 720.0,
+            "max_hold_minutes_bear": 480.0,
+            "max_hold_minutes_range": 180.0,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["allow_range"] is True
+    assert abs(updated.json()["rr_min_range"] - 2.2) < 1e-9
+
+
+def test_pretrade_auto_regime_and_policy_gating(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    save_binance = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(trader_token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert save_binance.status_code == 201, save_binance.text
+
+    # Range enabled but with stricter RR in range regime.
+    policy = client.put(
+        "/ops/admin/strategy-runtime-policies/SWING_V1/BINANCE",
+        headers=_auth(admin_token),
+        json={
+            "allow_bull": True,
+            "allow_bear": True,
+            "allow_range": True,
+            "rr_min_bull": 1.5,
+            "rr_min_bear": 1.6,
+            "rr_min_range": 2.2,
+            "min_volume_24h_usdt_bull": 50000000.0,
+            "min_volume_24h_usdt_bear": 70000000.0,
+            "min_volume_24h_usdt_range": 90000000.0,
+            "max_spread_bps_bull": 10.0,
+            "max_spread_bps_bear": 8.0,
+            "max_spread_bps_range": 7.0,
+            "max_slippage_bps_bull": 15.0,
+            "max_slippage_bps_bear": 12.0,
+            "max_slippage_bps_range": 10.0,
+            "max_hold_minutes_bull": 720.0,
+            "max_hold_minutes_bear": 480.0,
+            "max_hold_minutes_range": 180.0,
+        },
+    )
+    assert policy.status_code == 200, policy.text
+
+    blocked = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=_auth(trader_token),
+        json={
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "qty": 0.01,
+            "rr_estimate": 2.0,
+            "trend_tf": "4H",
+            "signal_tf": "1H",
+            "timing_tf": "15M",
+            "spread_bps": 6,
+            "slippage_bps": 9,
+            "volume_24h_usdt": 95000000,
+            "market_trend_score": 0.0,
+            "atr_pct": 8.0,
+            "momentum_score": 0.0,
+        },
+    )
+    assert blocked.status_code == 200, blocked.text
+    body_blocked = blocked.json()
+    assert body_blocked["market_regime"] == "range"
+    assert body_blocked["passed"] is False
+    rr_check = next((c for c in body_blocked["checks"] if c["name"] == "strategy_rr_min"), None)
+    assert rr_check is not None and rr_check["passed"] is False
+
+    allowed = client.post(
+        "/ops/execution/pretrade/binance/check",
+        headers=_auth(trader_token),
+        json={
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "qty": 0.01,
+            "rr_estimate": 2.3,
+            "trend_tf": "4H",
+            "signal_tf": "1H",
+            "timing_tf": "15M",
+            "spread_bps": 6,
+            "slippage_bps": 9,
+            "volume_24h_usdt": 95000000,
+            "market_trend_score": 0.0,
+            "atr_pct": 8.0,
+            "momentum_score": 0.0,
+        },
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["market_regime"] == "range"
+    assert allowed.json()["passed"] is True
+
+
+def test_exit_uses_regime_specific_time_limit(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    policy = client.put(
+        "/ops/admin/strategy-runtime-policies/SWING_V1/IBKR",
+        headers=_auth(admin_token),
+        json={
+            "allow_bull": True,
+            "allow_bear": True,
+            "allow_range": True,
+            "rr_min_bull": 1.4,
+            "rr_min_bear": 1.5,
+            "rr_min_range": 1.8,
+            "min_volume_24h_usdt_bull": 0.0,
+            "min_volume_24h_usdt_bear": 0.0,
+            "min_volume_24h_usdt_range": 0.0,
+            "max_spread_bps_bull": 12.0,
+            "max_spread_bps_bear": 10.0,
+            "max_spread_bps_range": 8.0,
+            "max_slippage_bps_bull": 15.0,
+            "max_slippage_bps_bear": 12.0,
+            "max_slippage_bps_range": 10.0,
+            "max_hold_minutes_bull": 720.0,
+            "max_hold_minutes_bear": 480.0,
+            "max_hold_minutes_range": 100.0,
+        },
+    )
+    assert policy.status_code == 200, policy.text
+
+    check = client.post(
+        "/ops/execution/exit/ibkr/check",
+        headers=_auth(trader_token),
+        json={
+            "symbol": "AAPL",
+            "side": "BUY",
+            "entry_price": 180,
+            "current_price": 181,
+            "stop_loss": 178,
+            "take_profit": 185,
+            "opened_minutes": 120,
+            "trend_break": False,
+            "signal_reverse": False,
+            "macro_event_block": False,
+            "earnings_within_24h": False,
+            "market_trend_score": 0.0,
+            "atr_pct": 9.0,
+            "momentum_score": 0.0,
+        },
+    )
+    assert check.status_code == 200, check.text
+    body = check.json()
+    assert body["market_regime"] == "range"
+    assert body["should_exit"] is True
+    assert "time_limit_reached" in body["reasons"]

@@ -59,6 +59,8 @@ from apps.api.app.schemas.security import (
     BackofficeUserOut,
     RiskProfileConfigOut,
     RiskProfileConfigUpdateRequest,
+    StrategyRuntimePolicyOut,
+    StrategyRuntimePolicyUpdateRequest,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -86,6 +88,12 @@ from apps.api.app.services.strategy_assignments import (
     is_exchange_enabled_for_user,
     resolve_strategy_for_user_exchange,
     upsert_strategy_assignment,
+)
+from apps.api.app.services.strategy_runtime_policy import (
+    infer_market_regime,
+    list_runtime_policies,
+    resolve_runtime_policy,
+    upsert_runtime_policy,
 )
 from apps.worker.app.engine.execution_runtime import (
     execute_binance_test_order_for_user,
@@ -429,10 +437,22 @@ def _evaluate_pretrade_for_user(
     )
 
     strategy_id = strategy["strategy_id"]
+    market_regime, regime_source = infer_market_regime(
+        trend_score=float(payload.market_trend_score),
+        atr_pct=float(payload.atr_pct),
+        momentum_score=float(payload.momentum_score),
+    )
+    runtime_policy = resolve_runtime_policy(
+        db=db,
+        strategy_id=strategy_id,
+        exchange=exchange,
+    )
     strategy_checks = _build_strategy_checks(
         exchange=exchange,
         strategy_id=strategy_id,
         payload=payload,
+        market_regime=market_regime,
+        runtime_policy=runtime_policy,
     )
     checks.extend(strategy_checks)
 
@@ -455,7 +475,12 @@ def _evaluate_pretrade_for_user(
                 "trend_tf": payload.trend_tf,
                 "signal_tf": payload.signal_tf,
                 "timing_tf": payload.timing_tf,
+                "market_trend_score": payload.market_trend_score,
+                "atr_pct": payload.atr_pct,
+                "momentum_score": payload.momentum_score,
             },
+            "market_regime": market_regime,
+            "regime_source": regime_source,
             "checks": checks,
         },
     )
@@ -467,6 +492,8 @@ def _evaluate_pretrade_for_user(
         "strategy_id": strategy_id,
         "strategy_source": strategy["source"],
         "risk_profile": profile["profile_name"],
+        "market_regime": market_regime,
+        "regime_source": regime_source,
         "checks": checks,
     }
 
@@ -475,18 +502,18 @@ def _build_strategy_checks(
     exchange: str,
     strategy_id: str,
     payload: PretradeCheckRequest,
+    market_regime: str,
+    runtime_policy: dict,
 ) -> list[dict]:
     checks: list[dict] = []
     ex = exchange.upper()
     st = strategy_id.upper()
 
     if st == "INTRADAY_V1":
-        rr_min = 1.3
         allowed_trend_tfs = {"1H"}
         allowed_signal_tfs = {"15M"}
         allowed_timing_tfs = {"5M", "15M"}
     else:
-        rr_min = 1.5
         if ex == "IBKR":
             allowed_trend_tfs = {"1D", "4H"}
             allowed_signal_tfs = {"1H", "30M"}
@@ -495,6 +522,16 @@ def _build_strategy_checks(
             allowed_trend_tfs = {"4H"}
             allowed_signal_tfs = {"1H"}
             allowed_timing_tfs = {"15M"}
+
+    allow_regime = bool(runtime_policy.get(f"allow_{market_regime}", True))
+    rr_min = float(runtime_policy.get(f"rr_min_{market_regime}", 1.5))
+    checks.append(
+        {
+            "name": "market_regime_allowed",
+            "passed": allow_regime,
+            "detail": f"regime={market_regime} allowed={allow_regime}",
+        }
+    )
 
     checks.append(
         {
@@ -526,14 +563,9 @@ def _build_strategy_checks(
     )
 
     if ex == "BINANCE":
-        if st == "INTRADAY_V1":
-            min_volume = 80_000_000.0
-            max_spread = 8.0
-            max_slippage = 12.0
-        else:
-            min_volume = 50_000_000.0
-            max_spread = 10.0
-            max_slippage = 15.0
+        min_volume = float(runtime_policy.get(f"min_volume_24h_usdt_{market_regime}", 0.0))
+        max_spread = float(runtime_policy.get(f"max_spread_bps_{market_regime}", 15.0))
+        max_slippage = float(runtime_policy.get(f"max_slippage_bps_{market_regime}", 20.0))
 
         checks.append(
             {
@@ -557,11 +589,27 @@ def _build_strategy_checks(
             }
         )
     else:
+        max_spread = float(runtime_policy.get(f"max_spread_bps_{market_regime}", 15.0))
+        max_slippage = float(runtime_policy.get(f"max_slippage_bps_{market_regime}", 20.0))
         checks.append(
             {
                 "name": "ibkr_in_rth",
                 "passed": bool(payload.in_rth),
                 "detail": "must be true",
+            }
+        )
+        checks.append(
+            {
+                "name": "ibkr_spread_bps",
+                "passed": float(payload.spread_bps) <= max_spread,
+                "detail": f"value={payload.spread_bps} required<={max_spread}",
+            }
+        )
+        checks.append(
+            {
+                "name": "ibkr_slippage_bps",
+                "passed": float(payload.slippage_bps) <= max_slippage,
+                "detail": f"value={payload.slippage_bps} required<={max_slippage}",
             }
         )
         checks.append(
@@ -586,6 +634,8 @@ def _build_exit_checks(
     exchange: str,
     strategy_id: str,
     payload: ExitCheckRequest,
+    market_regime: str,
+    runtime_policy: dict,
 ) -> tuple[list[dict], list[str]]:
     ex = exchange.upper()
     st = strategy_id.upper()
@@ -614,9 +664,10 @@ def _build_exit_checks(
         reasons.append("take_profit_hit")
 
     if st == "INTRADAY_V1":
-        max_hold_minutes = 240
+        fallback_hold = 240
     else:
-        max_hold_minutes = 480
+        fallback_hold = 480
+    max_hold_minutes = int(float(runtime_policy.get(f"max_hold_minutes_{market_regime}", fallback_hold)))
 
     timeout = opened_minutes >= max_hold_minutes
     checks.append(
@@ -847,6 +898,66 @@ def put_admin_risk_profile(
         action="risk.profile.config.updated",
         user_id=current_user.id,
         entity_type="risk_profile",
+        details=out,
+    )
+    db.commit()
+    return out
+
+
+@router.get("/admin/strategy-runtime-policies", response_model=list[StrategyRuntimePolicyOut])
+def get_admin_strategy_runtime_policies(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    return list_runtime_policies(db)
+
+
+@router.put(
+    "/admin/strategy-runtime-policies/{strategy_id}/{exchange}",
+    response_model=StrategyRuntimePolicyOut,
+)
+def put_admin_strategy_runtime_policy(
+    strategy_id: str,
+    exchange: str,
+    payload: StrategyRuntimePolicyUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    if not (0.1 <= float(payload.rr_min_bull) <= 20.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rr_min_bull out of range")
+    if not (0.1 <= float(payload.rr_min_bear) <= 20.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rr_min_bear out of range")
+    if not (0.1 <= float(payload.rr_min_range) <= 20.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rr_min_range out of range")
+    for name, value in {
+        "max_spread_bps_bull": payload.max_spread_bps_bull,
+        "max_spread_bps_bear": payload.max_spread_bps_bear,
+        "max_spread_bps_range": payload.max_spread_bps_range,
+        "max_slippage_bps_bull": payload.max_slippage_bps_bull,
+        "max_slippage_bps_bear": payload.max_slippage_bps_bear,
+        "max_slippage_bps_range": payload.max_slippage_bps_range,
+    }.items():
+        if not (0.0 <= float(value) <= 500.0):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{name} out of range")
+    for name, value in {
+        "max_hold_minutes_bull": payload.max_hold_minutes_bull,
+        "max_hold_minutes_bear": payload.max_hold_minutes_bear,
+        "max_hold_minutes_range": payload.max_hold_minutes_range,
+    }.items():
+        if not (1.0 <= float(value) <= 10080.0):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{name} out of range")
+
+    out = upsert_runtime_policy(
+        db,
+        strategy_id=strategy_id,
+        exchange=exchange,
+        payload=payload.model_dump(),
+    )
+    log_audit_event(
+        db,
+        action="strategy.runtime_policy.updated",
+        user_id=current_user.id,
+        entity_type="strategy_runtime_policy",
         details=out,
     )
     db.commit()
@@ -1301,10 +1412,22 @@ def exit_binance_check(
         user_id=current_user.id,
         exchange="BINANCE",
     )
+    market_regime, regime_source = infer_market_regime(
+        trend_score=float(payload.market_trend_score),
+        atr_pct=float(payload.atr_pct),
+        momentum_score=float(payload.momentum_score),
+    )
+    runtime_policy = resolve_runtime_policy(
+        db=db,
+        strategy_id=strategy["strategy_id"],
+        exchange="BINANCE",
+    )
     checks, reasons = _build_exit_checks(
         exchange="BINANCE",
         strategy_id=strategy["strategy_id"],
         payload=payload,
+        market_regime=market_regime,
+        runtime_policy=runtime_policy,
     )
     should_exit = len(reasons) > 0
     log_audit_event(
@@ -1316,6 +1439,8 @@ def exit_binance_check(
             "exchange": "BINANCE",
             "strategy_id": strategy["strategy_id"],
             "strategy_source": strategy["source"],
+            "market_regime": market_regime,
+            "regime_source": regime_source,
             "should_exit": should_exit,
             "reasons": reasons,
             "checks": checks,
@@ -1327,6 +1452,8 @@ def exit_binance_check(
         "exchange": "BINANCE",
         "strategy_id": strategy["strategy_id"],
         "strategy_source": strategy["source"],
+        "market_regime": market_regime,
+        "regime_source": regime_source,
         "reasons": reasons,
         "checks": checks,
     }
@@ -1348,10 +1475,22 @@ def exit_ibkr_check(
         user_id=current_user.id,
         exchange="IBKR",
     )
+    market_regime, regime_source = infer_market_regime(
+        trend_score=float(payload.market_trend_score),
+        atr_pct=float(payload.atr_pct),
+        momentum_score=float(payload.momentum_score),
+    )
+    runtime_policy = resolve_runtime_policy(
+        db=db,
+        strategy_id=strategy["strategy_id"],
+        exchange="IBKR",
+    )
     checks, reasons = _build_exit_checks(
         exchange="IBKR",
         strategy_id=strategy["strategy_id"],
         payload=payload,
+        market_regime=market_regime,
+        runtime_policy=runtime_policy,
     )
     should_exit = len(reasons) > 0
     log_audit_event(
@@ -1363,6 +1502,8 @@ def exit_ibkr_check(
             "exchange": "IBKR",
             "strategy_id": strategy["strategy_id"],
             "strategy_source": strategy["source"],
+            "market_regime": market_regime,
+            "regime_source": regime_source,
             "should_exit": should_exit,
             "reasons": reasons,
             "checks": checks,
@@ -1374,6 +1515,8 @@ def exit_ibkr_check(
         "exchange": "IBKR",
         "strategy_id": strategy["strategy_id"],
         "strategy_source": strategy["source"],
+        "market_regime": market_regime,
+        "regime_source": regime_source,
         "reasons": reasons,
         "checks": checks,
     }

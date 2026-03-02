@@ -186,3 +186,48 @@ class RiskProfileConfigUpdateRequest(BaseModel):
     max_leverage: float = 1.0
     stop_loss_required: bool = True
     min_rr: float
+
+
+class StrategyRuntimePolicyOut(BaseModel):
+    strategy_id: str
+    exchange: str
+    allow_bull: bool
+    allow_bear: bool
+    allow_range: bool
+    rr_min_bull: float
+    rr_min_bear: float
+    rr_min_range: float
+    min_volume_24h_usdt_bull: float
+    min_volume_24h_usdt_bear: float
+    min_volume_24h_usdt_range: float
+    max_spread_bps_bull: float
+    max_spread_bps_bear: float
+    max_spread_bps_range: float
+    max_slippage_bps_bull: float
+    max_slippage_bps_bear: float
+    max_slippage_bps_range: float
+    max_hold_minutes_bull: float
+    max_hold_minutes_bear: float
+    max_hold_minutes_range: float
+    updated_at: Optional[str] = None
+
+
+class StrategyRuntimePolicyUpdateRequest(BaseModel):
+    allow_bull: bool
+    allow_bear: bool
+    allow_range: bool
+    rr_min_bull: float
+    rr_min_bear: float
+    rr_min_range: float
+    min_volume_24h_usdt_bull: float = 0.0
+    min_volume_24h_usdt_bear: float = 0.0
+    min_volume_24h_usdt_range: float = 0.0
+    max_spread_bps_bull: float
+    max_spread_bps_bear: float
+    max_spread_bps_range: float
+    max_slippage_bps_bull: float
+    max_slippage_bps_bear: float
+    max_slippage_bps_range: float
+    max_hold_minutes_bull: float
+    max_hold_minutes_bear: float
+    max_hold_minutes_range: float
