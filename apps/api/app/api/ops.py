@@ -3125,20 +3125,11 @@ def ops_console_page():
         <strong>Runtime Policies (Strategy x Exchange x Regime)</strong>
         <div class="muted" style="margin-top:6px">Admin-defined policy table that controls automatic pretrade/exit decisions.</div>
         <table style="margin-top:8px">
-          <thead>
-            <tr>
-              <th>Strategy</th><th>Exchange</th>
-              <th>Allow bull</th><th>Allow bear</th><th>Allow range</th>
-              <th>RR bull</th><th>RR bear</th><th>RR range</th>
-              <th>Vol bull</th><th>Vol bear</th><th>Vol range</th>
-              <th>Spread bull</th><th>Spread bear</th><th>Spread range</th>
-              <th>Slip bull</th><th>Slip bear</th><th>Slip range</th>
-              <th>Hold bull</th><th>Hold bear</th><th>Hold range</th>
-              <th>Action</th>
-            </tr>
+          <thead id="runtimePolicyHead">
+            <tr><th>Variable</th><th class="muted">Load policies first</th></tr>
           </thead>
           <tbody id="runtimePolicyBody">
-            <tr><td colspan="21" class="muted">No runtime policies loaded</td></tr>
+            <tr><td colspan="2" class="muted">No runtime policies loaded</td></tr>
           </tbody>
         </table>
       </div>
@@ -3432,39 +3423,73 @@ def ops_console_page():
       if (!wrap) return;
       if (!canEdit) {
         wrap.style.display = "none";
-        byId("runtimePolicyBody").innerHTML = '<tr><td colspan="21" class="muted">Admin only</td></tr>';
+        byId("runtimePolicyHead").innerHTML = '<tr><th>Variable</th><th class="muted">Admin only</th></tr>';
+        byId("runtimePolicyBody").innerHTML = '<tr><td colspan="2" class="muted">Admin only</td></tr>';
         return;
       }
       wrap.style.display = "block";
       const rows = state.runtimePolicies || [];
-      byId("runtimePolicyBody").innerHTML = rows.map((p) => {
-        const k = rpKey(p.strategy_id, p.exchange);
-        return `
-          <tr>
-            <td>${esc(p.strategy_id)}</td>
-            <td>${esc(p.exchange)}</td>
-            <td><input id="rp_allow_bull_${k}" type="checkbox" ${p.allow_bull ? "checked" : ""} /></td>
-            <td><input id="rp_allow_bear_${k}" type="checkbox" ${p.allow_bear ? "checked" : ""} /></td>
-            <td><input id="rp_allow_range_${k}" type="checkbox" ${p.allow_range ? "checked" : ""} /></td>
-            <td>${runtimeNumInput(`rp_rr_bull_${k}`, p.rr_min_bull)}</td>
-            <td>${runtimeNumInput(`rp_rr_bear_${k}`, p.rr_min_bear)}</td>
-            <td>${runtimeNumInput(`rp_rr_range_${k}`, p.rr_min_range)}</td>
-            <td>${runtimeNumInput(`rp_vol_bull_${k}`, p.min_volume_24h_usdt_bull, "1")}</td>
-            <td>${runtimeNumInput(`rp_vol_bear_${k}`, p.min_volume_24h_usdt_bear, "1")}</td>
-            <td>${runtimeNumInput(`rp_vol_range_${k}`, p.min_volume_24h_usdt_range, "1")}</td>
-            <td>${runtimeNumInput(`rp_spread_bull_${k}`, p.max_spread_bps_bull)}</td>
-            <td>${runtimeNumInput(`rp_spread_bear_${k}`, p.max_spread_bps_bear)}</td>
-            <td>${runtimeNumInput(`rp_spread_range_${k}`, p.max_spread_bps_range)}</td>
-            <td>${runtimeNumInput(`rp_slip_bull_${k}`, p.max_slippage_bps_bull)}</td>
-            <td>${runtimeNumInput(`rp_slip_bear_${k}`, p.max_slippage_bps_bear)}</td>
-            <td>${runtimeNumInput(`rp_slip_range_${k}`, p.max_slippage_bps_range)}</td>
-            <td>${runtimeNumInput(`rp_hold_bull_${k}`, p.max_hold_minutes_bull, "1")}</td>
-            <td>${runtimeNumInput(`rp_hold_bear_${k}`, p.max_hold_minutes_bear, "1")}</td>
-            <td>${runtimeNumInput(`rp_hold_range_${k}`, p.max_hold_minutes_range, "1")}</td>
-            <td><button class="save-runtime-btn ghost mini" data-strategy="${esc(p.strategy_id)}" data-exchange="${esc(p.exchange)}">Save</button></td>
-          </tr>
-        `;
-      }).join("") || '<tr><td colspan="21" class="muted">No runtime policies loaded</td></tr>';
+      if (!rows.length) {
+        byId("runtimePolicyHead").innerHTML = '<tr><th>Variable</th><th class="muted">No data</th></tr>';
+        byId("runtimePolicyBody").innerHTML = '<tr><td colspan="2" class="muted">No runtime policies loaded</td></tr>';
+        return;
+      }
+
+      const ordered = [...rows].sort((a, b) => `${a.strategy_id}_${a.exchange}`.localeCompare(`${b.strategy_id}_${b.exchange}`));
+      byId("runtimePolicyHead").innerHTML = `
+        <tr>
+          <th>Variable</th>
+          ${ordered.map((p) => `<th>${esc(p.strategy_id)}<br><span class="muted">${esc(p.exchange)}</span></th>`).join("")}
+        </tr>
+      `;
+
+      const checkboxRow = (label, keyPrefix) => `
+        <tr>
+          <td>${label}</td>
+          ${ordered.map((p) => {
+            const k = rpKey(p.strategy_id, p.exchange);
+            return `<td><input id="${keyPrefix}_${k}" type="checkbox" ${p[label] ? "checked" : ""} /></td>`;
+          }).join("")}
+        </tr>
+      `;
+      const numRow = (label, keyPrefix, step = "0.1") => `
+        <tr>
+          <td>${label}</td>
+          ${ordered.map((p) => {
+            const k = rpKey(p.strategy_id, p.exchange);
+            return `<td>${runtimeNumInput(`${keyPrefix}_${k}`, p[label], step)}</td>`;
+          }).join("")}
+        </tr>
+      `;
+
+      const actionRow = `
+        <tr>
+          <td>Action</td>
+          ${ordered.map((p) => `<td><button class="save-runtime-btn ghost mini" data-strategy="${esc(p.strategy_id)}" data-exchange="${esc(p.exchange)}">Save</button></td>`).join("")}
+        </tr>
+      `;
+
+      byId("runtimePolicyBody").innerHTML = [
+        checkboxRow("allow_bull", "rp_allow_bull"),
+        checkboxRow("allow_bear", "rp_allow_bear"),
+        checkboxRow("allow_range", "rp_allow_range"),
+        numRow("rr_min_bull", "rp_rr_bull"),
+        numRow("rr_min_bear", "rp_rr_bear"),
+        numRow("rr_min_range", "rp_rr_range"),
+        numRow("min_volume_24h_usdt_bull", "rp_vol_bull", "1"),
+        numRow("min_volume_24h_usdt_bear", "rp_vol_bear", "1"),
+        numRow("min_volume_24h_usdt_range", "rp_vol_range", "1"),
+        numRow("max_spread_bps_bull", "rp_spread_bull"),
+        numRow("max_spread_bps_bear", "rp_spread_bear"),
+        numRow("max_spread_bps_range", "rp_spread_range"),
+        numRow("max_slippage_bps_bull", "rp_slip_bull"),
+        numRow("max_slippage_bps_bear", "rp_slip_bear"),
+        numRow("max_slippage_bps_range", "rp_slip_range"),
+        numRow("max_hold_minutes_bull", "rp_hold_bull", "1"),
+        numRow("max_hold_minutes_bear", "rp_hold_bear", "1"),
+        numRow("max_hold_minutes_range", "rp_hold_range", "1"),
+        actionRow,
+      ].join("");
 
       document.querySelectorAll(".save-runtime-btn").forEach((btn) => {
         btn.addEventListener("click", async () => {
