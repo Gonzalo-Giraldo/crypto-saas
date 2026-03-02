@@ -248,6 +248,92 @@ def test_pretrade_scan_ranking_and_timing(client):
     assert all(asset["passed"] for asset in only_passed["assets"])
 
 
+def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    saved = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert saved.status_code == 201, saved.text
+
+    dry_run_pick = client.post(
+        "/ops/execution/pretrade/binance/auto-pick",
+        headers=_auth(token),
+        json={
+            "top_n": 10,
+            "dry_run": True,
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                }
+            ],
+        },
+    )
+    assert dry_run_pick.status_code == 200, dry_run_pick.text
+    dry_data = dry_run_pick.json()
+    assert dry_data["selected"] is True
+    assert dry_data["decision"] == "dry_run_selected"
+    assert dry_data["execution"] is None
+
+    import apps.api.app.api.ops as ops_api
+
+    monkeypatch.setattr(
+        ops_api,
+        "execute_binance_test_order_for_user",
+        lambda user_id, symbol, side, qty: {
+            "exchange": "BINANCE",
+            "mode": "testnet_order_test",
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "sent": True,
+        },
+    )
+    execute_pick = client.post(
+        "/ops/execution/pretrade/binance/auto-pick",
+        headers=_auth(token),
+        json={
+            "top_n": 10,
+            "dry_run": False,
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                }
+            ],
+        },
+    )
+    assert execute_pick.status_code == 200, execute_pick.text
+    exec_data = execute_pick.json()
+    assert exec_data["selected"] is True
+    assert exec_data["decision"] == "executed_test_order"
+    assert exec_data["execution"]["sent"] is True
+
+
 def test_security_posture_admin_only(client):
     admin_token = _token(client, "admin@test.com", "AdminPass123!")
     trader_token = _token(client, "trader@test.com", "TraderPass123!")

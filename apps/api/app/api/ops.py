@@ -31,6 +31,8 @@ from apps.api.app.schemas.execution import (
 from apps.api.app.schemas.strategy import (
     ExitCheckOut,
     ExitCheckRequest,
+    PretradeAutoPickOut,
+    PretradeAutoPickRequest,
     PretradeCheckOut,
     PretradeCheckRequest,
     PretradeScanOut,
@@ -609,6 +611,74 @@ def _scan_pretrade_candidates(
         "duration_ms_total": total_ms,
         "duration_ms_avg": avg_ms,
         "assets": rows,
+    }
+
+
+def _auto_pick_from_scan(
+    db: Session,
+    current_user: User,
+    exchange: str,
+    payload: PretradeAutoPickRequest,
+) -> dict:
+    scan_payload = PretradeScanRequest(
+        candidates=payload.candidates,
+        top_n=payload.top_n,
+        include_blocked=False,
+    )
+    scan = _scan_pretrade_candidates(
+        db=db,
+        current_user=current_user,
+        exchange=exchange,
+        payload=scan_payload,
+    )
+    assets = scan.get("assets", [])
+    if not assets:
+        return {
+            "exchange": exchange,
+            "dry_run": bool(payload.dry_run),
+            "selected": False,
+            "selected_symbol": None,
+            "selected_side": None,
+            "selected_qty": None,
+            "selected_score": None,
+            "selected_market_regime": None,
+            "decision": "no_candidate_passed",
+            "execution": None,
+            "scan": scan,
+        }
+
+    selected = assets[0]
+    execution = None
+    decision = "dry_run_selected"
+    if not payload.dry_run:
+        if exchange == "BINANCE":
+            execution = execute_binance_test_order_for_user(
+                user_id=current_user.id,
+                symbol=selected["symbol"],
+                side=selected["side"],
+                qty=selected["qty"],
+            )
+        else:
+            execution = execute_ibkr_test_order_for_user(
+                user_id=current_user.id,
+                symbol=selected["symbol"],
+                side=selected["side"],
+                qty=selected["qty"],
+            )
+        decision = "executed_test_order"
+
+    return {
+        "exchange": exchange,
+        "dry_run": bool(payload.dry_run),
+        "selected": True,
+        "selected_symbol": selected["symbol"],
+        "selected_side": selected["side"],
+        "selected_qty": selected["qty"],
+        "selected_score": selected["score"],
+        "selected_market_regime": selected["market_regime"],
+        "decision": decision,
+        "execution": execution,
+        "scan": scan,
     }
 
 
@@ -1631,6 +1701,80 @@ def pretrade_ibkr_scan(
             "blocked_assets": out["blocked_assets"],
             "duration_ms_total": out["duration_ms_total"],
             "duration_ms_avg": out["duration_ms_avg"],
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post("/execution/pretrade/binance/auto-pick", response_model=PretradeAutoPickOut)
+def pretrade_binance_auto_pick(
+    payload: PretradeAutoPickRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="pretrade_auto_pick",
+        exchange="BINANCE",
+    )
+    out = _auto_pick_from_scan(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+        payload=payload,
+    )
+    log_audit_event(
+        db,
+        action="pretrade.auto_pick.completed",
+        user_id=current_user.id,
+        entity_type="pretrade_auto_pick",
+        details={
+            "exchange": "BINANCE",
+            "dry_run": bool(payload.dry_run),
+            "decision": out["decision"],
+            "selected": out["selected"],
+            "selected_symbol": out["selected_symbol"],
+            "selected_score": out["selected_score"],
+            "scanned_assets": out["scan"]["scanned_assets"],
+        },
+    )
+    db.commit()
+    return out
+
+
+@router.post("/execution/pretrade/ibkr/auto-pick", response_model=PretradeAutoPickOut)
+def pretrade_ibkr_auto_pick(
+    payload: PretradeAutoPickRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="pretrade_auto_pick",
+        exchange="IBKR",
+    )
+    out = _auto_pick_from_scan(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+        payload=payload,
+    )
+    log_audit_event(
+        db,
+        action="pretrade.auto_pick.completed",
+        user_id=current_user.id,
+        entity_type="pretrade_auto_pick",
+        details={
+            "exchange": "IBKR",
+            "dry_run": bool(payload.dry_run),
+            "decision": out["decision"],
+            "selected": out["selected"],
+            "selected_symbol": out["selected_symbol"],
+            "selected_score": out["selected_score"],
+            "scanned_assets": out["scan"]["scanned_assets"],
         },
     )
     db.commit()
@@ -3239,7 +3383,15 @@ def ops_console_page():
             <button id="execPretradeBtn" class="ghost mini">Pretrade check</button>
             <button id="execExitBtn" class="ghost mini">Exit check</button>
             <button id="execTestOrderBtn" class="mini">Test order</button>
+            <button id="execAutoPickBtn" class="ghost mini">Auto pick</button>
+            <label class="muted" style="display:inline-flex;align-items:center;gap:6px">
+              <input id="execAutoDryRun" type="checkbox" checked />
+              dry_run
+            </label>
+            <input id="execAutoTopN" type="number" min="1" max="100" value="10" style="max-width:90px" />
           </div>
+          <div class="muted" style="margin-top:8px">Candidates JSON (optional). If empty, console uses default liquid symbols for selected exchange.</div>
+          <textarea id="execCandidatesJson" class="mono" style="margin-top:6px;width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff" placeholder='[{"symbol":"BTCUSDT","side":"BUY","qty":0.01}]'></textarea>
           <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
           <pre id="execLabOut" class="mono" style="white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;">{}</pre>
         </div>
@@ -4320,6 +4472,30 @@ def ops_console_page():
       byId("execSymbol").value = ex === "IBKR" ? "AAPL" : "BTCUSDT";
       byId("execQty").value = ex === "IBKR" ? "1" : "0.01";
     });
+    function buildDefaultCandidates(exchange) {
+      if (exchange === "IBKR") {
+        return [
+          { symbol: "AAPL", side: "BUY", qty: 1, rr_estimate: 1.5, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 7, slippage_bps: 8, in_rth: true, macro_event_block: false, earnings_within_24h: false, market_trend_score: 0.4, atr_pct: 2.2, momentum_score: 0.3, volume_24h_usdt: 0 },
+          { symbol: "MSFT", side: "BUY", qty: 1, rr_estimate: 1.4, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 8, slippage_bps: 9, in_rth: true, macro_event_block: false, earnings_within_24h: false, market_trend_score: 0.2, atr_pct: 3.0, momentum_score: 0.1, volume_24h_usdt: 0 },
+          { symbol: "SPY", side: "BUY", qty: 1, rr_estimate: 1.4, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 5, slippage_bps: 7, in_rth: true, macro_event_block: false, earnings_within_24h: false, market_trend_score: 0.3, atr_pct: 1.8, momentum_score: 0.2, volume_24h_usdt: 0 },
+        ];
+      }
+      return [
+        { symbol: "BTCUSDT", side: "BUY", qty: 0.01, rr_estimate: 1.7, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 6, slippage_bps: 9, volume_24h_usdt: 95000000, market_trend_score: 0.6, atr_pct: 3.0, momentum_score: 0.4, funding_rate_bps: 0, crypto_event_block: false },
+        { symbol: "ETHUSDT", side: "BUY", qty: 0.01, rr_estimate: 1.6, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 7, slippage_bps: 10, volume_24h_usdt: 85000000, market_trend_score: 0.4, atr_pct: 3.8, momentum_score: 0.2, funding_rate_bps: 0, crypto_event_block: false },
+        { symbol: "BNBUSDT", side: "BUY", qty: 0.03, rr_estimate: 1.5, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 8, slippage_bps: 11, volume_24h_usdt: 65000000, market_trend_score: 0.3, atr_pct: 4.2, momentum_score: 0.1, funding_rate_bps: 0, crypto_event_block: false },
+      ];
+    }
+
+    function resolveExecCandidates(exchange) {
+      const raw = (byId("execCandidatesJson").value || "").trim();
+      if (!raw) return buildDefaultCandidates(exchange);
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        throw new Error("Candidates JSON must be an array");
+      }
+      return parsed;
+    }
     byId("execPretradeBtn").addEventListener("click", async () => {
       try {
         const exchange = byId("execExchange").value;
@@ -4413,6 +4589,27 @@ def ops_console_page():
         });
         setExecLabOut(out);
         setExecLabMsg(`Test order ${exchange} completed`);
+      } catch (e) {
+        setExecLabMsg(String(e.message || e), true);
+      }
+    });
+    byId("execAutoPickBtn").addEventListener("click", async () => {
+      try {
+        const exchange = byId("execExchange").value;
+        const topN = Number(byId("execAutoTopN").value || "10");
+        const dryRun = !!byId("execAutoDryRun").checked;
+        const candidates = resolveExecCandidates(exchange);
+        const path = exchange === "IBKR"
+          ? "/ops/execution/pretrade/ibkr/auto-pick"
+          : "/ops/execution/pretrade/binance/auto-pick";
+        const out = await api(path, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ candidates, top_n: topN, dry_run: dryRun }),
+        });
+        setExecLabOut(out);
+        const picked = out.selected ? `${out.selected_symbol} score=${out.selected_score}` : "none";
+        setExecLabMsg(`Auto pick ${exchange} completed | decision=${out.decision} | selected=${picked}`);
       } catch (e) {
         setExecLabMsg(String(e.message || e), true);
       }

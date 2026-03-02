@@ -135,6 +135,33 @@ class PretradeScanOut(BaseModel):
     assets: list[PretradeScanAssetOut]
 
 
+class PretradeAutoPickRequest(BaseModel):
+    candidates: list[PretradeCheckRequest] = Field(default_factory=list)
+    top_n: int = 10
+    dry_run: bool = True
+
+    @field_validator("top_n")
+    @classmethod
+    def validate_top_n(cls, value: int):
+        if value < 1 or value > 200:
+            raise ValueError("top_n must be between 1 and 200")
+        return value
+
+
+class PretradeAutoPickOut(BaseModel):
+    exchange: str
+    dry_run: bool
+    selected: bool
+    selected_symbol: str | None = None
+    selected_side: str | None = None
+    selected_qty: float | None = None
+    selected_score: float | None = None
+    selected_market_regime: str | None = None
+    decision: str
+    execution: dict | None = None
+    scan: PretradeScanOut
+
+
 class ExitCheckRequest(BaseModel):
     symbol: str
     side: str
