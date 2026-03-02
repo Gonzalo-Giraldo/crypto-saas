@@ -3494,7 +3494,22 @@ def ops_console_page():
             </label>
             <input id="execAutoTopN" type="number" min="1" max="100" value="10" style="max-width:90px" />
           </div>
-          <div class="muted" style="margin-top:8px">Candidates JSON (optional). If empty, console uses default liquid symbols for selected exchange.</div>
+          <div class="card" style="margin-top:8px;padding:10px">
+            <div class="row">
+              <strong>Candidatos auto-pick (caducan en 5 minutos)</strong>
+              <button id="execApplyCandidatesBtn" class="ghost mini">Aplicar 5 minutos</button>
+            </div>
+            <div class="row" style="margin-top:8px">
+              <input id="execBinance1" placeholder="BINANCE 1 (ej: BTCUSDT)" style="min-width:180px" />
+              <input id="execBinance2" placeholder="BINANCE 2 (ej: ETHUSDT)" style="min-width:180px" />
+            </div>
+            <div class="row" style="margin-top:8px">
+              <input id="execIbkr1" placeholder="IBKR 1 (ej: AAPL)" style="min-width:180px" />
+              <input id="execIbkr2" placeholder="IBKR 2 (ej: SPY)" style="min-width:180px" />
+            </div>
+            <div id="execCandidateStatus" class="muted" style="margin-top:6px">No configurado.</div>
+          </div>
+          <div class="muted" style="margin-top:8px">Candidates JSON (opcional). Si escribes JSON aqui, tiene prioridad sobre la configuracion de arriba.</div>
           <textarea id="execCandidatesJson" class="mono" style="margin-top:6px;width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff" placeholder='[{"symbol":"BTCUSDT","side":"BUY","qty":0.01}]'></textarea>
           <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
           <pre id="execLabOut" class="mono" style="white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;">{}</pre>
@@ -3613,6 +3628,7 @@ def ops_console_page():
     const STORE_TOKEN = "ops_console_token";
     const STORE_EMAIL = "ops_console_email";
     const STORE_REFRESH = "ops_console_refresh";
+    const EXEC_CANDIDATE_TTL_MS = 5 * 60 * 1000;
     const USER_ROLES = ["admin", "operator", "viewer", "trader", "disabled"];
     const state = {
       me: null,
@@ -3628,6 +3644,7 @@ def ops_console_page():
       readinessReportData: null,
       dailyGateData: null,
       autoPickReportData: null,
+      execCandidateConfig: null,
     };
 
     function esc(v) {
@@ -3690,6 +3707,102 @@ def ops_console_page():
       byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
     }
 
+    function normalizeSymbol(v) {
+      return String(v || "").trim().toUpperCase();
+    }
+
+    function parseExecCandidateInputs() {
+      const binance = [
+        normalizeSymbol(byId("execBinance1").value),
+        normalizeSymbol(byId("execBinance2").value),
+      ];
+      const ibkr = [
+        normalizeSymbol(byId("execIbkr1").value),
+        normalizeSymbol(byId("execIbkr2").value),
+      ];
+      if (binance.some((x) => !x) || ibkr.some((x) => !x)) {
+        throw new Error("Completa 2 simbolos BINANCE y 2 simbolos IBKR");
+      }
+      if (new Set(binance).size !== 2) throw new Error("BINANCE debe tener 2 simbolos diferentes");
+      if (new Set(ibkr).size !== 2) throw new Error("IBKR debe tener 2 simbolos diferentes");
+      return { BINANCE: binance, IBKR: ibkr };
+    }
+
+    function renderExecCandidateStatus() {
+      const el = byId("execCandidateStatus");
+      if (!el) return;
+      const cfg = state.execCandidateConfig;
+      if (!cfg) {
+        el.textContent = "No configurado.";
+        el.style.color = "var(--muted)";
+        return;
+      }
+      const leftMs = cfg.expires_at_ms - Date.now();
+      if (leftMs <= 0) {
+        state.execCandidateConfig = null;
+        el.textContent = "Caducado. Vuelve a aplicar candidatos (vigencia 5 minutos).";
+        el.style.color = "var(--bad)";
+        return;
+      }
+      const leftSec = Math.ceil(leftMs / 1000);
+      const mins = Math.floor(leftSec / 60);
+      const secs = leftSec % 60;
+      const binanceTxt = (cfg.by_exchange.BINANCE || []).join(", ");
+      const ibkrTxt = (cfg.by_exchange.IBKR || []).join(", ");
+      el.textContent = `Activo (${mins}m ${secs}s): BINANCE [${binanceTxt}] | IBKR [${ibkrTxt}]`;
+      el.style.color = "var(--muted)";
+    }
+
+    function applyExecCandidateConfig() {
+      const byExchange = parseExecCandidateInputs();
+      state.execCandidateConfig = {
+        by_exchange: byExchange,
+        expires_at_ms: Date.now() + EXEC_CANDIDATE_TTL_MS,
+      };
+      renderExecCandidateStatus();
+      setExecLabMsg("Candidatos aplicados por 5 minutos");
+    }
+
+    function buildCandidateTemplate(exchange, symbol) {
+      if (exchange === "IBKR") {
+        return {
+          symbol,
+          side: "BUY",
+          qty: 1,
+          rr_estimate: 1.5,
+          trend_tf: "4H",
+          signal_tf: "1H",
+          timing_tf: "15M",
+          spread_bps: 7,
+          slippage_bps: 8,
+          in_rth: true,
+          macro_event_block: false,
+          earnings_within_24h: false,
+          market_trend_score: 0.3,
+          atr_pct: 2.2,
+          momentum_score: 0.2,
+          volume_24h_usdt: 0,
+        };
+      }
+      return {
+        symbol,
+        side: "BUY",
+        qty: 0.01,
+        rr_estimate: 1.7,
+        trend_tf: "4H",
+        signal_tf: "1H",
+        timing_tf: "15M",
+        spread_bps: 6,
+        slippage_bps: 9,
+        volume_24h_usdt: 95000000,
+        market_trend_score: 0.5,
+        atr_pct: 3.2,
+        momentum_score: 0.3,
+        funding_rate_bps: 0,
+        crypto_event_block: false,
+      };
+    }
+
     function setSnapshotMsg(msg, bad=false) {
       const el = byId("snapshotMsg");
       if (!el) return;
@@ -3735,8 +3848,10 @@ def ops_console_page():
       wrap.style.display = canUse ? "block" : "none";
       if (canUse) {
         setExecLabMsg("Ready");
+        renderExecCandidateStatus();
       } else {
         setExecLabOut({});
+        renderExecCandidateStatus();
       }
     }
 
@@ -3854,6 +3969,7 @@ def ops_console_page():
       state.readinessReportData = null;
       state.dailyGateData = null;
       state.autoPickReportData = null;
+      state.execCandidateConfig = null;
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
@@ -4643,30 +4759,34 @@ def ops_console_page():
       byId("execSymbol").value = ex === "IBKR" ? "AAPL" : "BTCUSDT";
       byId("execQty").value = ex === "IBKR" ? "1" : "0.01";
     });
-    function buildDefaultCandidates(exchange) {
-      if (exchange === "IBKR") {
-        return [
-          { symbol: "AAPL", side: "BUY", qty: 1, rr_estimate: 1.5, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 7, slippage_bps: 8, in_rth: true, macro_event_block: false, earnings_within_24h: false, market_trend_score: 0.4, atr_pct: 2.2, momentum_score: 0.3, volume_24h_usdt: 0 },
-          { symbol: "MSFT", side: "BUY", qty: 1, rr_estimate: 1.4, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 8, slippage_bps: 9, in_rth: true, macro_event_block: false, earnings_within_24h: false, market_trend_score: 0.2, atr_pct: 3.0, momentum_score: 0.1, volume_24h_usdt: 0 },
-          { symbol: "SPY", side: "BUY", qty: 1, rr_estimate: 1.4, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 5, slippage_bps: 7, in_rth: true, macro_event_block: false, earnings_within_24h: false, market_trend_score: 0.3, atr_pct: 1.8, momentum_score: 0.2, volume_24h_usdt: 0 },
-        ];
-      }
-      return [
-        { symbol: "BTCUSDT", side: "BUY", qty: 0.01, rr_estimate: 1.7, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 6, slippage_bps: 9, volume_24h_usdt: 95000000, market_trend_score: 0.6, atr_pct: 3.0, momentum_score: 0.4, funding_rate_bps: 0, crypto_event_block: false },
-        { symbol: "ETHUSDT", side: "BUY", qty: 0.01, rr_estimate: 1.6, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 7, slippage_bps: 10, volume_24h_usdt: 85000000, market_trend_score: 0.4, atr_pct: 3.8, momentum_score: 0.2, funding_rate_bps: 0, crypto_event_block: false },
-        { symbol: "BNBUSDT", side: "BUY", qty: 0.03, rr_estimate: 1.5, trend_tf: "4H", signal_tf: "1H", timing_tf: "15M", spread_bps: 8, slippage_bps: 11, volume_24h_usdt: 65000000, market_trend_score: 0.3, atr_pct: 4.2, momentum_score: 0.1, funding_rate_bps: 0, crypto_event_block: false },
-      ];
-    }
 
     function resolveExecCandidates(exchange) {
       const raw = (byId("execCandidatesJson").value || "").trim();
-      if (!raw) return buildDefaultCandidates(exchange);
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        throw new Error("Candidates JSON must be an array");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          throw new Error("Candidates JSON must be an array");
+        }
+        return parsed;
       }
-      return parsed;
+      const cfg = state.execCandidateConfig;
+      if (!cfg) throw new Error("Configura candidatos en el panel (2 BINANCE + 2 IBKR) y aplica 5 minutos");
+      if (cfg.expires_at_ms <= Date.now()) {
+        state.execCandidateConfig = null;
+        renderExecCandidateStatus();
+        throw new Error("La configuracion de candidatos caduco. Vuelve a aplicar 5 minutos");
+      }
+      const symbols = cfg.by_exchange[exchange] || [];
+      if (!symbols.length) throw new Error(`No hay simbolos configurados para ${exchange}`);
+      return symbols.map((symbol) => buildCandidateTemplate(exchange, symbol));
     }
+    byId("execApplyCandidatesBtn").addEventListener("click", () => {
+      try {
+        applyExecCandidateConfig();
+      } catch (e) {
+        setExecLabMsg(String(e.message || e), true);
+      }
+    });
     byId("execPretradeBtn").addEventListener("click", async () => {
       try {
         const exchange = byId("execExchange").value;
@@ -4900,6 +5020,8 @@ def ops_console_page():
     if (remembered) byId("token").value = remembered;
     if (rememberedEmail) byId("email").value = rememberedEmail;
     if (rememberedRefresh) state.refreshToken = rememberedRefresh;
+    renderExecCandidateStatus();
+    setInterval(renderExecCandidateStatus, 1000);
     setInterval(async () => {
       if (!state.token || !state.me || state.me.role !== "admin") return;
       try { await loadAutoPickReport(); } catch (_) {}
