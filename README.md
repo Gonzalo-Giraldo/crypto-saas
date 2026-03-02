@@ -67,6 +67,7 @@ pytest -q tests/integration
 - `GET /ops/audit/me`
 - `GET /ops/audit/all` (admin)
 - `GET /ops/admin/audit/export` (admin, signed+hash export)
+- `GET /ops/admin/snapshot/daily` (admin, one-call daily ops bundle)
 - `GET /ops/backoffice/summary` (admin/operator/viewer)
 - `GET /ops/backoffice/users` (admin/operator/viewer)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)

@@ -1775,6 +1775,58 @@ def dashboard_summary(
     )
 
 
+@router.get("/admin/snapshot/daily")
+def admin_snapshot_daily(
+    real_only: bool = True,
+    max_secret_age_days: int = 30,
+    recent_hours: int = 24,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    dashboard = dashboard_summary(
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+        recent_hours=recent_hours,
+        email_contains=None,
+        exchange="ALL",
+        include_service_users=False,
+        db=db,
+        current_user=current_user,
+    )
+    backoffice_sum = backoffice_summary(
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+        db=db,
+        current_user=current_user,
+    )
+    backoffice_usr = backoffice_users(
+        real_only=real_only,
+        db=db,
+        current_user=current_user,
+    )
+    posture = security_posture(
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+        db=db,
+        current_user=current_user,
+    )
+    risk = daily_risk_compare(
+        real_only=real_only,
+        db=db,
+        current_user=current_user,
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_for": current_user.email,
+        "real_only": real_only,
+        "dashboard": dashboard,
+        "backoffice_summary": backoffice_sum,
+        "backoffice_users": backoffice_usr,
+        "security_posture": posture,
+        "risk_daily_compare": risk,
+    }
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page():
     return HTMLResponse(
@@ -3457,22 +3509,9 @@ def ops_console_page():
     byId("snapshotBuildBtn").addEventListener("click", async () => {
       try {
         const token = state.token;
-        const [dashboard, backofficeSummary, backofficeUsers, securityPosture, riskCompare] = await Promise.all([
-          api("/ops/dashboard/summary?real_only=true&include_service_users=false", { headers: { Authorization: `Bearer ${token}` } }),
-          api("/ops/backoffice/summary?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
-          api("/ops/backoffice/users?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
-          api("/ops/security/posture?real_only=true&max_secret_age_days=30", { headers: { Authorization: `Bearer ${token}` } }),
-          api("/ops/risk/daily-compare?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
-        ]);
-        state.snapshotData = {
-          generated_at: new Date().toISOString(),
-          generated_for: state.me ? state.me.email : null,
-          dashboard,
-          backoffice_summary: backofficeSummary,
-          backoffice_users: backofficeUsers,
-          security_posture: securityPosture,
-          risk_daily_compare: riskCompare,
-        };
+        state.snapshotData = await api("/ops/admin/snapshot/daily?real_only=true&max_secret_age_days=30&recent_hours=24", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         setSnapshotMsg("Snapshot built successfully");
       } catch (e) {
         setSnapshotMsg(String(e.message || e), true);

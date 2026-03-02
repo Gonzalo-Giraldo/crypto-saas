@@ -497,3 +497,23 @@ def test_admin_can_reset_user_2fa(client):
         otp=pyotp.TOTP(payload["secret"]).now(),
     )
     assert with_otp.status_code == 200, with_otp.text
+
+
+def test_admin_daily_snapshot_admin_only(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    blocked = client.get("/ops/admin/snapshot/daily", headers=_auth(trader_token))
+    assert blocked.status_code == 403
+
+    ok = client.get(
+        "/ops/admin/snapshot/daily?real_only=true&max_secret_age_days=30&recent_hours=24",
+        headers=_auth(admin_token),
+    )
+    assert ok.status_code == 200, ok.text
+    data = ok.json()
+    assert "dashboard" in data
+    assert "backoffice_summary" in data
+    assert "backoffice_users" in data
+    assert "security_posture" in data
+    assert "risk_daily_compare" in data
