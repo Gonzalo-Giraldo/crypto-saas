@@ -2452,6 +2452,7 @@ def ops_console_page():
         <input id="password" type="password" placeholder="password" />
         <input id="otp" placeholder="otp (if required)" style="max-width:170px" />
         <button id="loginBtn">Login</button>
+        <button id="refreshSessionBtn" class="ghost">Refresh Session</button>
         <button id="logoutBtn" class="ghost">Logout</button>
       </div>
       <div class="row" style="margin-top:8px">
@@ -2599,6 +2600,7 @@ def ops_console_page():
     const byId = (id) => document.getElementById(id);
     const STORE_TOKEN = "ops_console_token";
     const STORE_EMAIL = "ops_console_email";
+    const STORE_REFRESH = "ops_console_refresh";
     const USER_ROLES = ["admin", "operator", "viewer", "trader", "disabled"];
     const state = {
       me: null,
@@ -2608,6 +2610,7 @@ def ops_console_page():
       assignments: {},
       tradingControl: null,
       backofficeUsers: [],
+      refreshToken: "",
     };
 
     function esc(v) {
@@ -2734,18 +2737,33 @@ def ops_console_page():
         body: form.toString(),
       });
       const token = data.access_token || "";
+      const refresh = data.refresh_token || "";
       if (!token) throw new Error("No access token in response");
       byId("token").value = token;
       localStorage.setItem(STORE_TOKEN, token);
+      if (refresh) localStorage.setItem(STORE_REFRESH, refresh);
       localStorage.setItem(STORE_EMAIL, email);
+      state.refreshToken = refresh;
       byId("password").value = "";
       byId("otp").value = "";
       await loadAll();
     }
 
-    function logout() {
+    async function logout() {
+      try {
+        if (state.token && state.refreshToken) {
+          await api("/auth/logout", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: state.refreshToken }),
+          });
+        }
+      } catch (_) {
+        // Ignore logout transport errors and clear local session anyway.
+      }
       byId("token").value = "";
       localStorage.removeItem(STORE_TOKEN);
+      localStorage.removeItem(STORE_REFRESH);
       byId("sessionInfo").textContent = "No active session";
       setOverall("unknown");
       byId("boSummary").innerHTML = '<tr><td class="muted">No data</td></tr>';
@@ -2758,10 +2776,30 @@ def ops_console_page():
       state.assignments = {};
       state.tradingControl = null;
       state.backofficeUsers = [];
+      state.refreshToken = "";
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
       renderExecLab(false);
+    }
+
+    async function refreshSession() {
+      const refresh = state.refreshToken || localStorage.getItem(STORE_REFRESH) || "";
+      if (!refresh) throw new Error("No refresh token available. Login again.");
+      const out = await api("/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      const nextAccess = out.access_token || "";
+      const nextRefresh = out.refresh_token || "";
+      if (!nextAccess || !nextRefresh) throw new Error("Refresh response missing tokens");
+      state.refreshToken = nextRefresh;
+      state.token = nextAccess;
+      byId("token").value = nextAccess;
+      localStorage.setItem(STORE_TOKEN, nextAccess);
+      localStorage.setItem(STORE_REFRESH, nextRefresh);
+      await loadAll();
     }
 
     function fillHome(d) {
@@ -3161,7 +3199,10 @@ def ops_console_page():
     byId("loadBtn").addEventListener("click", async () => {
       try { await loadAll(); } catch (e) { byId("sessionInfo").textContent = String(e.message || e); setOverall("red"); }
     });
-    byId("logoutBtn").addEventListener("click", () => logout());
+    byId("refreshSessionBtn").addEventListener("click", async () => {
+      try { await refreshSession(); } catch (e) { byId("sessionInfo").textContent = String(e.message || e); setOverall("red"); }
+    });
+    byId("logoutBtn").addEventListener("click", async () => { await logout(); });
     byId("tradingCtlDisableBtn").addEventListener("click", async () => {
       try { await updateTradingControl(false); } catch (e) { setTradingCtlMsg(String(e.message || e), true); }
     });
@@ -3393,8 +3434,10 @@ def ops_console_page():
 
     const remembered = localStorage.getItem(STORE_TOKEN) || "";
     const rememberedEmail = localStorage.getItem(STORE_EMAIL) || "";
+    const rememberedRefresh = localStorage.getItem(STORE_REFRESH) || "";
     if (remembered) byId("token").value = remembered;
     if (rememberedEmail) byId("email").value = rememberedEmail;
+    if (rememberedRefresh) state.refreshToken = rememberedRefresh;
   </script>
 </body>
 </html>
