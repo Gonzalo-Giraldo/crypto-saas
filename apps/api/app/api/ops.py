@@ -2523,6 +2523,19 @@ def ops_console_page():
       <div class="card">
         <strong>Backoffice Users</strong>
         <div id="boMsg" class="muted" style="margin-top:6px">Readonly for operator/viewer. Editable for admin.</div>
+        <div class="row" style="margin-top:8px">
+          <input id="boEmailFilter" placeholder="email contains" style="min-width:220px" />
+          <select id="boRoleFilter">
+            <option value="ALL">All roles</option>
+            <option value="admin">admin</option>
+            <option value="operator">operator</option>
+            <option value="viewer">viewer</option>
+            <option value="trader">trader</option>
+            <option value="disabled">disabled</option>
+          </select>
+          <button id="boApplyFilterBtn" class="ghost mini">Apply</button>
+          <button id="boResetFilterBtn" class="ghost mini">Reset</button>
+        </div>
         <table style="margin-top:8px">
           <thead>
             <tr><th>Email</th><th>Role</th><th>Risk profile</th><th>2FA</th><th>BINANCE</th><th>IBKR</th><th>Readiness</th><th>Action</th></tr>
@@ -2546,6 +2559,7 @@ def ops_console_page():
       usersById: {},
       assignments: {},
       tradingControl: null,
+      backofficeUsers: [],
     };
 
     function esc(v) {
@@ -2658,6 +2672,7 @@ def ops_console_page():
       state.usersById = {};
       state.assignments = {};
       state.tradingControl = null;
+      state.backofficeUsers = [];
       renderTradingControl(null, false);
       renderMaintenance(false);
     }
@@ -2692,6 +2707,22 @@ def ops_console_page():
       return state.assignments[k] || null;
     }
 
+    function filteredBackofficeUsers() {
+      const rows = state.backofficeUsers || [];
+      const emailContains = (byId("boEmailFilter").value || "").trim().toLowerCase();
+      const roleFilter = (byId("boRoleFilter").value || "ALL").trim().toLowerCase();
+      return rows.filter((u) => {
+        const okEmail = !emailContains || String(u.email || "").toLowerCase().includes(emailContains);
+        const role = (state.usersById[u.user_id]?.role || u.role || "").toLowerCase();
+        const okRole = roleFilter === "all" || role === roleFilter;
+        return okEmail && okRole;
+      });
+    }
+
+    function renderBackofficeUsersFromFilter() {
+      fillBackofficeUsers(filteredBackofficeUsers());
+    }
+
     function fillBackofficeUsers(rows) {
       const canEdit = state.me && state.me.role === "admin";
       const riskProfiles = state.riskProfiles || [];
@@ -2717,6 +2748,7 @@ def ops_console_page():
               <button class="save-user-btn ghost mini" data-user-id="${esc(u.user_id)}">Save</button>
               <button class="set-pass-btn ghost mini" data-user-id="${esc(u.user_id)}">Set password</button>
               <button class="reset-2fa-btn ghost mini" data-user-id="${esc(u.user_id)}">Reset 2FA</button>
+              <button class="readiness-btn ghost mini" data-user-id="${esc(u.user_id)}">Readiness</button>
             </div>
             <div class="row" style="margin-top:6px">
               <button class="toggle-ex-btn ghost mini" data-user-email="${esc(u.email)}" data-exchange="BINANCE" data-next-enabled="${binanceCurrent ? "false" : "true"}" data-strategy-id="${esc(binanceStrategy)}">BINANCE ${binanceCurrent ? "off" : "on"}</button>
@@ -2826,6 +2858,32 @@ def ops_console_page():
               await loadAll();
             } catch (e) {
               setBoMsg(`2FA reset failed: ${String(e.message || e)}`, true);
+              btn.disabled = false;
+            }
+          });
+        });
+        document.querySelectorAll(".readiness-btn").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const userId = btn.getAttribute("data-user-id");
+            if (!userId) return;
+            const user = state.usersById[userId];
+            btn.disabled = true;
+            setBoMsg("Loading readiness...");
+            try {
+              const readiness = await api(`/users/${userId}/readiness-check`, {
+                headers: { Authorization: `Bearer ${state.token}` },
+              });
+              const failed = (readiness.checks || []).filter((c) => !c.passed);
+              if (!failed.length) {
+                setBoMsg(`Readiness OK for ${readiness.email || (user ? user.email : userId)}`);
+              } else {
+                const lines = failed.map((c) => `${c.name}: ${c.detail}`).join("\\n");
+                setBoMsg(`Readiness warning for ${readiness.email || (user ? user.email : userId)}: ${failed.length} failed`, true);
+                alert(`Readiness failed checks (${readiness.email || (user ? user.email : userId)}):\\n\\n${lines}`);
+              }
+            } catch (e) {
+              setBoMsg(`Readiness check failed: ${String(e.message || e)}`, true);
+            } finally {
               btn.disabled = false;
             }
           });
@@ -2943,6 +3001,7 @@ def ops_console_page():
         const home = results[0];
         const boSummary = results[1];
         const boUsers = results[2];
+        state.backofficeUsers = boUsers || [];
         state.usersById = {};
         state.riskProfiles = [];
         if (me.role === "admin") {
@@ -2968,7 +3027,7 @@ def ops_console_page():
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
-        fillBackofficeUsers(boUsers);
+        renderBackofficeUsersFromFilter();
       } else {
         byId("homeMsg").textContent = `Role ${me.role} has limited UI in Sprint A (backoffice is readonly for admin/operator/viewer).`;
         byId("boSummary").innerHTML = '<tr><td class="muted">No access to backoffice summary for this role</td></tr>';
@@ -3074,6 +3133,14 @@ def ops_console_page():
       } catch (e) {
         setMaintMsg(String(e.message || e), true);
       }
+    });
+    byId("boApplyFilterBtn").addEventListener("click", () => {
+      try { renderBackofficeUsersFromFilter(); } catch (e) { setBoMsg(String(e.message || e), true); }
+    });
+    byId("boResetFilterBtn").addEventListener("click", () => {
+      byId("boEmailFilter").value = "";
+      byId("boRoleFilter").value = "ALL";
+      try { renderBackofficeUsersFromFilter(); } catch (e) { setBoMsg(String(e.message || e), true); }
     });
 
     const remembered = localStorage.getItem(STORE_TOKEN) || "";
