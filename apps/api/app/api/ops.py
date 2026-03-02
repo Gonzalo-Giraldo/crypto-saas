@@ -4033,6 +4033,36 @@ def ops_console_page():
       setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ancla=18:45:00 Bogota | ventana=${out.hours}h | filas=${buckets.length}`);
     }
 
+    async function runScheduledAutoPickAnalysis() {
+      if (!state.token) return 0;
+      let executed = 0;
+      const topN = Number(byId("execAutoTopN").value || "10");
+      for (const exchange of ["BINANCE", "IBKR"]) {
+        let candidates = [];
+        try {
+          candidates = resolveExecCandidates(exchange);
+        } catch (_) {
+          candidates = [];
+        }
+        if (!Array.isArray(candidates) || candidates.length === 0) continue;
+        const path = exchange === "IBKR"
+          ? "/ops/execution/pretrade/ibkr/auto-pick"
+          : "/ops/execution/pretrade/binance/auto-pick";
+        try {
+          await api(path, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ candidates, top_n: topN, dry_run: true }),
+          });
+          executed += 1;
+        } catch (e) {
+          // Keep cycle resilient; one exchange failure must not stop the report refresh.
+          setAutoPickReportMsg(`Analisis ${exchange} fallo: ${String(e.message || e)}`, true);
+        }
+      }
+      return executed;
+    }
+
     function authHeaders(token, isForm=false) {
       if (isForm) return { "Content-Type": "application/x-www-form-urlencoded" };
       return { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
@@ -4709,7 +4739,7 @@ def ops_console_page():
           renderAutoPickReport(true);
           renderRuntimePolicies(true);
           renderReadinessReportTable();
-          await loadAutoPickReport();
+          await autoPickRefreshTick();
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
@@ -5180,6 +5210,7 @@ def ops_console_page():
     async function autoPickRefreshTick() {
       if (!state.token || !state.me || state.me.role !== "admin") return;
       try {
+        await runScheduledAutoPickAnalysis();
         await loadAutoPickReport();
       } catch (e) {
         setAutoPickReportMsg(`Auto-refresh fallo: ${String(e.message || e)}`, true);
