@@ -99,8 +99,123 @@ def _is_real_user_email(email: str) -> bool:
     return True
 
 
+def _is_service_user_email(email: str) -> bool:
+    return (email or "").lower().startswith("ops.bot.")
+
+
 def _tenant_id(user: User) -> str:
     return (user.tenant_id or "default")
+
+
+def _build_operational_readiness_report(
+    db: Session,
+    *,
+    tenant_id: str,
+    real_only: bool,
+    include_service_users: bool,
+) -> dict:
+    users = db.execute(
+        select(User)
+        .where(User.tenant_id == tenant_id)
+        .order_by(User.email.asc())
+    ).scalars().all()
+
+    rows = []
+    ready_users = 0
+    missing_users = 0
+    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
+    enforce_max_age = bool(settings.ENFORCE_PASSWORD_MAX_AGE and max_age_days > 0)
+    now = datetime.now(timezone.utc)
+
+    for user in users:
+        if real_only and not _is_real_user_email(user.email):
+            continue
+        if not include_service_users and _is_service_user_email(user.email):
+            continue
+
+        user_2fa = (
+            db.execute(select(UserTwoFactor).where(UserTwoFactor.user_id == user.id))
+            .scalar_one_or_none()
+        )
+        two_factor_enabled = bool(user_2fa and user_2fa.enabled)
+
+        secret_rows = db.execute(
+            select(ExchangeSecret.exchange).where(ExchangeSecret.user_id == user.id)
+        ).all()
+        secret_set = {row[0] for row in secret_rows}
+
+        assignment_rows = db.execute(
+            select(StrategyAssignment.exchange, StrategyAssignment.enabled).where(
+                StrategyAssignment.user_id == user.id
+            )
+        ).all()
+        enabled_map = {exchange: bool(enabled) for exchange, enabled in assignment_rows}
+
+        changed_at = user.password_changed_at
+        if changed_at is not None and changed_at.tzinfo is None:
+            changed_at = changed_at.replace(tzinfo=timezone.utc)
+        if changed_at is None:
+            password_age_days = None
+        else:
+            password_age_days = max(0, (now - changed_at.astimezone(timezone.utc)).days)
+
+        checks = [
+            {
+                "name": "role_allowed",
+                "passed": user.role in {"admin", "operator", "viewer", "trader", "disabled"},
+                "detail": user.role,
+            },
+            {
+                "name": "password_not_expired",
+                "passed": (not enforce_max_age) or (
+                    password_age_days is not None and password_age_days <= max_age_days
+                ),
+                "detail": f"age_days={password_age_days} max_age_days={max_age_days} enforced={enforce_max_age}",
+            },
+            {
+                "name": "admin_has_2fa",
+                "passed": (user.role != "admin") or two_factor_enabled,
+                "detail": f"two_factor_enabled={two_factor_enabled}",
+            },
+        ]
+        for exchange in ("BINANCE", "IBKR"):
+            enabled_for_user = bool(enabled_map.get(exchange, False))
+            has_secret = exchange in secret_set
+            checks.append(
+                {
+                    "name": f"{exchange.lower()}_enabled_has_secret",
+                    "passed": (not enabled_for_user) or has_secret,
+                    "detail": f"enabled={enabled_for_user} secret_configured={has_secret}",
+                }
+            )
+
+        ready = all(bool(c["passed"]) for c in checks)
+        if ready:
+            ready_users += 1
+        else:
+            missing_users += 1
+
+        rows.append(
+            {
+                "user_id": user.id,
+                "email": user.email,
+                "role": user.role,
+                "two_factor_enabled": two_factor_enabled,
+                "password_age_days": password_age_days,
+                "checks": checks,
+                "ready": ready,
+            }
+        )
+
+    return {
+        "summary": {
+            "total_users": len(rows),
+            "ready_users": ready_users,
+            "missing_users": missing_users,
+            "password_max_age_days": max_age_days if enforce_max_age else None,
+        },
+        "users": rows,
+    }
 
 
 def _build_security_posture_rows(
@@ -1827,6 +1942,69 @@ def admin_snapshot_daily(
     }
 
 
+@router.get("/admin/readiness/daily-gate")
+def admin_readiness_daily_gate(
+    real_only: bool = True,
+    include_service_users: bool = False,
+    max_secret_age_days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    tenant = _tenant_id(current_user)
+    now, posture_rows, missing_2fa, stale_secrets = _build_security_posture_rows(
+        db,
+        tenant_id=tenant,
+        real_only=real_only,
+        max_secret_age_days=max_secret_age_days,
+    )
+    readiness = _build_operational_readiness_report(
+        db,
+        tenant_id=tenant,
+        real_only=real_only,
+        include_service_users=include_service_users,
+    )
+    trading_enabled = get_trading_enabled(db)
+
+    checks = [
+        {
+            "name": "security_missing_2fa_zero",
+            "passed": int(missing_2fa) == 0,
+            "detail": f"missing_2fa={missing_2fa}",
+        },
+        {
+            "name": "security_stale_secrets_zero",
+            "passed": int(stale_secrets) == 0,
+            "detail": f"stale_secrets={stale_secrets}",
+        },
+        {
+            "name": "readiness_missing_zero",
+            "passed": int(readiness["summary"]["missing_users"]) == 0,
+            "detail": f"missing_users={readiness['summary']['missing_users']}",
+        },
+        {
+            "name": "trading_control_known",
+            "passed": isinstance(trading_enabled, bool),
+            "detail": f"trading_enabled={trading_enabled}",
+        },
+    ]
+    passed = all(bool(c["passed"]) for c in checks)
+    return {
+        "generated_at": now.isoformat(),
+        "generated_for": current_user.email,
+        "real_only": real_only,
+        "include_service_users": include_service_users,
+        "max_secret_age_days": max_secret_age_days,
+        "passed": passed,
+        "checks": checks,
+        "security_summary": {
+            "users_in_scope": len(posture_rows),
+            "users_missing_2fa": int(missing_2fa),
+            "users_with_stale_secrets": int(stale_secrets),
+        },
+        "readiness_summary": readiness["summary"],
+    }
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page():
     return HTMLResponse(
@@ -2617,6 +2795,8 @@ def ops_console_page():
           <div class="row" style="margin-top:8px">
             <button id="snapshotBuildBtn" class="ghost mini">Build snapshot</button>
             <button id="snapshotDownloadBtn" class="mini">Download JSON</button>
+            <button id="dailyGateRunBtn" class="ghost mini">Run daily gate</button>
+            <button id="dailyGateDownloadBtn" class="ghost mini">Download gate</button>
           </div>
           <div id="snapshotMsg" class="muted" style="margin-top:6px">No snapshot built</div>
         </div>
@@ -2678,6 +2858,7 @@ def ops_console_page():
       refreshToken: "",
       snapshotData: null,
       readinessReportData: null,
+      dailyGateData: null,
     };
 
     function esc(v) {
@@ -2860,6 +3041,7 @@ def ops_console_page():
       state.refreshToken = "";
       state.snapshotData = null;
       state.readinessReportData = null;
+      state.dailyGateData = null;
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
@@ -3534,6 +3716,34 @@ def ops_console_page():
         a.remove();
         URL.revokeObjectURL(url);
         setSnapshotMsg("Snapshot downloaded");
+      } catch (e) {
+        setSnapshotMsg(String(e.message || e), true);
+      }
+    });
+    byId("dailyGateRunBtn").addEventListener("click", async () => {
+      try {
+        const out = await api("/ops/admin/readiness/daily-gate?real_only=true&include_service_users=false&max_secret_age_days=30", {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        state.dailyGateData = out;
+        setSnapshotMsg(`Daily gate: ${out.passed ? "PASS" : "FAIL"} | checks=${(out.checks || []).length}`);
+      } catch (e) {
+        setSnapshotMsg(String(e.message || e), true);
+      }
+    });
+    byId("dailyGateDownloadBtn").addEventListener("click", () => {
+      try {
+        if (!state.dailyGateData) throw new Error("Run daily gate first");
+        const blob = new Blob([JSON.stringify(state.dailyGateData, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `daily_gate_${new Date().toISOString().replaceAll(":", "-")}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setSnapshotMsg("Daily gate downloaded");
       } catch (e) {
         setSnapshotMsg(String(e.message || e), true);
       }

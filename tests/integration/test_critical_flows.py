@@ -536,3 +536,22 @@ def test_admin_readiness_report_admin_only(client):
     assert "users" in data
     assert "ready_users" in data["summary"]
     assert "missing_users" in data["summary"]
+
+
+def test_admin_daily_gate_admin_only(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    blocked = client.get("/ops/admin/readiness/daily-gate", headers=_auth(trader_token))
+    assert blocked.status_code == 403
+
+    ok = client.get(
+        "/ops/admin/readiness/daily-gate?real_only=true&include_service_users=false&max_secret_age_days=30",
+        headers=_auth(admin_token),
+    )
+    assert ok.status_code == 200, ok.text
+    data = ok.json()
+    assert "passed" in data
+    assert "checks" in data
+    assert "security_summary" in data
+    assert "readiness_summary" in data
