@@ -2493,6 +2493,21 @@ def ops_console_page():
           </div>
           <div id="tradingCtlMsg" class="muted" style="margin-top:6px">No data</div>
         </div>
+        <div id="maintCtl" class="card" style="margin-top:10px;display:none">
+          <div class="row">
+            <strong>Admin Maintenance</strong>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="cleanupDays" type="number" min="1" value="14" style="max-width:120px" />
+            <button id="cleanupDryBtn" class="ghost mini">Cleanup dry-run</button>
+            <button id="cleanupApplyBtn" class="mini">Cleanup apply</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button id="idemStatsBtn" class="ghost mini">Idempotency stats</button>
+            <button id="idemCleanupBtn" class="ghost mini">Idempotency cleanup</button>
+          </div>
+          <div id="maintMsg" class="muted" style="margin-top:6px">No data</div>
+        </div>
       </div>
     </div>
 
@@ -2561,6 +2576,13 @@ def ops_console_page():
       el.style.color = bad ? "var(--bad)" : "var(--muted)";
     }
 
+    function setMaintMsg(msg, bad=false) {
+      const el = byId("maintMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
     function renderTradingControl(control, canEdit) {
       const wrap = byId("tradingCtl");
       if (!wrap) return;
@@ -2576,6 +2598,13 @@ def ops_console_page():
       const by = control && control.updated_by ? control.updated_by : "unknown";
       const reason = control && control.reason ? control.reason : "-";
       setTradingCtlMsg(`updated_by=${by} | reason=${reason}`);
+    }
+
+    function renderMaintenance(canEdit) {
+      const wrap = byId("maintCtl");
+      if (!wrap) return;
+      wrap.style.display = canEdit ? "block" : "none";
+      if (canEdit) setMaintMsg("Ready");
     }
 
     function authHeaders(token, isForm=false) {
@@ -2630,6 +2659,7 @@ def ops_console_page():
       state.assignments = {};
       state.tradingControl = null;
       renderTradingControl(null, false);
+      renderMaintenance(false);
     }
 
     function fillHome(d) {
@@ -2930,9 +2960,11 @@ def ops_console_page():
           state.tradingControl = tradingControl;
           setBoMsg("Admin edit mode enabled");
           renderTradingControl(tradingControl, true);
+          renderMaintenance(true);
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
+          renderMaintenance(false);
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
@@ -2943,6 +2975,7 @@ def ops_console_page():
         byId("boUsers").innerHTML = '<tr><td colspan="8" class="muted">No access to backoffice users for this role</td></tr>';
         setBoMsg("No backoffice access for this role", true);
         renderTradingControl(null, false);
+        renderMaintenance(false);
       }
     }
 
@@ -2990,6 +3023,56 @@ def ops_console_page():
         renderTradingControl(d, true);
       } catch (e) {
         setTradingCtlMsg(String(e.message || e), true);
+      }
+    });
+    byId("cleanupDryBtn").addEventListener("click", async () => {
+      try {
+        const older = Math.max(1, parseInt(byId("cleanupDays").value || "14", 10));
+        const out = await api(`/ops/admin/cleanup-smoke-users?dry_run=true&older_than_days=${older}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        setMaintMsg(`Cleanup dry-run: scanned=${out.scanned} eligible=${out.eligible} deleted=${out.deleted}`);
+      } catch (e) {
+        setMaintMsg(String(e.message || e), true);
+      }
+    });
+    byId("cleanupApplyBtn").addEventListener("click", async () => {
+      try {
+        const older = Math.max(1, parseInt(byId("cleanupDays").value || "14", 10));
+        const ok = confirm(`Apply smoke cleanup now? older_than_days=${older}`);
+        if (!ok) return;
+        const out = await api(`/ops/admin/cleanup-smoke-users?dry_run=false&older_than_days=${older}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        setMaintMsg(`Cleanup applied: scanned=${out.scanned} eligible=${out.eligible} deleted=${out.deleted}`);
+        await loadAll();
+      } catch (e) {
+        setMaintMsg(String(e.message || e), true);
+      }
+    });
+    byId("idemStatsBtn").addEventListener("click", async () => {
+      try {
+        const d = await api("/ops/admin/idempotency/stats", {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        setMaintMsg(`Idempotency stats: total=${d.records_total} max_age_days=${d.max_age_days}`);
+      } catch (e) {
+        setMaintMsg(String(e.message || e), true);
+      }
+    });
+    byId("idemCleanupBtn").addEventListener("click", async () => {
+      try {
+        const ok = confirm("Run idempotency cleanup now?");
+        if (!ok) return;
+        const d = await api("/ops/admin/idempotency/cleanup", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        setMaintMsg(`Idempotency cleanup: deleted=${d.deleted} max_age_days=${d.max_age_days}`);
+      } catch (e) {
+        setMaintMsg(String(e.message || e), true);
       }
     });
 
