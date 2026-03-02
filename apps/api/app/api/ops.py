@@ -3539,7 +3539,16 @@ def ops_console_page():
           <div id="autoPickReportMsg" class="muted" style="margin-top:6px">No report loaded</div>
           <table style="margin-top:8px">
             <thead>
-              <tr><th>Hora</th><th>Email</th><th>Exchange</th><th>Activo</th><th>Compro</th><th>Motivo</th><th>Score</th><th>Escaneados</th></tr>
+              <tr>
+                <th><button id="autoPickTimeSortBtn" class="ghost mini">Hora</button></th>
+                <th>Email</th>
+                <th>Exchange</th>
+                <th><button id="autoPickSymbolSortBtn" class="ghost mini">Activo</button></th>
+                <th>Compro</th>
+                <th>Motivo</th>
+                <th>Score</th>
+                <th>Escaneados</th>
+              </tr>
             </thead>
             <tbody id="autoPickReportBody">
               <tr><td colspan="8" class="muted">No data</td></tr>
@@ -3644,6 +3653,8 @@ def ops_console_page():
       readinessReportData: null,
       dailyGateData: null,
       autoPickReportData: null,
+      autoPickViewRows: [],
+      autoPickSort: { key: "timestamp", dir: "asc" },
       execCandidateConfig: null,
     };
 
@@ -3725,6 +3736,39 @@ def ops_console_page():
       if (!el) return;
       el.textContent = msg;
       el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
+    function sortAutoPickRows(rows) {
+      const key = state.autoPickSort.key;
+      const dir = state.autoPickSort.dir === "desc" ? -1 : 1;
+      return [...rows].sort((a, b) => {
+        if (key === "symbol") {
+          const av = String(a.symbol || "").toUpperCase();
+          const bv = String(b.symbol || "").toUpperCase();
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        }
+        const at = new Date(a.timestamp || 0).getTime();
+        const bt = new Date(b.timestamp || 0).getTime();
+        return (at - bt) * dir;
+      });
+    }
+
+    function renderAutoPickRows() {
+      const rows = sortAutoPickRows(state.autoPickViewRows || []);
+      byId("autoPickReportBody").innerHTML = rows.map((r) => `
+        <tr>
+          <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
+          <td>${esc(r.user_email)}</td>
+          <td>${esc(r.exchange)}</td>
+          <td>${esc(r.symbol || "-")}</td>
+          <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
+          <td>${esc(r.reason || "-")}</td>
+          <td>${esc(r.score != null ? String(r.score) : "-")}</td>
+          <td>${esc(String(r.scanned_assets || 0))}</td>
+        </tr>
+      `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
     }
 
     function setExecLabOut(payload) {
@@ -3910,20 +3954,57 @@ def ops_console_page():
         headers: { Authorization: `Bearer ${state.token}` },
       });
       state.autoPickReportData = out;
-      const rows = out.rows || [];
-      byId("autoPickReportBody").innerHTML = rows.map((r) => `
-        <tr>
-          <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
-          <td>${esc(r.user_email)}</td>
-          <td>${esc(r.exchange)}</td>
-          <td>${esc(r.symbol || "-")}</td>
-          <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
-          <td>${esc(r.reason || "-")}</td>
-          <td>${esc(r.score != null ? String(r.score) : "-")}</td>
-          <td>${esc(String(r.scanned_assets || 0))}</td>
-        </tr>
-      `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
-      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | filas=${rows.length}`);
+      const apiRows = Array.isArray(out.rows) ? out.rows : [];
+      const intervalMinutes = Math.max(1, Number(out.interval_minutes || 5));
+      const intervalMs = intervalMinutes * 60 * 1000;
+      const periods = Math.max(1, Math.floor((hours * 60) / intervalMinutes));
+      const endTs = new Date(out.window_to || out.generated_at || new Date().toISOString()).getTime();
+      const startTs = endTs - (periods * intervalMs);
+      const buckets = [];
+      for (let i = 0; i < periods; i += 1) {
+        const from = startTs + (i * intervalMs);
+        const to = from + intervalMs;
+        const inBucket = apiRows.filter((r) => {
+          const t = new Date(r.timestamp || 0).getTime();
+          return t >= from && t < to;
+        });
+        inBucket.sort((a, b) => {
+          const buyA = a.bought ? 1 : 0;
+          const buyB = b.bought ? 1 : 0;
+          if (buyA !== buyB) return buyB - buyA;
+          const scoreA = Number(a.score ?? -1);
+          const scoreB = Number(b.score ?? -1);
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
+        });
+        const best = inBucket[0] || null;
+        if (best) {
+          buckets.push({
+            timestamp: new Date(from).toISOString(),
+            user_email: best.user_email || "-",
+            exchange: best.exchange || "-",
+            symbol: best.symbol || "-",
+            bought: !!best.bought,
+            reason: best.reason || "-",
+            score: best.score,
+            scanned_assets: best.scanned_assets || 0,
+          });
+        } else {
+          buckets.push({
+            timestamp: new Date(from).toISOString(),
+            user_email: "-",
+            exchange: "-",
+            symbol: "-",
+            bought: false,
+            reason: "Sin datos",
+            score: null,
+            scanned_assets: 0,
+          });
+        }
+      }
+      state.autoPickViewRows = buckets;
+      renderAutoPickRows();
+      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | filas=${buckets.length}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -5039,6 +5120,20 @@ def ops_console_page():
       } catch (e) {
         setAutoPickReportMsg(String(e.message || e), true);
       }
+    });
+    byId("autoPickTimeSortBtn").addEventListener("click", () => {
+      state.autoPickSort = {
+        key: "timestamp",
+        dir: state.autoPickSort.key === "timestamp" && state.autoPickSort.dir === "asc" ? "desc" : "asc",
+      };
+      renderAutoPickRows();
+    });
+    byId("autoPickSymbolSortBtn").addEventListener("click", () => {
+      state.autoPickSort = {
+        key: "symbol",
+        dir: state.autoPickSort.key === "symbol" && state.autoPickSort.dir === "asc" ? "desc" : "asc",
+      };
+      renderAutoPickRows();
     });
     byId("helpModalCloseBtn").addEventListener("click", closeHelpModal);
     byId("helpModal").addEventListener("click", (e) => {
