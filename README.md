@@ -59,6 +59,8 @@ pytest -q tests/integration
 - `GET /users/risk-profiles` (admin)
 - `GET /users/{user_id}/readiness-check` (admin, auto validation after changes)
 - `GET /users/readiness/report` (admin, aggregated readiness report)
+- `GET /users/{user_id}/risk-settings` (admin, read dynamic capital base per user)
+- `PUT /users/{user_id}/risk-settings` (admin, update dynamic capital base per user)
 - `PUT /users/{user_id}/exchange-secrets` (admin)
 - `GET /users/{user_id}/exchange-secrets` (admin)
 - `DELETE /users/{user_id}/exchange-secrets/{exchange}` (admin)
@@ -137,6 +139,10 @@ pytest -q tests/integration
   - max holding time by strategy
   - trend break / signal reverse
   - IBKR event risk forced exit
+- `open_from_signal` now enforces risk-per-trade with dynamic user capital:
+  - `capital_base_usd` from `user_risk_settings` (or `DEFAULT_CAPITAL_BASE_USD`)
+  - `max_risk_amount_usd = capital_base_usd * max_risk_per_trade_pct / 100`
+  - blocks opening if `abs(entry_price-stop_loss) * qty > max_risk_amount_usd`
 
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`

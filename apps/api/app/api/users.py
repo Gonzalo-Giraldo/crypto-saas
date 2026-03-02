@@ -10,6 +10,7 @@ from apps.api.app.models.exchange_secret import ExchangeSecret
 from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.models.user_2fa import UserTwoFactor
 from apps.api.app.models.user_risk_profile import UserRiskProfileOverride
+from apps.api.app.models.user_risk_settings import UserRiskSettings
 from apps.api.app.models.user import User
 from apps.api.app.schemas.exchange_secret import ExchangeSecretOut, ExchangeSecretUpsert
 from apps.api.app.schemas.user import (
@@ -20,9 +21,11 @@ from apps.api.app.schemas.user import (
     UserEmailUpdate,
     UserPasswordUpdate,
     User2FAResetOut,
+    UserRiskSettingsOut,
+    UserRiskSettingsUpdate,
 )
-from apps.api.app.api.deps import get_current_user, require_role
 from apps.api.app.core.config import settings
+from apps.api.app.api.deps import get_current_user, require_role
 from apps.api.app.core.security import get_password_hash
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import upsert_exchange_secret
@@ -466,6 +469,63 @@ def get_user_readiness_check(
 ):
     user = _tenant_user_or_404(db, user_id, current_user)
     return _build_user_readiness(db, user)
+
+
+@router.get("/{user_id}/risk-settings", response_model=UserRiskSettingsOut)
+def get_user_risk_settings(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    user = _tenant_user_or_404(db, user_id, current_user)
+    row = db.execute(
+        select(UserRiskSettings).where(UserRiskSettings.user_id == user.id)
+    ).scalar_one_or_none()
+    capital = float(row.capital_base_usd) if row else float(settings.DEFAULT_CAPITAL_BASE_USD)
+    updated_at = row.updated_at.isoformat() if row and row.updated_at else None
+    return UserRiskSettingsOut(
+        user_id=user.id,
+        capital_base_usd=capital,
+        updated_at=updated_at,
+    )
+
+
+@router.put("/{user_id}/risk-settings", response_model=UserRiskSettingsOut)
+def put_user_risk_settings(
+    user_id: str,
+    payload: UserRiskSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    user = _tenant_user_or_404(db, user_id, current_user)
+    capital = float(payload.capital_base_usd)
+    if capital <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="capital_base_usd must be > 0")
+
+    row = db.execute(
+        select(UserRiskSettings).where(UserRiskSettings.user_id == user.id)
+    ).scalar_one_or_none()
+    if not row:
+        row = UserRiskSettings(user_id=user.id, capital_base_usd=capital)
+        db.add(row)
+    else:
+        row.capital_base_usd = capital
+
+    log_audit_event(
+        db,
+        action="user.risk_settings.updated",
+        user_id=current_user.id,
+        entity_type="risk",
+        entity_id=user.id,
+        details={"target_email": user.email, "capital_base_usd": capital},
+    )
+    db.commit()
+    db.refresh(row)
+    return UserRiskSettingsOut(
+        user_id=user.id,
+        capital_base_usd=float(row.capital_base_usd),
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+    )
 
 
 @router.get("/readiness/report")

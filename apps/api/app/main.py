@@ -15,6 +15,7 @@ import apps.api.app.models.session_revocation
 import apps.api.app.models.runtime_setting
 import apps.api.app.models.idempotency_key
 import apps.api.app.models.risk_profile_config
+import apps.api.app.models.user_risk_settings
 
 from fastapi import FastAPI
 

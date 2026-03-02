@@ -606,3 +606,110 @@ def test_admin_can_update_dynamic_risk_profile_and_affects_limits(client):
     assert admin_row is not None
     assert admin_row["limits"]["max_trades_per_day"] == 2
     assert abs(admin_row["limits"]["max_daily_loss_pct"] - 1.2) < 1e-9
+
+
+def test_user_risk_settings_admin_only(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    users = client.get("/users", headers=_auth(admin_token))
+    assert users.status_code == 200, users.text
+    trader = next((u for u in users.json() if u["email"] == "trader@test.com"), None)
+    assert trader is not None
+
+    blocked = client.put(
+        f"/users/{trader['id']}/risk-settings",
+        headers=_auth(trader_token),
+        json={"capital_base_usd": 2500.0},
+    )
+    assert blocked.status_code == 403
+
+    updated = client.put(
+        f"/users/{trader['id']}/risk-settings",
+        headers=_auth(admin_token),
+        json={"capital_base_usd": 2500.0},
+    )
+    assert updated.status_code == 200, updated.text
+    assert abs(updated.json()["capital_base_usd"] - 2500.0) < 1e-9
+
+    fetched = client.get(
+        f"/users/{trader['id']}/risk-settings",
+        headers=_auth(admin_token),
+    )
+    assert fetched.status_code == 200, fetched.text
+    assert abs(fetched.json()["capital_base_usd"] - 2500.0) < 1e-9
+
+
+def test_open_position_blocks_when_risk_per_trade_exceeded(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    users = client.get("/users", headers=_auth(admin_token))
+    assert users.status_code == 200, users.text
+    trader = next((u for u in users.json() if u["email"] == "trader@test.com"), None)
+    assert trader is not None
+
+    # Keep the test deterministic using a known capital base for the trader.
+    set_capital = client.put(
+        f"/users/{trader['id']}/risk-settings",
+        headers=_auth(admin_token),
+        json={"capital_base_usd": 1000.0},
+    )
+    assert set_capital.status_code == 200, set_capital.text
+
+    risk_today = client.get("/positions/risk/today", headers=_auth(trader_token))
+    assert risk_today.status_code == 200, risk_today.text
+    max_risk_amount_usd = float(risk_today.json()["max_risk_amount_usd"])
+    assert max_risk_amount_usd > 0
+
+    create_1 = client.post(
+        "/signals",
+        headers=_auth(trader_token),
+        json={
+            "symbol": "BTCUSDT",
+            "module": "SWING_V1",
+            "base_risk_percent": 0.5,
+            "entry_price": 100.0,
+            "stop_loss": 90.0,
+            "take_profit": 120.0,
+        },
+    )
+    assert create_1.status_code == 200, create_1.text
+    signal_1 = create_1.json()
+    claim_1 = client.post("/signals/claim", headers=_auth(trader_token))
+    assert claim_1.status_code == 200, claim_1.text
+
+    # risk_per_unit = 10.0; force requested risk > max_risk_amount_usd
+    blocked_qty = (max_risk_amount_usd / 10.0) + 1.0
+    blocked_open = client.post(
+        "/positions/open_from_signal",
+        headers=_auth(trader_token),
+        params={"signal_id": signal_1["id"], "qty": blocked_qty},
+    )
+    assert blocked_open.status_code == 409, blocked_open.text
+    assert "risk per trade exceeded" in blocked_open.json()["detail"]
+
+    create_2 = client.post(
+        "/signals",
+        headers=_auth(trader_token),
+        json={
+            "symbol": "BTCUSDT",
+            "module": "SWING_V1",
+            "base_risk_percent": 0.5,
+            "entry_price": 100.0,
+            "stop_loss": 90.0,
+            "take_profit": 120.0,
+        },
+    )
+    assert create_2.status_code == 200, create_2.text
+    signal_2 = create_2.json()
+    claim_2 = client.post("/signals/claim", headers=_auth(trader_token))
+    assert claim_2.status_code == 200, claim_2.text
+
+    allowed_qty = max((max_risk_amount_usd / 10.0) * 0.8, 0.01)
+    allowed_open = client.post(
+        "/positions/open_from_signal",
+        headers=_auth(trader_token),
+        params={"signal_id": signal_2["id"], "qty": allowed_qty},
+    )
+    assert allowed_open.status_code == 200, allowed_open.text

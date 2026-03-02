@@ -45,3 +45,13 @@ class User2FAResetOut(BaseModel):
     secret: str
     otpauth_uri: str
     message: str
+
+
+class UserRiskSettingsOut(BaseModel):
+    user_id: str
+    capital_base_usd: float
+    updated_at: Optional[str] = None
+
+
+class UserRiskSettingsUpdate(BaseModel):
+    capital_base_usd: float

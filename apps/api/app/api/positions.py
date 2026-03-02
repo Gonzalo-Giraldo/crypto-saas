@@ -12,6 +12,8 @@ from apps.api.app.schemas.position import PositionOut
 from apps.api.app.core.time import today_colombia
 from apps.api.app.api.deps import get_current_user
 from apps.api.app.models.user import User
+from apps.api.app.models.user_risk_settings import UserRiskSettings
+from apps.api.app.core.config import settings
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.risk_profiles import (
     apply_profile_daily_limits,
@@ -46,6 +48,15 @@ def _log_and_raise_risk_block(
     )
     db.commit()
     raise HTTPException(status_code=409, detail=detail)
+
+
+def _capital_base_usd_for_user(db: Session, user_id: str) -> float:
+    row = db.execute(
+        select(UserRiskSettings).where(UserRiskSettings.user_id == user_id)
+    ).scalar_one_or_none()
+    if row and row.capital_base_usd and float(row.capital_base_usd) > 0:
+        return float(row.capital_base_usd)
+    return float(settings.DEFAULT_CAPITAL_BASE_USD)
 
 
 @router.post("/open_from_signal", response_model=PositionOut)
@@ -165,6 +176,54 @@ def open_from_signal(
             action="position.open.blocked.max_trades",
             extra={"trades_today": dr.trades_today, "max_trades": dr.max_trades},
         )
+
+    stop_required = bool(profile.get("stop_loss_required", True))
+    if stop_required and s.stop_loss is None:
+        _log_and_raise_risk_block(
+            db=db,
+            current_user=current_user,
+            detail="Risk block: stop_loss is required by risk profile",
+            action="position.open.blocked.stop_loss_required",
+            extra={"profile_name": profile["profile_name"]},
+        )
+
+    if s.stop_loss is not None:
+        entry_price = float(s.entry_price)
+        stop_loss = float(s.stop_loss)
+        risk_per_unit = abs(entry_price - stop_loss)
+        if risk_per_unit <= 0:
+            _log_and_raise_risk_block(
+                db=db,
+                current_user=current_user,
+                detail="Risk block: invalid stop_loss distance",
+                action="position.open.blocked.risk_per_trade.invalid_stop",
+                extra={"entry_price": entry_price, "stop_loss": stop_loss},
+            )
+
+        capital_base_usd = _capital_base_usd_for_user(db, current_user.id)
+        max_risk_per_trade_pct = float(profile["max_risk_per_trade_pct"])
+        max_risk_amount = capital_base_usd * (max_risk_per_trade_pct / 100.0)
+        requested_risk_amount = risk_per_unit * float(qty)
+
+        if requested_risk_amount > max_risk_amount:
+            max_qty_allowed = max_risk_amount / risk_per_unit if risk_per_unit > 0 else 0.0
+            _log_and_raise_risk_block(
+                db=db,
+                current_user=current_user,
+                detail=(
+                    "Risk block: risk per trade exceeded "
+                    f"(requested={round(requested_risk_amount, 6)} > max={round(max_risk_amount, 6)})"
+                ),
+                action="position.open.blocked.risk_per_trade",
+                extra={
+                    "capital_base_usd": capital_base_usd,
+                    "max_risk_per_trade_pct": max_risk_per_trade_pct,
+                    "max_risk_amount_usd": round(max_risk_amount, 6),
+                    "requested_risk_amount_usd": round(requested_risk_amount, 6),
+                    "risk_per_unit": round(risk_per_unit, 6),
+                    "max_qty_allowed": round(max_qty_allowed, 6),
+                },
+            )
 
     p = Position(
         user_id=s.user_id,
@@ -307,10 +366,15 @@ def get_today_risk(
     if not dr:
         daily_stop = -abs(float(profile["max_daily_loss_pct"]))
         max_trades = int(profile["max_trades_per_day"])
+        capital_base_usd = _capital_base_usd_for_user(db, current_user.id)
+        max_risk_per_trade_pct = float(profile["max_risk_per_trade_pct"])
         return {
             "user_id": current_user.id,
             "day": str(today),
             "risk_profile": profile["profile_name"],
+            "capital_base_usd": capital_base_usd,
+            "max_risk_per_trade_pct": max_risk_per_trade_pct,
+            "max_risk_amount_usd": round(capital_base_usd * (max_risk_per_trade_pct / 100.0), 6),
             "trades_today": 0,
             "realized_pnl_today": 0.0,
             "daily_stop": daily_stop,
@@ -323,11 +387,16 @@ def get_today_risk(
 
     apply_profile_daily_limits(dr, profile)
     db.commit()
+    capital_base_usd = _capital_base_usd_for_user(db, current_user.id)
+    max_risk_per_trade_pct = float(profile["max_risk_per_trade_pct"])
 
     return {
         "user_id": dr.user_id,
         "day": str(dr.day),
         "risk_profile": profile["profile_name"],
+        "capital_base_usd": capital_base_usd,
+        "max_risk_per_trade_pct": max_risk_per_trade_pct,
+        "max_risk_amount_usd": round(capital_base_usd * (max_risk_per_trade_pct / 100.0), 6),
         "trades_today": dr.trades_today,
         "realized_pnl_today": dr.realized_pnl_today,
         "daily_stop": dr.daily_stop,
