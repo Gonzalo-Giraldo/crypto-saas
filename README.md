@@ -69,8 +69,9 @@ pytest -q tests/integration
 - `GET /ops/backoffice/summary` (admin/operator/viewer)
 - `GET /ops/backoffice/users` (admin/operator/viewer)
 - `GET /ops/risk/daily-compare` (admin, supports `?real_only=true`)
- - `GET /ops/dashboard/summary` (admin, single-screen status summary)
+- `GET /ops/dashboard/summary` (admin, single-screen status summary)
 - `GET /ops/dashboard` (simple web dashboard UI)
+- `GET /ops/console` (Sprint A UI: login + home + backoffice readonly)
 - `POST /ops/strategy/assign` (admin)
 - `GET /ops/strategy/assignments` (admin)
 - `POST /ops/execution/prepare` (dry-run, worker runtime)
@@ -138,6 +139,7 @@ pytest -q tests/integration
 - NOC-lite decision table: `docs/noc_lite.md`
 - Backend Definition of Done: `docs/backend_definition_of_done.md`
 - IBKR real go-live package: `docs/ibkr_real_go_live_checklist.md`
+- Frontend MVP blueprint: `docs/frontend_mvp_blueprint.md`
 
 ## Smoke Script
 - Automated production smoke checks: `scripts/smoke_prod.sh`

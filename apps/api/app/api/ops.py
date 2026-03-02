@@ -2398,3 +2398,250 @@ def dashboard_page():
 </html>
         """
     )
+
+
+@router.get("/console", response_class=HTMLResponse)
+def ops_console_page():
+    return HTMLResponse(
+        """
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ops Console v1</title>
+  <style>
+    :root {
+      --bg:#f3f5f9; --card:#ffffff; --ink:#122033; --muted:#607086;
+      --line:#d7e0eb; --ok:#147a46; --warn:#9a5a00; --bad:#b42318; --brand:#0f5fd2;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family: "Segoe UI", Tahoma, sans-serif; background: radial-gradient(1200px 500px at 10% -5%, #d9e9ff, transparent 50%), var(--bg); color:var(--ink); }
+    .shell { max-width:1200px; margin:20px auto; padding:0 14px 26px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+    h1 { margin:0 0 6px; font-size:28px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; }
+    .kpi { border:1px solid var(--line); border-radius:10px; padding:10px; }
+    .kpi .v { font-size:24px; font-weight:700; }
+    input, select { border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff; min-width:120px; }
+    input[type="password"] { min-width:180px; }
+    button { border:0; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer; background:var(--brand); color:#fff; }
+    .ghost { background:#edf3fc; color:#0c57c4; border:1px solid #bbd0f3; }
+    .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-weight:700; font-size:12px; color:#fff; }
+    .green { background:var(--ok); } .yellow { background:var(--warn); } .red { background:var(--bad); }
+    .tabs { display:flex; gap:8px; margin-top:10px; }
+    .tab { background:#eef3fb; color:#24579f; border:1px solid #bfd1ee; border-radius:10px; padding:8px 12px; font-weight:700; cursor:pointer; }
+    .tab.active { background:#0f5fd2; color:#fff; border-color:#0f5fd2; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { border-bottom:1px solid var(--line); text-align:left; padding:8px 6px; font-size:13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="card">
+      <h1>Ops Console v1</h1>
+      <div class="muted">Sprint A: Login + Home + Backoffice readonly</div>
+      <div class="row" style="margin-top:10px">
+        <input id="email" placeholder="email" />
+        <input id="password" type="password" placeholder="password" />
+        <input id="otp" placeholder="otp (if required)" style="max-width:170px" />
+        <button id="loginBtn">Login</button>
+        <button id="logoutBtn" class="ghost">Logout</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="token" placeholder="or paste bearer token" style="min-width:420px;max-width:100%" />
+        <button id="loadBtn" class="ghost">Load</button>
+      </div>
+      <div id="sessionInfo" class="muted" style="margin-top:8px">No active session</div>
+    </div>
+
+    <div class="card">
+      <div class="tabs">
+        <button class="tab active" data-tab="home">Home</button>
+        <button class="tab" data-tab="backoffice">Backoffice</button>
+      </div>
+    </div>
+
+    <div id="home" class="panel active">
+      <div class="card">
+        <div class="row"><strong>Overall:</strong> <span id="overall" class="badge yellow">unknown</span></div>
+        <div class="grid" style="margin-top:10px">
+          <div class="kpi"><div class="muted">Users in scope</div><div id="k_users" class="v">-</div></div>
+          <div class="kpi"><div class="muted">Missing 2FA</div><div id="k_2fa" class="v">-</div></div>
+          <div class="kpi"><div class="muted">Stale secrets</div><div id="k_stale" class="v">-</div></div>
+          <div class="kpi"><div class="muted">Trades today</div><div id="k_trades" class="v">-</div></div>
+          <div class="kpi"><div class="muted">Open positions</div><div id="k_open" class="v">-</div></div>
+          <div class="kpi"><div class="muted">Blocked opens</div><div id="k_blocked" class="v">-</div></div>
+        </div>
+        <div id="homeMsg" class="muted" style="margin-top:8px">Load data to start.</div>
+      </div>
+    </div>
+
+    <div id="backoffice" class="panel">
+      <div class="card">
+        <strong>Backoffice Summary</strong>
+        <table style="margin-top:8px">
+          <tbody id="boSummary">
+            <tr><td class="muted">No data</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <strong>Backoffice Users</strong>
+        <table style="margin-top:8px">
+          <thead>
+            <tr><th>Email</th><th>Role</th><th>2FA</th><th>BINANCE</th><th>IBKR</th><th>Readiness</th></tr>
+          </thead>
+          <tbody id="boUsers">
+            <tr><td colspan="6" class="muted">No data</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+    const byId = (id) => document.getElementById(id);
+    const STORE_TOKEN = "ops_console_token";
+    const STORE_EMAIL = "ops_console_email";
+
+    function setOverall(v) {
+      const el = byId("overall");
+      el.textContent = v || "unknown";
+      el.className = "badge " + (v === "green" ? "green" : v === "red" ? "red" : "yellow");
+    }
+
+    function authHeaders(token, isForm=false) {
+      if (isForm) return { "Content-Type": "application/x-www-form-urlencoded" };
+      return { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
+    }
+
+    async function api(path, opts={}) {
+      const res = await fetch(path, opts);
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json") ? await res.json() : { detail: await res.text() };
+      if (!res.ok) throw new Error(data.detail || `${res.status} ${path}`);
+      return data;
+    }
+
+    async function login() {
+      const email = byId("email").value.trim();
+      const password = byId("password").value;
+      const otp = byId("otp").value.trim();
+      if (!email || !password) throw new Error("Email and password required");
+      const form = new URLSearchParams();
+      form.set("username", email);
+      form.set("password", password);
+      if (otp) form.set("otp", otp);
+      const data = await api("/auth/login", {
+        method: "POST",
+        headers: authHeaders("", true),
+        body: form.toString(),
+      });
+      const token = data.access_token || "";
+      if (!token) throw new Error("No access token in response");
+      byId("token").value = token;
+      localStorage.setItem(STORE_TOKEN, token);
+      localStorage.setItem(STORE_EMAIL, email);
+      byId("password").value = "";
+      byId("otp").value = "";
+      await loadAll();
+    }
+
+    function logout() {
+      byId("token").value = "";
+      localStorage.removeItem(STORE_TOKEN);
+      byId("sessionInfo").textContent = "No active session";
+      setOverall("unknown");
+      byId("boSummary").innerHTML = '<tr><td class="muted">No data</td></tr>';
+      byId("boUsers").innerHTML = '<tr><td colspan="6" class="muted">No data</td></tr>';
+      byId("homeMsg").textContent = "Logged out";
+    }
+
+    function fillHome(d) {
+      setOverall(d.overall_status);
+      byId("k_users").textContent = d.security.total_users;
+      byId("k_2fa").textContent = d.security.users_missing_2fa;
+      byId("k_stale").textContent = d.security.users_with_stale_secrets;
+      byId("k_trades").textContent = d.operations.trades_today_total;
+      byId("k_open").textContent = d.operations.open_positions_total;
+      byId("k_blocked").textContent = d.operations.blocked_open_attempts_total;
+      byId("homeMsg").textContent = `Generated ${d.generated_at} | Day ${d.day} | For ${d.generated_for}`;
+    }
+
+    function fillBackofficeSummary(s) {
+      byId("boSummary").innerHTML = `
+        <tr><td><strong>Tenant</strong></td><td class="mono">${s.tenant_id}</td></tr>
+        <tr><td><strong>Total users</strong></td><td>${s.total_users}</td></tr>
+        <tr><td><strong>Admins/Operators/Viewers/Traders</strong></td><td>${s.admins}/${s.operators}/${s.viewers}/${s.traders}</td></tr>
+        <tr><td><strong>Disabled</strong></td><td>${s.disabled}</td></tr>
+        <tr><td><strong>Missing 2FA</strong></td><td>${s.users_missing_2fa}</td></tr>
+        <tr><td><strong>Stale secrets</strong></td><td>${s.users_with_stale_secrets}</td></tr>`;
+    }
+
+    function fillBackofficeUsers(rows) {
+      byId("boUsers").innerHTML = (rows || []).map((u) => `
+        <tr>
+          <td>${u.email}</td>
+          <td>${u.role}</td>
+          <td>${u.two_factor_enabled ? "yes" : "no"}</td>
+          <td>${u.binance_enabled ? (u.binance_secret_configured ? "enabled+secret" : "enabled/no secret") : "off"}</td>
+          <td>${u.ibkr_enabled ? (u.ibkr_secret_configured ? "enabled+secret" : "enabled/no secret") : "off"}</td>
+          <td><span class="badge ${u.readiness === "READY" ? "green" : "red"}">${u.readiness}</span></td>
+        </tr>
+      `).join("") || '<tr><td colspan="6" class="muted">No users in scope</td></tr>';
+    }
+
+    async function loadAll() {
+      const token = byId("token").value.trim();
+      if (!token) throw new Error("Token required");
+      localStorage.setItem(STORE_TOKEN, token);
+      const me = await api("/users/me", { headers: { Authorization: `Bearer ${token}` } });
+      byId("sessionInfo").textContent = `Signed in as ${me.email} (${me.role})`;
+
+      if (["admin", "operator", "viewer"].includes(me.role)) {
+        const [home, boSummary, boUsers] = await Promise.all([
+          api("/ops/dashboard/summary?real_only=true&include_service_users=false", { headers: { Authorization: `Bearer ${token}` } }),
+          api("/ops/backoffice/summary?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
+          api("/ops/backoffice/users?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        fillHome(home);
+        fillBackofficeSummary(boSummary);
+        fillBackofficeUsers(boUsers);
+      } else {
+        byId("homeMsg").textContent = `Role ${me.role} has limited UI in Sprint A (backoffice is readonly for admin/operator/viewer).`;
+        byId("boSummary").innerHTML = '<tr><td class="muted">No access to backoffice summary for this role</td></tr>';
+        byId("boUsers").innerHTML = '<tr><td colspan="6" class="muted">No access to backoffice users for this role</td></tr>';
+      }
+    }
+
+    document.querySelectorAll(".tab").forEach((b) => {
+      b.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+        document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        byId(b.dataset.tab).classList.add("active");
+      });
+    });
+
+    byId("loginBtn").addEventListener("click", async () => {
+      try { await login(); } catch (e) { byId("sessionInfo").textContent = String(e.message || e); setOverall("red"); }
+    });
+    byId("loadBtn").addEventListener("click", async () => {
+      try { await loadAll(); } catch (e) { byId("sessionInfo").textContent = String(e.message || e); setOverall("red"); }
+    });
+    byId("logoutBtn").addEventListener("click", () => logout());
+
+    const remembered = localStorage.getItem(STORE_TOKEN) || "";
+    const rememberedEmail = localStorage.getItem(STORE_EMAIL) || "";
+    if (remembered) byId("token").value = remembered;
+    if (rememberedEmail) byId("email").value = rememberedEmail;
+  </script>
+</body>
+</html>
+        """
+    )

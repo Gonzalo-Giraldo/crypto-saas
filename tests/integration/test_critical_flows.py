@@ -459,3 +459,9 @@ def test_audit_export_hash_and_signature_admin_only(client):
     ).encode("utf-8")
     expected_sha = hashlib.sha256(canonical_json).hexdigest()
     assert expected_sha == data["payload_sha256"]
+
+
+def test_ops_console_page_served(client):
+    res = client.get("/ops/console")
+    assert res.status_code == 200
+    assert "Ops Console v1" in res.text
