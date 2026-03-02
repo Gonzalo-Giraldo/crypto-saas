@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, EmailStr, field_validator
 from pydantic import Field
 
@@ -152,13 +154,14 @@ class PretradeAutoPickOut(BaseModel):
     exchange: str
     dry_run: bool
     selected: bool
-    selected_symbol: str | None = None
-    selected_side: str | None = None
-    selected_qty: float | None = None
-    selected_score: float | None = None
-    selected_market_regime: str | None = None
+    selected_symbol: Optional[str] = None
+    selected_side: Optional[str] = None
+    selected_qty: Optional[float] = None
+    selected_score: Optional[float] = None
+    selected_market_regime: Optional[str] = None
     decision: str
-    execution: dict | None = None
+    top_failed_checks: list[str] = Field(default_factory=list)
+    execution: Optional[dict] = None
     scan: PretradeScanOut
 
 

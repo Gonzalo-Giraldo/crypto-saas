@@ -231,3 +231,30 @@ class StrategyRuntimePolicyUpdateRequest(BaseModel):
     max_hold_minutes_bull: float
     max_hold_minutes_bear: float
     max_hold_minutes_range: float
+
+
+class AutoPickReportItemOut(BaseModel):
+    timestamp: str
+    bucket_5m: str
+    user_email: str
+    exchange: str
+    dry_run: bool
+    selected: bool
+    bought: bool
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    qty: Optional[float] = None
+    score: Optional[float] = None
+    market_regime: Optional[str] = None
+    decision: str
+    reason: str
+    scanned_assets: int = 0
+
+
+class AutoPickReportOut(BaseModel):
+    generated_at: str
+    hours: int
+    window_from: str
+    window_to: str
+    interval_minutes: int
+    rows: list[AutoPickReportItemOut]

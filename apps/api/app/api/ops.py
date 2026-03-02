@@ -66,6 +66,8 @@ from apps.api.app.schemas.security import (
     RiskProfileConfigUpdateRequest,
     StrategyRuntimePolicyOut,
     StrategyRuntimePolicyUpdateRequest,
+    AutoPickReportItemOut,
+    AutoPickReportOut,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -623,7 +625,7 @@ def _auto_pick_from_scan(
     scan_payload = PretradeScanRequest(
         candidates=payload.candidates,
         top_n=payload.top_n,
-        include_blocked=False,
+        include_blocked=True,
     )
     scan = _scan_pretrade_candidates(
         db=db,
@@ -632,7 +634,11 @@ def _auto_pick_from_scan(
         payload=scan_payload,
     )
     assets = scan.get("assets", [])
-    if not assets:
+    passed_assets = [a for a in assets if bool(a.get("passed"))]
+    if not passed_assets:
+        top_failed_checks: list[str] = []
+        if assets:
+            top_failed_checks = list(assets[0].get("failed_checks") or [])
         return {
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
@@ -643,11 +649,12 @@ def _auto_pick_from_scan(
             "selected_score": None,
             "selected_market_regime": None,
             "decision": "no_candidate_passed",
+            "top_failed_checks": top_failed_checks,
             "execution": None,
             "scan": scan,
         }
 
-    selected = assets[0]
+    selected = passed_assets[0]
     execution = None
     decision = "dry_run_selected"
     if not payload.dry_run:
@@ -677,6 +684,7 @@ def _auto_pick_from_scan(
         "selected_score": selected["score"],
         "selected_market_regime": selected["market_regime"],
         "decision": decision,
+        "top_failed_checks": [],
         "execution": execution,
         "scan": scan,
     }
@@ -1291,6 +1299,94 @@ def all_audit(
     return rows
 
 
+@router.get("/admin/auto-pick/report", response_model=AutoPickReportOut)
+def auto_pick_report(
+    hours: int = 2,
+    limit: int = 500,
+    interval_minutes: int = 5,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    hours = max(1, min(hours, 48))
+    limit = max(1, min(limit, 2000))
+    interval_minutes = max(1, min(interval_minutes, 60))
+    now = datetime.now(timezone.utc)
+    from_dt = now - timedelta(hours=hours)
+    tenant_ids = select(User.id).where(User.tenant_id == _tenant_id(current_user))
+    user_rows = (
+        db.execute(select(User.id, User.email).where(User.tenant_id == _tenant_id(current_user)))
+        .all()
+    )
+    email_by_id = {uid: email for uid, email in user_rows}
+
+    rows = (
+        db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.user_id.in_(tenant_ids),
+                AuditLog.action == "pretrade.auto_pick.completed",
+                AuditLog.created_at >= from_dt,
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+    out_rows = []
+    for r in rows:
+        try:
+            details = json.loads(r.details) if r.details else {}
+        except Exception:
+            details = {}
+        created_at = r.created_at
+        if created_at and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        created_at = (created_at or now).astimezone(timezone.utc)
+        minute_bucket = (created_at.minute // interval_minutes) * interval_minutes
+        bucket = created_at.replace(minute=minute_bucket, second=0, microsecond=0)
+        dry_run = bool(details.get("dry_run", True))
+        decision = str(details.get("decision") or "unknown")
+        selected = bool(details.get("selected", False))
+        bought = decision == "executed_test_order"
+        reason = decision
+        if not selected:
+            top_failed = details.get("top_failed_checks") or []
+            if isinstance(top_failed, list) and top_failed:
+                reason = f"no_compra: {', '.join(str(x) for x in top_failed[:3])}"
+            else:
+                reason = "no_compra: sin candidato aprobado"
+        out_rows.append(
+            AutoPickReportItemOut(
+                timestamp=created_at.isoformat(),
+                bucket_5m=bucket.isoformat(),
+                user_email=email_by_id.get(r.user_id, "unknown"),
+                exchange=str(details.get("exchange") or "UNKNOWN"),
+                dry_run=dry_run,
+                selected=selected,
+                bought=bought,
+                symbol=details.get("selected_symbol"),
+                side=details.get("selected_side"),
+                qty=details.get("selected_qty"),
+                score=details.get("selected_score"),
+                market_regime=details.get("selected_market_regime"),
+                decision=decision,
+                reason=reason,
+                scanned_assets=int(details.get("scanned_assets") or 0),
+            )
+        )
+
+    return AutoPickReportOut(
+        generated_at=now.isoformat(),
+        hours=hours,
+        window_from=from_dt.isoformat(),
+        window_to=now.isoformat(),
+        interval_minutes=interval_minutes,
+        rows=out_rows,
+    )
+
+
 @router.get("/admin/audit/export", response_model=AuditExportOut)
 def export_audit(
     limit: int = 500,
@@ -1736,7 +1832,11 @@ def pretrade_binance_auto_pick(
             "decision": out["decision"],
             "selected": out["selected"],
             "selected_symbol": out["selected_symbol"],
+            "selected_side": out["selected_side"],
+            "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
+            "selected_market_regime": out["selected_market_regime"],
+            "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
     )
@@ -1773,7 +1873,11 @@ def pretrade_ibkr_auto_pick(
             "decision": out["decision"],
             "selected": out["selected"],
             "selected_symbol": out["selected_symbol"],
+            "selected_side": out["selected_side"],
+            "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
+            "selected_market_regime": out["selected_market_regime"],
+            "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
     )
@@ -3408,6 +3512,25 @@ def ops_console_page():
           </div>
           <div id="snapshotMsg" class="muted" style="margin-top:6px">No snapshot built</div>
         </div>
+        <div id="autoPickReportCtl" class="card" style="margin-top:10px;display:none">
+          <div class="row">
+            <strong>Auto-pick Report (ultimas 2 horas)</strong>
+            <span class="muted">Refresco automatico cada 5 minutos</span>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input id="autoPickHours" type="number" min="1" max="48" value="2" style="max-width:90px" />
+            <button id="autoPickLoadBtn" class="ghost mini">Cargar ahora</button>
+          </div>
+          <div id="autoPickReportMsg" class="muted" style="margin-top:6px">No report loaded</div>
+          <table style="margin-top:8px">
+            <thead>
+              <tr><th>Hora</th><th>Email</th><th>Exchange</th><th>Activo</th><th>Compro</th><th>Motivo</th><th>Score</th><th>Escaneados</th></tr>
+            </thead>
+            <tbody id="autoPickReportBody">
+              <tr><td colspan="8" class="muted">No data</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -3504,6 +3627,7 @@ def ops_console_page():
       snapshotData: null,
       readinessReportData: null,
       dailyGateData: null,
+      autoPickReportData: null,
     };
 
     function esc(v) {
@@ -3550,6 +3674,13 @@ def ops_console_page():
 
     function setExecLabMsg(msg, bad=false) {
       const el = byId("execLabMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
+    function setAutoPickReportMsg(msg, bad=false) {
+      const el = byId("autoPickReportMsg");
       if (!el) return;
       el.textContent = msg;
       el.style.color = bad ? "var(--bad)" : "var(--muted)";
@@ -3614,6 +3745,40 @@ def ops_console_page():
       if (!wrap) return;
       wrap.style.display = canUse ? "block" : "none";
       if (canUse) setSnapshotMsg("Ready");
+    }
+
+    function renderAutoPickReport(canUse) {
+      const wrap = byId("autoPickReportCtl");
+      if (!wrap) return;
+      wrap.style.display = canUse ? "block" : "none";
+      if (canUse) {
+        setAutoPickReportMsg("Ready");
+      } else {
+        byId("autoPickReportBody").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
+      }
+    }
+
+    async function loadAutoPickReport() {
+      if (!state.token) throw new Error("Token required");
+      const hours = Math.max(1, Math.min(48, parseInt(byId("autoPickHours").value || "2", 10)));
+      const out = await api(`/ops/admin/auto-pick/report?hours=${hours}&limit=500&interval_minutes=5`, {
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      state.autoPickReportData = out;
+      const rows = out.rows || [];
+      byId("autoPickReportBody").innerHTML = rows.map((r) => `
+        <tr>
+          <td>${esc(r.timestamp)}</td>
+          <td>${esc(r.user_email)}</td>
+          <td>${esc(r.exchange)}</td>
+          <td>${esc(r.symbol || "-")}</td>
+          <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
+          <td>${esc(r.reason || "-")}</td>
+          <td>${esc(r.score != null ? String(r.score) : "-")}</td>
+          <td>${esc(String(r.scanned_assets || 0))}</td>
+        </tr>
+      `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
+      setAutoPickReportMsg(`Actualizado: ${out.generated_at} | ventana=${out.hours}h | filas=${rows.length}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -3688,11 +3853,13 @@ def ops_console_page():
       state.snapshotData = null;
       state.readinessReportData = null;
       state.dailyGateData = null;
+      state.autoPickReportData = null;
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
       renderExecLab(false);
       renderSnapshot(false);
+      renderAutoPickReport(false);
       renderRuntimePolicies(false);
       renderReadinessReportTable();
     }
@@ -4286,8 +4453,10 @@ def ops_console_page():
           renderIncidentAudit(true);
           renderExecLab(true);
           renderSnapshot(true);
+          renderAutoPickReport(true);
           renderRuntimePolicies(true);
           renderReadinessReportTable();
+          await loadAutoPickReport();
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
@@ -4295,6 +4464,7 @@ def ops_console_page():
           renderIncidentAudit(false);
           renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
           renderSnapshot(false);
+          renderAutoPickReport(false);
           renderRuntimePolicies(false);
           state.readinessReportData = null;
           renderReadinessReportTable();
@@ -4312,6 +4482,7 @@ def ops_console_page():
         renderIncidentAudit(false);
         renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
         renderSnapshot(false);
+        renderAutoPickReport(false);
       }
     }
 
@@ -4708,6 +4879,13 @@ def ops_console_page():
         setBoMsg(String(e.message || e), true);
       }
     });
+    byId("autoPickLoadBtn").addEventListener("click", async () => {
+      try {
+        await loadAutoPickReport();
+      } catch (e) {
+        setAutoPickReportMsg(String(e.message || e), true);
+      }
+    });
     byId("helpModalCloseBtn").addEventListener("click", closeHelpModal);
     byId("helpModal").addEventListener("click", (e) => {
       if (e.target && e.target.id === "helpModal") closeHelpModal();
@@ -4722,6 +4900,10 @@ def ops_console_page():
     if (remembered) byId("token").value = remembered;
     if (rememberedEmail) byId("email").value = rememberedEmail;
     if (rememberedRefresh) state.refreshToken = rememberedRefresh;
+    setInterval(async () => {
+      if (!state.token || !state.me || state.me.role !== "admin") return;
+      try { await loadAutoPickReport(); } catch (_) {}
+    }, 5 * 60 * 1000);
   </script>
 </body>
 </html>

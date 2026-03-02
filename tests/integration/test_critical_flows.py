@@ -334,6 +334,69 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     assert exec_data["execution"]["sent"] is True
 
 
+def test_auto_pick_report_last_2_hours(client, monkeypatch):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+    saved = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(trader_token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert saved.status_code == 201, saved.text
+
+    import apps.api.app.api.ops as ops_api
+
+    monkeypatch.setattr(
+        ops_api,
+        "execute_binance_test_order_for_user",
+        lambda user_id, symbol, side, qty: {
+            "exchange": "BINANCE",
+            "mode": "testnet_order_test",
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "sent": True,
+        },
+    )
+    picked = client.post(
+        "/ops/execution/pretrade/binance/auto-pick",
+        headers=_auth(trader_token),
+        json={
+            "top_n": 5,
+            "dry_run": False,
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                }
+            ],
+        },
+    )
+    assert picked.status_code == 200, picked.text
+
+    report = client.get("/ops/admin/auto-pick/report?hours=2&limit=200&interval_minutes=5", headers=_auth(admin_token))
+    assert report.status_code == 200, report.text
+    data = report.json()
+    assert data["hours"] == 2
+    assert data["interval_minutes"] == 5
+    assert len(data["rows"]) >= 1
+    row = data["rows"][0]
+    assert "decision" in row
+    assert "bought" in row
+    assert "reason" in row
+
+
 def test_security_posture_admin_only(client):
     admin_token = _token(client, "admin@test.com", "AdminPass123!")
     trader_token = _token(client, "trader@test.com", "TraderPass123!")
