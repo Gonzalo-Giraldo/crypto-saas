@@ -2647,6 +2647,8 @@ def ops_console_page():
           </select>
           <button id="boApplyFilterBtn" class="ghost mini">Apply</button>
           <button id="boResetFilterBtn" class="ghost mini">Reset</button>
+          <button id="boReadinessReportBtn" class="ghost mini">Readiness report</button>
+          <button id="boReadinessDownloadBtn" class="ghost mini">Download report</button>
         </div>
         <table style="margin-top:8px">
           <thead>
@@ -2675,6 +2677,7 @@ def ops_console_page():
       backofficeUsers: [],
       refreshToken: "",
       snapshotData: null,
+      readinessReportData: null,
     };
 
     function esc(v) {
@@ -2856,6 +2859,7 @@ def ops_console_page():
       state.backofficeUsers = [];
       state.refreshToken = "";
       state.snapshotData = null;
+      state.readinessReportData = null;
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
@@ -3541,6 +3545,35 @@ def ops_console_page():
       byId("boEmailFilter").value = "";
       byId("boRoleFilter").value = "ALL";
       try { renderBackofficeUsersFromFilter(); } catch (e) { setBoMsg(String(e.message || e), true); }
+    });
+    byId("boReadinessReportBtn").addEventListener("click", async () => {
+      try {
+        const out = await api("/users/readiness/report?real_only=true&include_service_users=false", {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        state.readinessReportData = out;
+        const s = out.summary || {};
+        setBoMsg(`Readiness report: total=${s.total_users || 0} ready=${s.ready_users || 0} missing=${s.missing_users || 0}`);
+      } catch (e) {
+        setBoMsg(String(e.message || e), true);
+      }
+    });
+    byId("boReadinessDownloadBtn").addEventListener("click", () => {
+      try {
+        if (!state.readinessReportData) throw new Error("Load readiness report first");
+        const blob = new Blob([JSON.stringify(state.readinessReportData, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `readiness_report_${new Date().toISOString().replaceAll(":", "-")}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setBoMsg("Readiness report downloaded");
+      } catch (e) {
+        setBoMsg(String(e.message || e), true);
+      }
     });
 
     const remembered = localStorage.getItem(STORE_TOKEN) || "";

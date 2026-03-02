@@ -58,6 +58,7 @@ pytest -q tests/integration
 - `PUT /users/{user_id}/risk-profile` (admin, set/clear override)
 - `GET /users/risk-profiles` (admin)
 - `GET /users/{user_id}/readiness-check` (admin, auto validation after changes)
+- `GET /users/readiness/report` (admin, aggregated readiness report)
 - `PUT /users/{user_id}/exchange-secrets` (admin)
 - `GET /users/{user_id}/exchange-secrets` (admin)
 - `DELETE /users/{user_id}/exchange-secrets/{exchange}` (admin)

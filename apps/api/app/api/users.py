@@ -37,6 +37,20 @@ def _tenant_id(user: User) -> str:
     return (user.tenant_id or "default")
 
 
+def _is_real_user_email(email: str) -> bool:
+    e = (email or "").lower()
+    if e.startswith("smoke.") or e.startswith("disabled_"):
+        return False
+    if e.endswith("@example.com") or e.endswith("@example.invalid"):
+        return False
+    return True
+
+
+def _is_service_user_email(email: str) -> bool:
+    e = (email or "").lower()
+    return e.startswith("ops.bot.")
+
+
 def _tenant_user_or_404(db: Session, user_id: str, current_user: User) -> User:
     user = db.execute(
         select(User).where(
@@ -451,6 +465,48 @@ def get_user_readiness_check(
 ):
     user = _tenant_user_or_404(db, user_id, current_user)
     return _build_user_readiness(db, user)
+
+
+@router.get("/readiness/report")
+def get_readiness_report(
+    real_only: bool = True,
+    include_service_users: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    users = db.execute(
+        select(User)
+        .where(User.tenant_id == _tenant_id(current_user))
+        .order_by(User.email.asc())
+    ).scalars().all()
+
+    rows = []
+    ready = 0
+    missing = 0
+    for user in users:
+        if real_only and not _is_real_user_email(user.email):
+            continue
+        if not include_service_users and _is_service_user_email(user.email):
+            continue
+        item = _build_user_readiness(db, user)
+        if item["ready"]:
+            ready += 1
+        else:
+            missing += 1
+        rows.append(item)
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_for": current_user.email,
+        "real_only": real_only,
+        "include_service_users": include_service_users,
+        "summary": {
+            "total_users": len(rows),
+            "ready_users": ready,
+            "missing_users": missing,
+        },
+        "users": rows,
+    }
 
 
 # 🔹 Usuario autenticado actual
