@@ -2557,6 +2557,17 @@ def ops_console_page():
           <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
           <pre id="execLabOut" class="mono" style="white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;">{}</pre>
         </div>
+        <div id="snapshotCtl" class="card" style="margin-top:10px;display:none">
+          <div class="row">
+            <strong>Daily Snapshot</strong>
+            <span class="muted">One-file operational snapshot</span>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button id="snapshotBuildBtn" class="ghost mini">Build snapshot</button>
+            <button id="snapshotDownloadBtn" class="mini">Download JSON</button>
+          </div>
+          <div id="snapshotMsg" class="muted" style="margin-top:6px">No snapshot built</div>
+        </div>
       </div>
     </div>
 
@@ -2611,6 +2622,7 @@ def ops_console_page():
       tradingControl: null,
       backofficeUsers: [],
       refreshToken: "",
+      snapshotData: null,
     };
 
     function esc(v) {
@@ -2666,6 +2678,13 @@ def ops_console_page():
       byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
     }
 
+    function setSnapshotMsg(msg, bad=false) {
+      const el = byId("snapshotMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
     function renderTradingControl(control, canEdit) {
       const wrap = byId("tradingCtl");
       if (!wrap) return;
@@ -2707,6 +2726,13 @@ def ops_console_page():
       } else {
         setExecLabOut({});
       }
+    }
+
+    function renderSnapshot(canUse) {
+      const wrap = byId("snapshotCtl");
+      if (!wrap) return;
+      wrap.style.display = canUse ? "block" : "none";
+      if (canUse) setSnapshotMsg("Ready");
     }
 
     function authHeaders(token, isForm=false) {
@@ -2777,10 +2803,12 @@ def ops_console_page():
       state.tradingControl = null;
       state.backofficeUsers = [];
       state.refreshToken = "";
+      state.snapshotData = null;
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
       renderExecLab(false);
+      renderSnapshot(false);
     }
 
     async function refreshSession() {
@@ -3147,12 +3175,14 @@ def ops_console_page():
           renderMaintenance(true);
           renderIncidentAudit(true);
           renderExecLab(true);
+          renderSnapshot(true);
         } else {
           setBoMsg("Readonly mode");
           renderTradingControl(null, false);
           renderMaintenance(false);
           renderIncidentAudit(false);
           renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
+          renderSnapshot(false);
         }
         fillHome(home);
         fillBackofficeSummary(boSummary);
@@ -3166,6 +3196,7 @@ def ops_console_page():
         renderMaintenance(false);
         renderIncidentAudit(false);
         renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
+        renderSnapshot(false);
       }
     }
 
@@ -3421,6 +3452,47 @@ def ops_console_page():
         setExecLabMsg(`Test order ${exchange} completed`);
       } catch (e) {
         setExecLabMsg(String(e.message || e), true);
+      }
+    });
+    byId("snapshotBuildBtn").addEventListener("click", async () => {
+      try {
+        const token = state.token;
+        const [dashboard, backofficeSummary, backofficeUsers, securityPosture, riskCompare] = await Promise.all([
+          api("/ops/dashboard/summary?real_only=true&include_service_users=false", { headers: { Authorization: `Bearer ${token}` } }),
+          api("/ops/backoffice/summary?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
+          api("/ops/backoffice/users?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
+          api("/ops/security/posture?real_only=true&max_secret_age_days=30", { headers: { Authorization: `Bearer ${token}` } }),
+          api("/ops/risk/daily-compare?real_only=true", { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        state.snapshotData = {
+          generated_at: new Date().toISOString(),
+          generated_for: state.me ? state.me.email : null,
+          dashboard,
+          backoffice_summary: backofficeSummary,
+          backoffice_users: backofficeUsers,
+          security_posture: securityPosture,
+          risk_daily_compare: riskCompare,
+        };
+        setSnapshotMsg("Snapshot built successfully");
+      } catch (e) {
+        setSnapshotMsg(String(e.message || e), true);
+      }
+    });
+    byId("snapshotDownloadBtn").addEventListener("click", () => {
+      try {
+        if (!state.snapshotData) throw new Error("Build snapshot first");
+        const blob = new Blob([JSON.stringify(state.snapshotData, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `ops_snapshot_${new Date().toISOString().replaceAll(":", "-")}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setSnapshotMsg("Snapshot downloaded");
+      } catch (e) {
+        setSnapshotMsg(String(e.message || e), true);
       }
     });
     byId("boApplyFilterBtn").addEventListener("click", () => {
