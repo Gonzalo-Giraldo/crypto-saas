@@ -3737,12 +3737,13 @@ def ops_console_page():
             <button id="autoPickLoadBtn" class="ghost mini">Cargar ahora</button>
           </div>
           <div id="autoPickReportMsg" class="muted" style="margin-top:6px">No report loaded</div>
+          <div class="muted" style="margin-top:6px">Eventos reales por broker (sin relleno de huecos).</div>
+          <div style="margin-top:10px"><strong>BINANCE</strong></div>
           <table style="margin-top:8px">
             <thead>
               <tr>
                 <th><button id="autoPickTimeSortBtn" class="ghost mini">Hora</button></th>
                 <th>Email</th>
-                <th>Exchange</th>
                 <th><button id="autoPickSymbolSortBtn" class="ghost mini">Activo</button></th>
                 <th>Compro</th>
                 <th>Motivo</th>
@@ -3750,8 +3751,25 @@ def ops_console_page():
                 <th>Escaneados</th>
               </tr>
             </thead>
-            <tbody id="autoPickReportBody">
-              <tr><td colspan="8" class="muted">No data</td></tr>
+            <tbody id="autoPickReportBodyBinance">
+              <tr><td colspan="7" class="muted">No data</td></tr>
+            </tbody>
+          </table>
+          <div style="margin-top:10px"><strong>IBKR</strong></div>
+          <table style="margin-top:8px">
+            <thead>
+              <tr>
+                <th><button id="autoPickTimeSortBtn2" class="ghost mini">Hora</button></th>
+                <th>Email</th>
+                <th><button id="autoPickSymbolSortBtn2" class="ghost mini">Activo</button></th>
+                <th>Compro</th>
+                <th>Motivo</th>
+                <th>Score</th>
+                <th>Escaneados</th>
+              </tr>
+            </thead>
+            <tbody id="autoPickReportBodyIbkr">
+              <tr><td colspan="7" class="muted">No data</td></tr>
             </tbody>
           </table>
         </div>
@@ -3853,7 +3871,7 @@ def ops_console_page():
       dailyGateData: null,
       autoPickReportData: null,
       autoPickViewRows: [],
-      autoPickSort: { key: "timestamp", dir: "asc" },
+      autoPickSort: { key: "timestamp", dir: "desc" },
     };
 
     function esc(v) {
@@ -3976,23 +3994,27 @@ def ops_console_page():
       });
     }
 
-    function renderAutoPickRows() {
-      const rows = sortAutoPickRows(state.autoPickViewRows || []);
-      byId("autoPickReportBody").innerHTML = rows.map((r) => `
+    function renderAutoPickBody(tbodyId, rows) {
+      byId(tbodyId).innerHTML = rows.map((r) => `
         <tr>
           <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
           <td>${esc(r.user_email)}</td>
-          <td>${esc(r.exchange)}</td>
           <td>${esc(r.symbol || "-")}</td>
           <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
           <td>${esc(r.reason || "-")}</td>
           <td>${esc(r.score != null ? String(r.score) : "-")}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>
-      `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
+      `).join("") || '<tr><td colspan="7" class="muted">Sin eventos en esta ventana</td></tr>';
     }
 
-    function noBuyReasonGeneric() { return "no_compra: sin decision registrada en este bloque"; }
+    function renderAutoPickRows() {
+      const rows = sortAutoPickRows(state.autoPickViewRows || []);
+      const binance = rows.filter((r) => String(r.exchange || "").toUpperCase() === "BINANCE");
+      const ibkr = rows.filter((r) => String(r.exchange || "").toUpperCase() === "IBKR");
+      renderAutoPickBody("autoPickReportBodyBinance", binance);
+      renderAutoPickBody("autoPickReportBodyIbkr", ibkr);
+    }
 
     function setExecLabOut(payload) {
       byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
@@ -4062,7 +4084,8 @@ def ops_console_page():
       if (canUse) {
         setAutoPickReportMsg("Ready");
       } else {
-        byId("autoPickReportBody").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="7" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="7" class="muted">No data</td></tr>';
       }
     }
 
@@ -4073,60 +4096,22 @@ def ops_console_page():
         headers: { Authorization: `Bearer ${state.token}` },
       });
       state.autoPickReportData = out;
-      const apiRows = Array.isArray(out.rows) ? out.rows : [];
-      const intervalMinutes = Math.max(1, Number(out.interval_minutes || 5));
-      const intervalMs = intervalMinutes * 60 * 1000;
-      const periods = Math.max(1, Math.floor((hours * 60) / intervalMinutes));
-      const referenceTs = new Date(out.window_to || out.generated_at || new Date().toISOString()).getTime();
-      const anchorMs = bogotaAnchor1845Ms(referenceTs);
-      const stepsToRef = Math.max(0, Math.floor((referenceTs - anchorMs) / intervalMs));
-      const lastBucketStart = anchorMs + (stepsToRef * intervalMs);
-      const startTs = lastBucketStart - ((periods - 1) * intervalMs);
-      const buckets = [];
-      for (let i = 0; i < periods; i += 1) {
-        const from = startTs + (i * intervalMs);
-        const to = from + intervalMs;
-        const inBucket = apiRows.filter((r) => {
-          const t = new Date(r.timestamp || 0).getTime();
-          return t >= from && t < to;
-        });
-        inBucket.sort((a, b) => {
-          const buyA = a.bought ? 1 : 0;
-          const buyB = b.bought ? 1 : 0;
-          if (buyA !== buyB) return buyB - buyA;
-          const scoreA = Number(a.score ?? -1);
-          const scoreB = Number(b.score ?? -1);
-          if (scoreA !== scoreB) return scoreB - scoreA;
-          return new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime();
-        });
-        const best = inBucket[0] || null;
-        if (best) {
-          buckets.push({
-            timestamp: new Date(from).toISOString(),
-            user_email: best.user_email || "-",
-            exchange: best.exchange || "-",
-            symbol: best.symbol || "-",
-            bought: !!best.bought,
-            reason: best.reason || "-",
-            score: best.score,
-            scanned_assets: best.scanned_assets || 0,
-          });
-        } else {
-          buckets.push({
-            timestamp: new Date(from).toISOString(),
-            user_email: "-",
-            exchange: "-",
-            symbol: "-",
-            bought: false,
-            reason: noBuyReasonGeneric(),
-            score: null,
-            scanned_assets: 0,
-          });
-        }
-      }
-      state.autoPickViewRows = buckets;
+      const rows = Array.isArray(out.rows) ? out.rows : [];
+      state.autoPickViewRows = rows.map((r) => ({
+        timestamp: r.timestamp,
+        user_email: r.user_email || "-",
+        exchange: r.exchange || "-",
+        symbol: r.symbol || "-",
+        bought: !!r.bought,
+        reason: r.reason || "-",
+        score: r.score,
+        scanned_assets: Number(r.scanned_assets || 0),
+      }));
       renderAutoPickRows();
-      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ancla=18:45:00 Bogota | ventana=${out.hours}h | filas=${buckets.length}`);
+      const total = state.autoPickViewRows.length;
+      const b = state.autoPickViewRows.filter((r) => String(r.exchange).toUpperCase() === "BINANCE").length;
+      const i = state.autoPickViewRows.filter((r) => String(r.exchange).toUpperCase() === "IBKR").length;
+      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | eventos=${total} | BINANCE=${b} | IBKR=${i}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -5217,7 +5202,21 @@ def ops_console_page():
       };
       renderAutoPickRows();
     });
+    byId("autoPickTimeSortBtn2").addEventListener("click", () => {
+      state.autoPickSort = {
+        key: "timestamp",
+        dir: state.autoPickSort.key === "timestamp" && state.autoPickSort.dir === "asc" ? "desc" : "asc",
+      };
+      renderAutoPickRows();
+    });
     byId("autoPickSymbolSortBtn").addEventListener("click", () => {
+      state.autoPickSort = {
+        key: "symbol",
+        dir: state.autoPickSort.key === "symbol" && state.autoPickSort.dir === "asc" ? "desc" : "asc",
+      };
+      renderAutoPickRows();
+    });
+    byId("autoPickSymbolSortBtn2").addEventListener("click", () => {
       state.autoPickSort = {
         key: "symbol",
         dir: state.autoPickSort.key === "symbol" && state.autoPickSort.dir === "asc" ? "desc" : "asc",
