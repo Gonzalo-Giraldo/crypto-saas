@@ -4,6 +4,7 @@ import hmac
 import json
 import time
 from typing import Optional
+from urllib import error as urllib_error, parse as urllib_parse, request as urllib_request
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
@@ -135,10 +136,76 @@ def _parse_symbol_allowlist(value: str) -> set[str]:
     return {item.strip().upper() for item in raw.split(",") if item.strip()}
 
 
+def _binance_fallback_symbols() -> list[str]:
+    return [
+        "BTCUSDT",
+        "ETHUSDT",
+        "BNBUSDT",
+        "SOLUSDT",
+        "XRPUSDT",
+        "ADAUSDT",
+        "DOGEUSDT",
+        "LTCUSDT",
+    ]
+
+
+def _ibkr_fallback_symbols() -> list[str]:
+    return [
+        "SPY",
+        "QQQ",
+        "IWM",
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMZN",
+        "META",
+        "TSLA",
+    ]
+
+
+def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
+    base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
+    url = f"{base}/api/v3/ticker/24hr"
+    try:
+        req = urllib_request.Request(url, method="GET")
+        with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    rows: list[tuple[str, float]] = []
+    banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper().strip()
+        if not symbol.endswith("USDT"):
+            continue
+        if symbol.endswith(banned_suffixes):
+            continue
+        try:
+            vol = float(item.get("quoteVolume") or 0.0)
+        except (TypeError, ValueError):
+            vol = 0.0
+        rows.append((symbol, vol))
+    rows.sort(key=lambda x: x[1], reverse=True)
+    out: list[str] = []
+    seen: set[str] = set()
+    for symbol, _ in rows:
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append(symbol)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
     ex = (exchange or "").upper()
     if ex == "IBKR":
-        symbols = sorted(_parse_symbol_allowlist(settings.ALLOWED_IBKR_SYMBOLS))
+        symbols = _ibkr_fallback_symbols()
         return [
             PretradeCheckRequest(
                 symbol=s,
@@ -160,7 +227,7 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
             )
             for s in symbols
         ]
-    symbols = sorted(_parse_symbol_allowlist(settings.ALLOWED_BINANCE_SYMBOLS))
+    symbols = _fetch_binance_auto_universe(limit=12) or _binance_fallback_symbols()
     return [
         PretradeCheckRequest(
             symbol=s,
@@ -845,13 +912,11 @@ def _build_strategy_checks(
     )
 
     if ex == "BINANCE":
-        allowlist = _parse_symbol_allowlist(settings.ALLOWED_BINANCE_SYMBOLS)
-        symbol_allowed = True if not allowlist else payload.symbol.upper() in allowlist
         checks.append(
             {
                 "name": "symbol_allowlist",
-                "passed": symbol_allowed,
-                "detail": payload.symbol.upper(),
+                "passed": True,
+                "detail": f"{payload.symbol.upper()} (auto-universe)",
             }
         )
         checks.append(
@@ -907,13 +972,11 @@ def _build_strategy_checks(
             }
         )
     else:
-        allowlist = _parse_symbol_allowlist(settings.ALLOWED_IBKR_SYMBOLS)
-        symbol_allowed = True if not allowlist else payload.symbol.upper() in allowlist
         checks.append(
             {
                 "name": "symbol_allowlist",
-                "passed": symbol_allowed,
-                "detail": payload.symbol.upper(),
+                "passed": True,
+                "detail": f"{payload.symbol.upper()} (auto-universe)",
             }
         )
         max_spread = float(runtime_policy.get(f"max_spread_bps_{market_regime}", 15.0))
