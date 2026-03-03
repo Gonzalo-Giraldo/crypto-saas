@@ -1,0 +1,74 @@
+name: Auto Pick Tick 5min
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry_run mode"
+        required: true
+        default: "true"
+      top_n:
+        description: "Top N assets to evaluate"
+        required: true
+        default: "10"
+      real_only:
+        description: "Only real users"
+        required: true
+        default: "true"
+      include_service_users:
+        description: "Include service users (ops.bot.*)"
+        required: true
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-pick-tick-5min
+  cancel-in-progress: true
+
+jobs:
+  auto_pick_tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_URL: ${{ vars.BASE_URL != '' && vars.BASE_URL || 'https://crypto-saas-api.onrender.com' }}
+      ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+      ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
+      ADMIN_OTP: ${{ secrets.DUAL_ADMIN_OTP }}
+      ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
+      TOP_N: ${{ github.event_name == 'workflow_dispatch' && inputs.top_n || '10' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'true' }}
+      REAL_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.real_only || 'true' }}
+      INCLUDE_SERVICE_USERS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_service_users || 'false' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" ]]; then
+            echo "Missing required secrets: DUAL_ADMIN_EMAIL / DUAL_ADMIN_PASSWORD"
+            exit 1
+          fi
+
+      - name: Run auto-pick tick
+        run: |
+          set -euo pipefail
+          chmod +x scripts/auto_pick_tick.sh
+          scripts/auto_pick_tick.sh 2>&1 | tee auto_pick_tick.log
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-pick-tick-${{ github.run_id }}
+          path: |
+            auto_pick_tick.log
+            auto_pick_tick_output.json
+          if-no-files-found: ignore
+
