@@ -1,8 +1,10 @@
 import hashlib
 import hmac
+import requests
 
 from fastapi import HTTPException, status
 
+from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
@@ -94,12 +96,12 @@ def execute_binance_test_order_for_user(
             )
 
         try:
-            send_test_order(
+            _send_binance_test_order(
                 api_key=creds["api_key"],
                 api_secret=creds["api_secret"],
                 symbol=symbol,
                 side=side,
-                quantity=qty,
+                qty=qty,
             )
         except Exception as exc:
             log_audit_event(
@@ -139,6 +141,76 @@ def execute_binance_test_order_for_user(
         }
     finally:
         db.close()
+
+
+def _send_binance_test_order(
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    side: str,
+    qty: float,
+) -> None:
+    gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+    if not gateway_enabled:
+        send_test_order(
+            api_key=api_key,
+            api_secret=api_secret,
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+        )
+        return
+
+    try:
+        _send_binance_test_order_via_gateway(
+            api_key=api_key,
+            api_secret=api_secret,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+        )
+    except Exception:
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            raise
+        send_test_order(
+            api_key=api_key,
+            api_secret=api_secret,
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+        )
+
+
+def _send_binance_test_order_via_gateway(
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    side: str,
+    qty: float,
+) -> None:
+    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+    url = f"{base}/binance/test-order"
+    headers = {"Content-Type": "application/json"}
+    if settings.BINANCE_GATEWAY_TOKEN:
+        headers["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
+
+    payload = {
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "symbol": symbol.upper(),
+        "side": side.upper(),
+        "qty": qty,
+    }
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+    )
+    if response.status_code >= 400:
+        detail = response.text
+        raise RuntimeError(f"Binance gateway error {response.status_code}: {detail}")
 
 
 def execute_ibkr_test_order_for_user(

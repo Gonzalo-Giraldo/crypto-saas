@@ -7,6 +7,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ENCRYPTION_KEY: str
     BINANCE_TESTNET_BASE_URL: str = "https://testnet.binance.vision"
+    BINANCE_GATEWAY_ENABLED: bool = False
+    BINANCE_GATEWAY_BASE_URL: str = ""
+    BINANCE_GATEWAY_TOKEN: str = ""
+    BINANCE_GATEWAY_TIMEOUT_SECONDS: int = 12
+    BINANCE_GATEWAY_FALLBACK_DIRECT: bool = True
     IBKR_BRIDGE_BASE_URL: str = ""
     RISK_PROFILE_MODEL2_EMAIL: str = ""
     RISK_PROFILE_LOOSE_EMAIL: str = ""
