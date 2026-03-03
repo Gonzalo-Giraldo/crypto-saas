@@ -24,11 +24,32 @@ from apps.api.app.api.ops import router as ops_router
 from apps.api.app.api.users import router as users_router
 
 from apps.api.app.db.session import engine, Base
+from sqlalchemy import inspect, text
 
 app = FastAPI(title="crypto-saas API")
 
 # OJO: users_router ya importa el modelo User, así que el modelo ya queda registrado.
 Base.metadata.create_all(bind=engine)
+
+
+def _ensure_runtime_policy_columns():
+    insp = inspect(engine)
+    try:
+        cols = {c["name"] for c in insp.get_columns("strategy_runtime_policy")}
+    except Exception:
+        return
+    if "min_score_pct" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE strategy_runtime_policy "
+                "ADD COLUMN min_score_pct DOUBLE PRECISION NOT NULL DEFAULT 78.0"
+            )
+        )
+
+
+_ensure_runtime_policy_columns()
 
 app.include_router(ops_router)
 app.include_router(users_router)

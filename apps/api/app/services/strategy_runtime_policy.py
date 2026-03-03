@@ -15,6 +15,7 @@ DEFAULT_RUNTIME_POLICIES = {
         "rr_min_bull": 1.5,
         "rr_min_bear": 1.6,
         "rr_min_range": 1.9,
+        "min_score_pct": 78.0,
         "min_volume_24h_usdt_bull": 50000000.0,
         "min_volume_24h_usdt_bear": 70000000.0,
         "min_volume_24h_usdt_range": 90000000.0,
@@ -37,6 +38,7 @@ DEFAULT_RUNTIME_POLICIES = {
         "rr_min_bull": 1.4,
         "rr_min_bear": 1.5,
         "rr_min_range": 1.8,
+        "min_score_pct": 78.0,
         "min_volume_24h_usdt_bull": 0.0,
         "min_volume_24h_usdt_bear": 0.0,
         "min_volume_24h_usdt_range": 0.0,
@@ -59,6 +61,7 @@ DEFAULT_RUNTIME_POLICIES = {
         "rr_min_bull": 1.3,
         "rr_min_bear": 1.4,
         "rr_min_range": 1.6,
+        "min_score_pct": 78.0,
         "min_volume_24h_usdt_bull": 80000000.0,
         "min_volume_24h_usdt_bear": 100000000.0,
         "min_volume_24h_usdt_range": 120000000.0,
@@ -81,6 +84,7 @@ DEFAULT_RUNTIME_POLICIES = {
         "rr_min_bull": 1.3,
         "rr_min_bear": 1.4,
         "rr_min_range": 1.6,
+        "min_score_pct": 78.0,
         "min_volume_24h_usdt_bull": 0.0,
         "min_volume_24h_usdt_bear": 0.0,
         "min_volume_24h_usdt_range": 0.0,
@@ -117,6 +121,7 @@ def _to_dict(row: StrategyRuntimePolicy) -> dict:
         "rr_min_bull": float(row.rr_min_bull),
         "rr_min_bear": float(row.rr_min_bear),
         "rr_min_range": float(row.rr_min_range),
+        "min_score_pct": float(row.min_score_pct),
         "min_volume_24h_usdt_bull": float(row.min_volume_24h_usdt_bull),
         "min_volume_24h_usdt_bear": float(row.min_volume_24h_usdt_bear),
         "min_volume_24h_usdt_range": float(row.min_volume_24h_usdt_range),
@@ -184,6 +189,7 @@ def upsert_runtime_policy(db, *, strategy_id: str, exchange: str, payload: dict)
     row.rr_min_bull = float(payload["rr_min_bull"])
     row.rr_min_bear = float(payload["rr_min_bear"])
     row.rr_min_range = float(payload["rr_min_range"])
+    row.min_score_pct = float(payload["min_score_pct"])
     row.min_volume_24h_usdt_bull = float(payload["min_volume_24h_usdt_bull"])
     row.min_volume_24h_usdt_bear = float(payload["min_volume_24h_usdt_bear"])
     row.min_volume_24h_usdt_range = float(payload["min_volume_24h_usdt_range"])

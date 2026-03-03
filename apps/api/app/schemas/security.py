@@ -197,6 +197,7 @@ class StrategyRuntimePolicyOut(BaseModel):
     rr_min_bull: float
     rr_min_bear: float
     rr_min_range: float
+    min_score_pct: float = 78.0
     min_volume_24h_usdt_bull: float
     min_volume_24h_usdt_bear: float
     min_volume_24h_usdt_range: float
@@ -219,6 +220,7 @@ class StrategyRuntimePolicyUpdateRequest(BaseModel):
     rr_min_bull: float
     rr_min_bear: float
     rr_min_range: float
+    min_score_pct: float = 78.0
     min_volume_24h_usdt_bull: float = 0.0
     min_volume_24h_usdt_bear: float = 0.0
     min_volume_24h_usdt_range: float = 0.0

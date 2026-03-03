@@ -135,6 +135,54 @@ def _parse_symbol_allowlist(value: str) -> set[str]:
     return {item.strip().upper() for item in raw.split(",") if item.strip()}
 
 
+def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
+    ex = (exchange or "").upper()
+    if ex == "IBKR":
+        symbols = sorted(_parse_symbol_allowlist(settings.ALLOWED_IBKR_SYMBOLS))
+        return [
+            PretradeCheckRequest(
+                symbol=s,
+                side="BUY",
+                qty=1.0,
+                rr_estimate=1.6,
+                trend_tf="4H",
+                signal_tf="1H",
+                timing_tf="15M",
+                spread_bps=8.0,
+                slippage_bps=10.0,
+                volume_24h_usdt=0.0,
+                in_rth=True,
+                macro_event_block=False,
+                earnings_within_24h=False,
+                market_trend_score=0.0,
+                atr_pct=0.0,
+                momentum_score=0.0,
+            )
+            for s in symbols
+        ]
+    symbols = sorted(_parse_symbol_allowlist(settings.ALLOWED_BINANCE_SYMBOLS))
+    return [
+        PretradeCheckRequest(
+            symbol=s,
+            side="BUY",
+            qty=0.01,
+            rr_estimate=1.7,
+            trend_tf="4H",
+            signal_tf="1H",
+            timing_tf="15M",
+            spread_bps=7.0,
+            slippage_bps=10.0,
+            volume_24h_usdt=90000000.0,
+            market_trend_score=0.0,
+            atr_pct=0.0,
+            momentum_score=0.0,
+            funding_rate_bps=0.0,
+            crypto_event_block=False,
+        )
+        for s in symbols
+    ]
+
+
 def _build_operational_readiness_report(
     db: Session,
     *,
@@ -622,8 +670,20 @@ def _auto_pick_from_scan(
     exchange: str,
     payload: PretradeAutoPickRequest,
 ) -> dict:
+    strategy = resolve_strategy_for_user_exchange(
+        db=db,
+        user_id=current_user.id,
+        exchange=exchange,
+    )
+    runtime_policy = resolve_runtime_policy(
+        db=db,
+        strategy_id=strategy["strategy_id"],
+        exchange=exchange,
+    )
+    min_score_pct = float(runtime_policy.get("min_score_pct", 78.0))
+    universe = _build_auto_pick_universe(exchange)
     scan_payload = PretradeScanRequest(
-        candidates=payload.candidates,
+        candidates=universe,
         top_n=payload.top_n,
         include_blocked=True,
     )
@@ -633,12 +693,30 @@ def _auto_pick_from_scan(
         exchange=exchange,
         payload=scan_payload,
     )
+    if not universe:
+        return {
+            "exchange": exchange,
+            "dry_run": bool(payload.dry_run),
+            "selected": False,
+            "selected_symbol": None,
+            "selected_side": None,
+            "selected_qty": None,
+            "selected_score": None,
+            "selected_market_regime": None,
+            "decision": "no_universe_symbols_configured",
+            "top_failed_checks": ["allowlist_empty"],
+            "execution": None,
+            "scan": scan,
+        }
     assets = scan.get("assets", [])
     passed_assets = [a for a in assets if bool(a.get("passed"))]
-    if not passed_assets:
+    score_eligible = [a for a in passed_assets if float(a.get("score") or 0.0) >= min_score_pct]
+    if not score_eligible:
         top_failed_checks: list[str] = []
         if assets:
             top_failed_checks = list(assets[0].get("failed_checks") or [])
+        if passed_assets and "score_below_min_threshold" not in top_failed_checks:
+            top_failed_checks = ["score_below_min_threshold", *top_failed_checks]
         return {
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
@@ -654,25 +732,29 @@ def _auto_pick_from_scan(
             "scan": scan,
         }
 
-    selected = passed_assets[0]
+    selected = score_eligible[0]
     execution = None
     decision = "dry_run_selected"
     if not payload.dry_run:
-        if exchange == "BINANCE":
-            execution = execute_binance_test_order_for_user(
-                user_id=current_user.id,
-                symbol=selected["symbol"],
-                side=selected["side"],
-                qty=selected["qty"],
-            )
-        else:
-            execution = execute_ibkr_test_order_for_user(
-                user_id=current_user.id,
-                symbol=selected["symbol"],
-                side=selected["side"],
-                qty=selected["qty"],
-            )
-        decision = "executed_test_order"
+        try:
+            if exchange == "BINANCE":
+                execution = execute_binance_test_order_for_user(
+                    user_id=current_user.id,
+                    symbol=selected["symbol"],
+                    side=selected["side"],
+                    qty=selected["qty"],
+                )
+            else:
+                execution = execute_ibkr_test_order_for_user(
+                    user_id=current_user.id,
+                    symbol=selected["symbol"],
+                    side=selected["side"],
+                    qty=selected["qty"],
+                )
+            decision = "executed_test_order"
+        except HTTPException as exc:
+            decision = "insufficient_resources_or_execution_error"
+            execution = {"error": str(exc.detail)}
 
     return {
         "exchange": exchange,
@@ -1883,6 +1965,77 @@ def pretrade_ibkr_auto_pick(
     )
     db.commit()
     return out
+
+
+@router.post("/admin/auto-pick/tick")
+def admin_auto_pick_tick(
+    dry_run: bool = True,
+    top_n: int = 10,
+    real_only: bool = True,
+    include_service_users: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    top_n = max(1, min(top_n, 100))
+    users = (
+        db.execute(select(User).where(User.tenant_id == _tenant_id(current_user)).order_by(User.email.asc()))
+        .scalars()
+        .all()
+    )
+    executed = []
+    for u in users:
+        if u.role not in {"admin", "trader"}:
+            continue
+        if real_only and not _is_real_user_email(u.email):
+            continue
+        if (not include_service_users) and _is_service_user_email(u.email):
+            continue
+        for exchange in ("BINANCE", "IBKR"):
+            if not is_exchange_enabled_for_user(db=db, user_id=u.id, exchange=exchange):
+                continue
+            out = _auto_pick_from_scan(
+                db=db,
+                current_user=u,
+                exchange=exchange,
+                payload=PretradeAutoPickRequest(top_n=top_n, dry_run=dry_run),
+            )
+            log_audit_event(
+                db,
+                action="pretrade.auto_pick.completed",
+                user_id=u.id,
+                entity_type="pretrade_auto_pick",
+                details={
+                    "exchange": exchange,
+                    "dry_run": bool(dry_run),
+                    "decision": out["decision"],
+                    "selected": out["selected"],
+                    "selected_symbol": out["selected_symbol"],
+                    "selected_side": out["selected_side"],
+                    "selected_qty": out["selected_qty"],
+                    "selected_score": out["selected_score"],
+                    "selected_market_regime": out["selected_market_regime"],
+                    "top_failed_checks": out.get("top_failed_checks", []),
+                    "scanned_assets": out["scan"]["scanned_assets"],
+                },
+            )
+            executed.append(
+                {
+                    "user_email": u.email,
+                    "exchange": exchange,
+                    "decision": out["decision"],
+                    "selected": out["selected"],
+                    "selected_symbol": out["selected_symbol"],
+                    "selected_score": out["selected_score"],
+                    "scanned_assets": out["scan"]["scanned_assets"],
+                }
+            )
+    db.commit()
+    return {
+        "dry_run": bool(dry_run),
+        "top_n": top_n,
+        "executed_count": len(executed),
+        "results": executed,
+    }
 
 
 @router.post("/execution/exit/binance/check", response_model=ExitCheckOut)
@@ -3494,23 +3647,7 @@ def ops_console_page():
             </label>
             <input id="execAutoTopN" type="number" min="1" max="100" value="10" style="max-width:90px" />
           </div>
-          <div class="card" style="margin-top:8px;padding:10px">
-            <div class="row">
-              <strong>Candidatos auto-pick (1 a 4 simbolos, caducan en 5 minutos)</strong>
-              <button id="execApplyCandidatesBtn" class="ghost mini">Aplicar 5 minutos</button>
-            </div>
-            <div class="row" style="margin-top:8px">
-              <input id="execBinance1" placeholder="BINANCE 1 (ej: BTCUSDT)" style="min-width:180px" />
-              <input id="execBinance2" placeholder="BINANCE 2 (ej: ETHUSDT)" style="min-width:180px" />
-            </div>
-            <div class="row" style="margin-top:8px">
-              <input id="execIbkr1" placeholder="IBKR 1 (ej: AAPL)" style="min-width:180px" />
-              <input id="execIbkr2" placeholder="IBKR 2 (ej: SPY)" style="min-width:180px" />
-            </div>
-            <div id="execCandidateStatus" class="muted" style="margin-top:6px">No configurado.</div>
-          </div>
-          <div class="muted" style="margin-top:8px">Candidates JSON (opcional). Si escribes JSON aqui, tiene prioridad sobre la configuracion de arriba.</div>
-          <textarea id="execCandidatesJson" class="mono" style="margin-top:6px;width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff" placeholder='[{"symbol":"BTCUSDT","side":"BUY","qty":0.01}]'></textarea>
+          <div class="muted" style="margin-top:8px">Auto-pick analiza automaticamente el universo permitido por broker cada 5 minutos.</div>
           <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
           <pre id="execLabOut" class="mono" style="white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;">{}</pre>
         </div>
@@ -3637,7 +3774,6 @@ def ops_console_page():
     const STORE_TOKEN = "ops_console_token";
     const STORE_EMAIL = "ops_console_email";
     const STORE_REFRESH = "ops_console_refresh";
-    const EXEC_CANDIDATE_TTL_MS = 5 * 60 * 1000;
     const USER_ROLES = ["admin", "operator", "viewer", "trader", "disabled"];
     const state = {
       me: null,
@@ -3655,7 +3791,6 @@ def ops_console_page():
       autoPickReportData: null,
       autoPickViewRows: [],
       autoPickSort: { key: "timestamp", dir: "asc" },
-      execCandidateConfig: null,
     };
 
     function esc(v) {
@@ -3794,121 +3929,10 @@ def ops_console_page():
       `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
     }
 
-    function noBuyReasonFromCandidates() {
-      const cfg = state.execCandidateConfig;
-      if (!cfg) return "no_compra: sin candidatos configurados";
-      if (cfg.expires_at_ms <= Date.now()) return "no_compra: candidatos caducados";
-      const b = cfg.by_exchange && Array.isArray(cfg.by_exchange.BINANCE) ? cfg.by_exchange.BINANCE : [];
-      const i = cfg.by_exchange && Array.isArray(cfg.by_exchange.IBKR) ? cfg.by_exchange.IBKR : [];
-      const total = b.length + i.length;
-      if (total === 0) return "no_compra: candidatos vacios";
-      return "no_compra: sin decision registrada en este bloque";
-    }
+    function noBuyReasonGeneric() { return "no_compra: sin decision registrada en este bloque"; }
 
     function setExecLabOut(payload) {
       byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
-    }
-
-    function normalizeSymbol(v) {
-      return String(v || "").trim().toUpperCase();
-    }
-
-    function parseExecCandidateInputs() {
-      const binanceRaw = [
-        normalizeSymbol(byId("execBinance1").value),
-        normalizeSymbol(byId("execBinance2").value),
-      ];
-      const ibkrRaw = [
-        normalizeSymbol(byId("execIbkr1").value),
-        normalizeSymbol(byId("execIbkr2").value),
-      ];
-      const binance = binanceRaw.filter((x) => !!x);
-      const ibkr = ibkrRaw.filter((x) => !!x);
-      const total = binance.length + ibkr.length;
-      if (total > 4) throw new Error("Maximo 4 simbolos");
-      if (new Set(binance).size !== binance.length) throw new Error("BINANCE no debe repetir simbolos");
-      if (new Set(ibkr).size !== ibkr.length) throw new Error("IBKR no debe repetir simbolos");
-      return { BINANCE: binance, IBKR: ibkr };
-    }
-
-    function renderExecCandidateStatus() {
-      const el = byId("execCandidateStatus");
-      if (!el) return;
-      const cfg = state.execCandidateConfig;
-      if (!cfg) {
-        el.textContent = "No configurado.";
-        el.style.color = "var(--muted)";
-        return;
-      }
-      const leftMs = cfg.expires_at_ms - Date.now();
-      if (leftMs <= 0) {
-        state.execCandidateConfig = null;
-        el.textContent = "Caducado. Vuelve a aplicar candidatos (vigencia 5 minutos).";
-        el.style.color = "var(--bad)";
-        return;
-      }
-      const leftSec = Math.ceil(leftMs / 1000);
-      const mins = Math.floor(leftSec / 60);
-      const secs = leftSec % 60;
-      const binanceTxt = (cfg.by_exchange.BINANCE || []).join(", ");
-      const ibkrTxt = (cfg.by_exchange.IBKR || []).join(", ");
-      el.textContent = `Activo (${mins}m ${secs}s): BINANCE [${binanceTxt}] | IBKR [${ibkrTxt}]`;
-      el.style.color = "var(--muted)";
-    }
-
-    function applyExecCandidateConfig() {
-      const byExchange = parseExecCandidateInputs();
-      state.execCandidateConfig = {
-        by_exchange: byExchange,
-        expires_at_ms: Date.now() + EXEC_CANDIDATE_TTL_MS,
-      };
-      renderExecCandidateStatus();
-      const total = (byExchange.BINANCE || []).length + (byExchange.IBKR || []).length;
-      if (total === 0) {
-        setExecLabMsg("No hay simbolos candidatos");
-      } else {
-        setExecLabMsg("Candidatos aplicados por 5 minutos");
-      }
-    }
-
-    function buildCandidateTemplate(exchange, symbol) {
-      if (exchange === "IBKR") {
-        return {
-          symbol,
-          side: "BUY",
-          qty: 1,
-          rr_estimate: 1.5,
-          trend_tf: "4H",
-          signal_tf: "1H",
-          timing_tf: "15M",
-          spread_bps: 7,
-          slippage_bps: 8,
-          in_rth: true,
-          macro_event_block: false,
-          earnings_within_24h: false,
-          market_trend_score: 0.3,
-          atr_pct: 2.2,
-          momentum_score: 0.2,
-          volume_24h_usdt: 0,
-        };
-      }
-      return {
-        symbol,
-        side: "BUY",
-        qty: 0.01,
-        rr_estimate: 1.7,
-        trend_tf: "4H",
-        signal_tf: "1H",
-        timing_tf: "15M",
-        spread_bps: 6,
-        slippage_bps: 9,
-        volume_24h_usdt: 95000000,
-        market_trend_score: 0.5,
-        atr_pct: 3.2,
-        momentum_score: 0.3,
-        funding_rate_bps: 0,
-        crypto_event_block: false,
-      };
     }
 
     function setSnapshotMsg(msg, bad=false) {
@@ -3956,10 +3980,8 @@ def ops_console_page():
       wrap.style.display = canUse ? "block" : "none";
       if (canUse) {
         setExecLabMsg("Ready");
-        renderExecCandidateStatus();
       } else {
         setExecLabOut({});
-        renderExecCandidateStatus();
       }
     }
 
@@ -4033,7 +4055,7 @@ def ops_console_page():
             exchange: "-",
             symbol: "-",
             bought: false,
-            reason: noBuyReasonFromCandidates(),
+            reason: noBuyReasonGeneric(),
             score: null,
             scanned_assets: 0,
           });
@@ -4117,7 +4139,6 @@ def ops_console_page():
       state.readinessReportData = null;
       state.dailyGateData = null;
       state.autoPickReportData = null;
-      state.execCandidateConfig = null;
       renderTradingControl(null, false);
       renderMaintenance(false);
       renderIncidentAudit(false);
@@ -4908,32 +4929,6 @@ def ops_console_page():
       byId("execQty").value = ex === "IBKR" ? "1" : "0.01";
     });
 
-    function resolveExecCandidates(exchange) {
-      const raw = (byId("execCandidatesJson").value || "").trim();
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) {
-          throw new Error("Candidates JSON must be an array");
-        }
-        return parsed;
-      }
-      const cfg = state.execCandidateConfig;
-      if (!cfg) return [];
-      if (cfg.expires_at_ms <= Date.now()) {
-        state.execCandidateConfig = null;
-        renderExecCandidateStatus();
-        return [];
-      }
-      const symbols = cfg.by_exchange[exchange] || [];
-      return symbols.map((symbol) => buildCandidateTemplate(exchange, symbol));
-    }
-    byId("execApplyCandidatesBtn").addEventListener("click", () => {
-      try {
-        applyExecCandidateConfig();
-      } catch (e) {
-        setExecLabMsg(String(e.message || e), true);
-      }
-    });
     byId("execPretradeBtn").addEventListener("click", async () => {
       try {
         const exchange = byId("execExchange").value;
@@ -5036,19 +5031,13 @@ def ops_console_page():
         const exchange = byId("execExchange").value;
         const topN = Number(byId("execAutoTopN").value || "10");
         const dryRun = !!byId("execAutoDryRun").checked;
-        const candidates = resolveExecCandidates(exchange);
-        if (!Array.isArray(candidates) || candidates.length === 0) {
-          setExecLabOut({});
-          setExecLabMsg("No hay simbolos candidatos");
-          return;
-        }
         const path = exchange === "IBKR"
           ? "/ops/execution/pretrade/ibkr/auto-pick"
           : "/ops/execution/pretrade/binance/auto-pick";
         const out = await api(path, {
           method: "POST",
           headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ candidates, top_n: topN, dry_run: dryRun }),
+          body: JSON.stringify({ top_n: topN, dry_run: dryRun }),
         });
         setExecLabOut(out);
         const picked = out.selected ? `${out.selected_symbol} score=${out.selected_score}` : "none";
@@ -5186,8 +5175,6 @@ def ops_console_page():
     if (remembered) byId("token").value = remembered;
     if (rememberedEmail) byId("email").value = rememberedEmail;
     if (rememberedRefresh) state.refreshToken = rememberedRefresh;
-    renderExecCandidateStatus();
-    setInterval(renderExecCandidateStatus, 1000);
     async function autoPickRefreshTick() {
       if (!state.token || !state.me || state.me.role !== "admin") return;
       try {
