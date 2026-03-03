@@ -247,6 +247,7 @@ class AutoPickReportItemOut(BaseModel):
     side: Optional[str] = None
     qty: Optional[float] = None
     score: Optional[float] = None
+    avg_score: Optional[float] = None
     market_regime: Optional[str] = None
     decision: str
     reason: str

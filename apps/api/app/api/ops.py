@@ -751,7 +751,8 @@ def _auto_pick_from_scan(
     universe = _build_auto_pick_universe(exchange)
     scan_payload = PretradeScanRequest(
         candidates=universe,
-        top_n=payload.top_n,
+        # Auto-pick evaluates the full broker universe each tick.
+        top_n=max(1, len(universe)),
         include_blocked=True,
     )
     scan = _scan_pretrade_candidates(
@@ -760,6 +761,12 @@ def _auto_pick_from_scan(
         exchange=exchange,
         payload=scan_payload,
     )
+    assets = scan.get("assets", [])
+    top_candidate = assets[0] if assets else None
+    avg_score = None
+    if assets:
+        avg_score = round(sum(float(a.get("score") or 0.0) for a in assets) / len(assets), 2)
+
     if not universe:
         return {
             "exchange": exchange,
@@ -770,12 +777,15 @@ def _auto_pick_from_scan(
             "selected_qty": None,
             "selected_score": None,
             "selected_market_regime": None,
+            "top_candidate_symbol": None,
+            "top_candidate_score": None,
+            "avg_score": None,
             "decision": "no_universe_symbols_configured",
             "top_failed_checks": ["allowlist_empty"],
             "execution": None,
             "scan": scan,
         }
-    assets = scan.get("assets", [])
+
     passed_assets = [a for a in assets if bool(a.get("passed"))]
     score_eligible = [a for a in passed_assets if float(a.get("score") or 0.0) >= min_score_pct]
     if not score_eligible:
@@ -793,6 +803,9 @@ def _auto_pick_from_scan(
             "selected_qty": None,
             "selected_score": None,
             "selected_market_regime": None,
+            "top_candidate_symbol": (top_candidate or {}).get("symbol"),
+            "top_candidate_score": (top_candidate or {}).get("score"),
+            "avg_score": avg_score,
             "decision": "no_candidate_passed",
             "top_failed_checks": top_failed_checks,
             "execution": None,
@@ -832,6 +845,9 @@ def _auto_pick_from_scan(
         "selected_qty": selected["qty"],
         "selected_score": selected["score"],
         "selected_market_regime": selected["market_regime"],
+        "top_candidate_symbol": (top_candidate or {}).get("symbol"),
+        "top_candidate_score": (top_candidate or {}).get("score"),
+        "avg_score": avg_score,
         "decision": decision,
         "top_failed_checks": [],
         "execution": execution,
@@ -1319,6 +1335,8 @@ def put_admin_strategy_runtime_policy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rr_min_bear out of range")
     if not (0.1 <= float(payload.rr_min_range) <= 20.0):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rr_min_range out of range")
+    if not (0.0 <= float(payload.min_score_pct) <= 100.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="min_score_pct out of range")
     for name, value in {
         "max_spread_bps_bull": payload.max_spread_bps_bull,
         "max_spread_bps_bear": payload.max_spread_bps_bear,
@@ -1502,6 +1520,9 @@ def auto_pick_report(
                 reason = f"no_compra: {', '.join(str(x) for x in top_failed[:3])}"
             else:
                 reason = "no_compra: sin candidato aprobado"
+        top_symbol = details.get("top_candidate_symbol")
+        top_score = details.get("top_candidate_score")
+        selected_score = details.get("selected_score")
         out_rows.append(
             AutoPickReportItemOut(
                 timestamp=created_at.isoformat(),
@@ -1511,10 +1532,11 @@ def auto_pick_report(
                 dry_run=dry_run,
                 selected=selected,
                 bought=bought,
-                symbol=details.get("selected_symbol"),
+                symbol=top_symbol if top_symbol is not None else details.get("selected_symbol"),
                 side=details.get("selected_side"),
                 qty=details.get("selected_qty"),
-                score=details.get("selected_score"),
+                score=top_score if top_score is not None else selected_score,
+                avg_score=details.get("avg_score"),
                 market_regime=details.get("selected_market_regime"),
                 decision=decision,
                 reason=reason,
@@ -1981,6 +2003,9 @@ def pretrade_binance_auto_pick(
             "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
             "selected_market_regime": out["selected_market_regime"],
+            "top_candidate_symbol": out.get("top_candidate_symbol"),
+            "top_candidate_score": out.get("top_candidate_score"),
+            "avg_score": out.get("avg_score"),
             "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
@@ -2022,6 +2047,9 @@ def pretrade_ibkr_auto_pick(
             "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
             "selected_market_regime": out["selected_market_regime"],
+            "top_candidate_symbol": out.get("top_candidate_symbol"),
+            "top_candidate_score": out.get("top_candidate_score"),
+            "avg_score": out.get("avg_score"),
             "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
@@ -2077,6 +2105,9 @@ def admin_auto_pick_tick(
                     "selected_qty": out["selected_qty"],
                     "selected_score": out["selected_score"],
                     "selected_market_regime": out["selected_market_regime"],
+                    "top_candidate_symbol": out.get("top_candidate_symbol"),
+                    "top_candidate_score": out.get("top_candidate_score"),
+                    "avg_score": out.get("avg_score"),
                     "top_failed_checks": out.get("top_failed_checks", []),
                     "scanned_assets": out["scan"]["scanned_assets"],
                 },
@@ -2089,6 +2120,9 @@ def admin_auto_pick_tick(
                     "selected": out["selected"],
                     "selected_symbol": out["selected_symbol"],
                     "selected_score": out["selected_score"],
+                    "top_candidate_symbol": out.get("top_candidate_symbol"),
+                    "top_candidate_score": out.get("top_candidate_score"),
+                    "avg_score": out.get("avg_score"),
                     "scanned_assets": out["scan"]["scanned_assets"],
                 }
             )
@@ -3748,11 +3782,12 @@ def ops_console_page():
                 <th>Compro</th>
                 <th>Motivo</th>
                 <th>Score</th>
+                <th>Score prom</th>
                 <th>Escaneados</th>
               </tr>
             </thead>
             <tbody id="autoPickReportBodyBinance">
-              <tr><td colspan="7" class="muted">No data</td></tr>
+              <tr><td colspan="8" class="muted">No data</td></tr>
             </tbody>
           </table>
           <div style="margin-top:10px"><strong>IBKR</strong></div>
@@ -3765,11 +3800,12 @@ def ops_console_page():
                 <th>Compro</th>
                 <th>Motivo</th>
                 <th>Score</th>
+                <th>Score prom</th>
                 <th>Escaneados</th>
               </tr>
             </thead>
             <tbody id="autoPickReportBodyIbkr">
-              <tr><td colspan="7" class="muted">No data</td></tr>
+              <tr><td colspan="8" class="muted">No data</td></tr>
             </tbody>
           </table>
         </div>
@@ -3782,6 +3818,18 @@ def ops_console_page():
         <table style="margin-top:8px">
           <tbody id="boSummary">
             <tr><td class="muted">No data</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <strong>Risk Profiles (Max Trades/Day)</strong>
+        <div class="muted" style="margin-top:6px">Edit max daily trades per profile (global).</div>
+        <table style="margin-top:8px">
+          <thead>
+            <tr><th>Profile</th><th>Max trades/day</th><th>Action</th></tr>
+          </thead>
+          <tbody id="boRiskCfgBody">
+            <tr><td colspan="3" class="muted">No data</td></tr>
           </tbody>
         </table>
       </div>
@@ -3860,6 +3908,7 @@ def ops_console_page():
       me: null,
       token: "",
       riskProfiles: [],
+      riskProfileConfigs: [],
       usersById: {},
       assignments: {},
       tradingControl: null,
@@ -4003,9 +4052,10 @@ def ops_console_page():
           <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
           <td>${esc(r.reason || "-")}</td>
           <td>${esc(r.score != null ? String(r.score) : "-")}</td>
+          <td>${esc(r.avg_score != null ? String(r.avg_score) : "-")}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>
-      `).join("") || '<tr><td colspan="7" class="muted">Sin eventos en esta ventana</td></tr>';
+      `).join("") || '<tr><td colspan="8" class="muted">Sin eventos en esta ventana</td></tr>';
     }
 
     function renderAutoPickRows() {
@@ -4084,8 +4134,8 @@ def ops_console_page():
       if (canUse) {
         setAutoPickReportMsg("Ready");
       } else {
-        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="7" class="muted">No data</td></tr>';
-        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="7" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
       }
     }
 
@@ -4119,6 +4169,7 @@ def ops_console_page():
             bought: false,
             reason: "no_compra: tick_no_ejecutado_en_ventana",
             score: null,
+            avg_score: null,
             scanned_assets: 0,
           };
         }
@@ -4132,6 +4183,7 @@ def ops_console_page():
           bought: !!best.bought,
           reason: best.reason || "-",
           score: best.score,
+          avg_score: best.avg_score,
           scanned_assets: Number(best.scanned_assets || 0),
         };
       }
@@ -4214,6 +4266,7 @@ def ops_console_page():
       state.me = null;
       state.token = "";
       state.riskProfiles = [];
+      state.riskProfileConfigs = [];
       state.usersById = {};
       state.assignments = {};
       state.tradingControl = null;
@@ -4231,6 +4284,7 @@ def ops_console_page():
       renderSnapshot(false);
       renderAutoPickReport(false);
       renderRuntimePolicies(false);
+      renderRiskProfileConfigs(false);
       renderReadinessReportTable();
     }
 
@@ -4304,6 +4358,7 @@ def ops_console_page():
       "R:R minimo alcista": "Ganancia minima esperada frente a la perdida posible cuando el mercado sube.",
       "R:R minimo bajista": "Ganancia minima esperada frente a la perdida posible cuando el mercado baja.",
       "R:R minimo lateral": "Ganancia minima esperada frente a la perdida posible cuando el mercado esta lateral.",
+      "Score minimo (%)": "Puntaje minimo requerido para permitir compra automatica.",
       "Volumen 24h minimo alcista": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado alcista.",
       "Volumen 24h minimo bajista": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado bajista.",
       "Volumen 24h minimo lateral": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado lateral.",
@@ -4417,6 +4472,7 @@ def ops_console_page():
         numRow("R:R minimo alcista", "rr_min_bull", "rp_rr_bull", 2),
         numRow("R:R minimo bajista", "rr_min_bear", "rp_rr_bear", 2),
         numRow("R:R minimo lateral", "rr_min_range", "rp_rr_range", 2),
+        numRow("Score minimo (%)", "min_score_pct", "rp_min_score", 2),
         numRow("Volumen 24h minimo alcista", "min_volume_24h_usdt_bull", "rp_vol_bull", 0),
         numRow("Volumen 24h minimo bajista", "min_volume_24h_usdt_bear", "rp_vol_bear", 0),
         numRow("Volumen 24h minimo lateral", "min_volume_24h_usdt_range", "rp_vol_range", 0),
@@ -4445,6 +4501,7 @@ def ops_console_page():
             rr_min_bull: parseNumberInput(byId(`rp_rr_bull_${k}`).value),
             rr_min_bear: parseNumberInput(byId(`rp_rr_bear_${k}`).value),
             rr_min_range: parseNumberInput(byId(`rp_rr_range_${k}`).value),
+            min_score_pct: parseNumberInput(byId(`rp_min_score_${k}`).value),
             min_volume_24h_usdt_bull: parseNumberInput(byId(`rp_vol_bull_${k}`).value),
             min_volume_24h_usdt_bear: parseNumberInput(byId(`rp_vol_bear_${k}`).value),
             min_volume_24h_usdt_range: parseNumberInput(byId(`rp_vol_range_${k}`).value),
@@ -4494,6 +4551,64 @@ def ops_console_page():
 
     function _options(values, selected) {
       return values.map((v) => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
+    }
+
+    function renderRiskProfileConfigs(canEdit) {
+      const rows = state.riskProfileConfigs || [];
+      if (!rows.length) {
+        byId("boRiskCfgBody").innerHTML = '<tr><td colspan="3" class="muted">No data</td></tr>';
+        return;
+      }
+      byId("boRiskCfgBody").innerHTML = rows.map((r) => {
+        const profile = String(r.profile_name || "");
+        const maxTrades = Number(r.max_trades_per_day || 0);
+        const inputId = `rpmax_${profile.replaceAll(/[^a-zA-Z0-9_]/g, "_")}`;
+        const action = canEdit
+          ? `<button class="save-rpmax-btn ghost mini" data-profile="${esc(profile)}" data-input-id="${esc(inputId)}">Save</button>`
+          : '<span class="muted">readonly</span>';
+        return `
+          <tr>
+            <td>${esc(profile)}</td>
+            <td>${canEdit ? `<input id="${esc(inputId)}" type="number" min="1" max="200" value="${esc(String(maxTrades))}" style="max-width:120px" />` : esc(String(maxTrades))}</td>
+            <td>${action}</td>
+          </tr>
+        `;
+      }).join("");
+
+      if (!canEdit) return;
+      document.querySelectorAll(".save-rpmax-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const profile = btn.getAttribute("data-profile");
+          const inputId = btn.getAttribute("data-input-id");
+          const input = inputId ? byId(inputId) : null;
+          const found = rows.find((x) => String(x.profile_name) === String(profile));
+          if (!profile || !input || !found) return;
+          const next = Math.max(1, Math.min(200, parseInt(input.value || "0", 10)));
+          btn.disabled = true;
+          setBoMsg(`Saving max_trades_per_day for ${profile}...`);
+          try {
+            await api(`/ops/admin/risk/profiles/${encodeURIComponent(profile)}`, {
+              method: "PUT",
+              headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                max_risk_per_trade_pct: Number(found.max_risk_per_trade_pct),
+                max_daily_loss_pct: Number(found.max_daily_loss_pct),
+                max_trades_per_day: next,
+                max_open_positions: Number(found.max_open_positions),
+                cooldown_between_trades_minutes: Number(found.cooldown_between_trades_minutes),
+                max_leverage: Number(found.max_leverage),
+                stop_loss_required: Boolean(found.stop_loss_required),
+                min_rr: Number(found.min_rr),
+              }),
+            });
+            setBoMsg(`Updated ${profile}: max_trades_per_day=${next}`);
+            await loadAll();
+          } catch (e) {
+            setBoMsg(`Risk profile update failed: ${String(e.message || e)}`, true);
+            btn.disabled = false;
+          }
+        });
+      });
     }
 
     function assignmentFor(userEmail, exchange) {
@@ -4788,6 +4903,7 @@ def ops_console_page():
         if (me.role === "admin") {
           reqs.push(api("/users", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/users/risk-profiles", { headers: { Authorization: `Bearer ${token}` } }));
+          reqs.push(api("/ops/admin/risk/profiles", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/ops/strategy/assignments", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/ops/admin/trading-control", { headers: { Authorization: `Bearer ${token}` } }));
           reqs.push(api("/ops/admin/strategy-runtime-policies", { headers: { Authorization: `Bearer ${token}` } }));
@@ -4800,15 +4916,18 @@ def ops_console_page():
         state.backofficeUsers = boUsers || [];
         state.usersById = {};
         state.riskProfiles = [];
+        state.riskProfileConfigs = [];
         if (me.role === "admin") {
           const users = results[3] || [];
           const profiles = results[4] || [];
-          const assignments = results[5] || [];
-          const tradingControl = results[6] || null;
-          const runtimePolicies = results[7] || [];
-          const readinessReport = results[8] || null;
+          const profileConfigs = results[5] || [];
+          const assignments = results[6] || [];
+          const tradingControl = results[7] || null;
+          const runtimePolicies = results[8] || [];
+          const readinessReport = results[9] || null;
           users.forEach((u) => { state.usersById[u.id] = u; });
           state.riskProfiles = profiles;
+          state.riskProfileConfigs = profileConfigs;
           state.assignments = {};
           assignments.forEach((a) => {
             const k = `${(a.user_email || "").toLowerCase()}|${a.exchange}`;
@@ -4825,6 +4944,7 @@ def ops_console_page():
           renderSnapshot(true);
           renderAutoPickReport(true);
           renderRuntimePolicies(true);
+          renderRiskProfileConfigs(true);
           renderReadinessReportTable();
           await autoPickRefreshTick();
         } else {
@@ -4836,6 +4956,7 @@ def ops_console_page():
           renderSnapshot(false);
           renderAutoPickReport(false);
           renderRuntimePolicies(false);
+          renderRiskProfileConfigs(false);
           state.readinessReportData = null;
           renderReadinessReportTable();
         }
@@ -4853,6 +4974,7 @@ def ops_console_page():
         renderExecLab(state.me && ["trader", "operator"].includes(state.me.role));
         renderSnapshot(false);
         renderAutoPickReport(false);
+        renderRiskProfileConfigs(false);
       }
     }
 
