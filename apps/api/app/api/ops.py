@@ -4096,22 +4096,59 @@ def ops_console_page():
         headers: { Authorization: `Bearer ${state.token}` },
       });
       state.autoPickReportData = out;
-      const rows = Array.isArray(out.rows) ? out.rows : [];
-      state.autoPickViewRows = rows.map((r) => ({
-        timestamp: r.timestamp,
-        user_email: r.user_email || "-",
-        exchange: r.exchange || "-",
-        symbol: r.symbol || "-",
-        bought: !!r.bought,
-        reason: r.reason || "-",
-        score: r.score,
-        scanned_assets: Number(r.scanned_assets || 0),
-      }));
+      const apiRows = Array.isArray(out.rows) ? out.rows : [];
+      const intervalMinutes = Math.max(1, Number(out.interval_minutes || 5));
+      const intervalMs = intervalMinutes * 60 * 1000;
+      const periods = Math.max(1, Math.floor((hours * 60) / intervalMinutes));
+      const nowMs = Date.now();
+      const lastBucket = Math.floor(nowMs / intervalMs) * intervalMs;
+      const firstBucket = lastBucket - ((periods - 1) * intervalMs);
+
+      function pickBucketRow(exchange, from, to) {
+        const rows = apiRows.filter((r) => {
+          const ex = String(r.exchange || "").toUpperCase();
+          const ts = new Date(r.timestamp || 0).getTime();
+          return ex === exchange && ts >= from && ts < to;
+        });
+        if (!rows.length) {
+          return {
+            timestamp: new Date(from).toISOString(),
+            user_email: "-",
+            exchange,
+            symbol: "-",
+            bought: false,
+            reason: "no_compra: tick_no_ejecutado_en_ventana",
+            score: null,
+            scanned_assets: 0,
+          };
+        }
+        rows.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+        const best = rows[0];
+        return {
+          timestamp: best.timestamp || new Date(from).toISOString(),
+          user_email: best.user_email || "-",
+          exchange,
+          symbol: best.symbol || "-",
+          bought: !!best.bought,
+          reason: best.reason || "-",
+          score: best.score,
+          scanned_assets: Number(best.scanned_assets || 0),
+        };
+      }
+
+      const rows = [];
+      for (let i = 0; i < periods; i += 1) {
+        const from = firstBucket + (i * intervalMs);
+        const to = from + intervalMs;
+        rows.push(pickBucketRow("BINANCE", from, to));
+        rows.push(pickBucketRow("IBKR", from, to));
+      }
+      state.autoPickViewRows = rows;
       renderAutoPickRows();
       const total = state.autoPickViewRows.length;
       const b = state.autoPickViewRows.filter((r) => String(r.exchange).toUpperCase() === "BINANCE").length;
       const i = state.autoPickViewRows.filter((r) => String(r.exchange).toUpperCase() === "IBKR").length;
-      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | eventos=${total} | BINANCE=${b} | IBKR=${i}`);
+      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | filas esperadas por broker=${periods} | total=${total} | BINANCE=${b} | IBKR=${i}`);
     }
 
     function authHeaders(token, isForm=false) {
