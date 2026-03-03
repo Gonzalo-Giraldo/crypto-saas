@@ -3794,6 +3794,17 @@ def ops_console_page():
       `).join("") || '<tr><td colspan="8" class="muted">No data in selected window</td></tr>';
     }
 
+    function noBuyReasonFromCandidates() {
+      const cfg = state.execCandidateConfig;
+      if (!cfg) return "no_compra: sin candidatos configurados";
+      if (cfg.expires_at_ms <= Date.now()) return "no_compra: candidatos caducados";
+      const b = cfg.by_exchange && Array.isArray(cfg.by_exchange.BINANCE) ? cfg.by_exchange.BINANCE : [];
+      const i = cfg.by_exchange && Array.isArray(cfg.by_exchange.IBKR) ? cfg.by_exchange.IBKR : [];
+      const total = b.length + i.length;
+      if (total === 0) return "no_compra: candidatos vacios";
+      return "no_compra: sin decision registrada en este bloque";
+    }
+
     function setExecLabOut(payload) {
       byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
     }
@@ -4022,7 +4033,7 @@ def ops_console_page():
             exchange: "-",
             symbol: "-",
             bought: false,
-            reason: "Sin datos",
+            reason: noBuyReasonFromCandidates(),
             score: null,
             scanned_assets: 0,
           });
@@ -4031,36 +4042,6 @@ def ops_console_page():
       state.autoPickViewRows = buckets;
       renderAutoPickRows();
       setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ancla=18:45:00 Bogota | ventana=${out.hours}h | filas=${buckets.length}`);
-    }
-
-    async function runScheduledAutoPickAnalysis() {
-      if (!state.token) return 0;
-      let executed = 0;
-      const topN = Number(byId("execAutoTopN").value || "10");
-      for (const exchange of ["BINANCE", "IBKR"]) {
-        let candidates = [];
-        try {
-          candidates = resolveExecCandidates(exchange);
-        } catch (_) {
-          candidates = [];
-        }
-        if (!Array.isArray(candidates) || candidates.length === 0) continue;
-        const path = exchange === "IBKR"
-          ? "/ops/execution/pretrade/ibkr/auto-pick"
-          : "/ops/execution/pretrade/binance/auto-pick";
-        try {
-          await api(path, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ candidates, top_n: topN, dry_run: true }),
-          });
-          executed += 1;
-        } catch (e) {
-          // Keep cycle resilient; one exchange failure must not stop the report refresh.
-          setAutoPickReportMsg(`Analisis ${exchange} fallo: ${String(e.message || e)}`, true);
-        }
-      }
-      return executed;
     }
 
     function authHeaders(token, isForm=false) {
@@ -5210,7 +5191,6 @@ def ops_console_page():
     async function autoPickRefreshTick() {
       if (!state.token || !state.me || state.me.role !== "admin") return;
       try {
-        await runScheduledAutoPickAnalysis();
         await loadAutoPickReport();
       } catch (e) {
         setAutoPickReportMsg(`Auto-refresh fallo: ${String(e.message || e)}`, true);
