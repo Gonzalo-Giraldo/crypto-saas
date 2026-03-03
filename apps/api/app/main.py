@@ -44,7 +44,7 @@ def _ensure_runtime_policy_columns():
         conn.execute(
             text(
                 "ALTER TABLE strategy_runtime_policy "
-                "ADD COLUMN min_score_pct DOUBLE PRECISION NOT NULL DEFAULT 78.0"
+                "ADD COLUMN IF NOT EXISTS min_score_pct DOUBLE PRECISION NOT NULL DEFAULT 78.0"
             )
         )
 
