@@ -91,6 +91,8 @@ pytest -q tests/integration
 - `POST /ops/execution/exit/ibkr/check`
 - `POST /ops/execution/binance/test-order` (Binance testnet)
 - `POST /ops/execution/ibkr/test-order` (IBKR paper test-order, simulated or bridge)
+- `GET /ops/execution/binance/account-status` (BINANCE account attributes by user)
+- `GET /ops/execution/ibkr/account-status` (IBKR account attributes by user)
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
 - `GET /ops/security/posture` (admin, 2FA + secret age posture)
 - `POST /ops/admin/cleanup-smoke-users` (admin, cleanup smoke users with dry-run)

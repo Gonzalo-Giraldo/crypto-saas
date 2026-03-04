@@ -1,4 +1,5 @@
 from pydantic import BaseModel, field_validator
+from typing import Any
 
 
 ALLOWED_EXCHANGES = {"BINANCE", "IBKR"}
@@ -83,3 +84,29 @@ class IbkrTestOrderOut(BaseModel):
     qty: float
     sent: bool
     order_ref: str
+
+
+class AccountBalanceItemOut(BaseModel):
+    asset: str
+    free: float | None = None
+    locked: float | None = None
+    total: float | None = None
+
+
+class PositionItemOut(BaseModel):
+    symbol: str
+    qty: float | None = None
+    avg_price: float | None = None
+    market_value: float | None = None
+    unrealized_pnl: float | None = None
+
+
+class AccountStatusOut(BaseModel):
+    exchange: str
+    mode: str
+    account_id: str | None = None
+    can_trade: bool | None = None
+    balances: list[AccountBalanceItemOut] = []
+    open_orders: int | None = None
+    positions: list[PositionItemOut] = []
+    metrics: dict[str, Any] = {}

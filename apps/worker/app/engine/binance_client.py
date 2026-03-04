@@ -44,3 +44,28 @@ def send_test_order(
         raise RuntimeError(f"Binance testnet error {response.status_code}: {detail}")
 
     return {"ok": True}
+
+
+def get_account_status(
+    api_key: str,
+    api_secret: str,
+):
+    endpoint = "/api/v3/account"
+    base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+    params = {
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(
+        api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": api_key}
+
+    response = requests.get(url, headers=headers, timeout=10)
+    if response.status_code >= 400:
+        detail = response.text
+        raise RuntimeError(f"Binance account error {response.status_code}: {detail}")
+    return response.json()

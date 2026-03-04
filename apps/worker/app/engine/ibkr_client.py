@@ -63,3 +63,47 @@ def send_ibkr_test_order(
 
     # Safe fallback: deterministic local simulation (no money movement).
     return {"ok": True, "mode": "simulated", "order_ref": order_ref}
+
+
+def get_ibkr_account_status(
+    api_key: str,
+    api_secret: str,
+) -> dict[str, Any]:
+    if len(api_key or "") < 8:
+        raise RuntimeError("IBKR api_key seems invalid (too short)")
+    if len(api_secret or "") < 8:
+        raise RuntimeError("IBKR api_secret seems invalid (too short)")
+
+    if settings.IBKR_BRIDGE_BASE_URL:
+        payload = {"mode": "paper_status"}
+        payload_raw = json.dumps(payload, separators=(",", ":"))
+        signature = hmac.new(
+            api_secret.encode("utf-8"),
+            payload_raw.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        headers = {
+            "X-API-KEY": api_key,
+            "X-SIGNATURE": signature,
+            "Content-Type": "application/json",
+        }
+        url = f"{settings.IBKR_BRIDGE_BASE_URL.rstrip('/')}/ibkr/paper/account-status"
+        response = requests.post(url, data=payload_raw, headers=headers, timeout=12)
+        if response.status_code >= 400:
+            raise RuntimeError(f"IBKR bridge error {response.status_code}: {response.text}")
+        body = response.json()
+        body["mode"] = "bridge"
+        return body
+
+    # Safe fallback while bridge is not configured.
+    return {
+        "mode": "simulated",
+        "account_id": "paper-simulated",
+        "currency": "USD",
+        "can_trade": True,
+        "cash": None,
+        "buying_power": None,
+        "net_liquidation": None,
+        "positions": [],
+        "open_orders": [],
+    }

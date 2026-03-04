@@ -8,8 +8,8 @@ from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
-from apps.worker.app.engine.binance_client import send_test_order
-from apps.worker.app.engine.ibkr_client import send_ibkr_test_order
+from apps.worker.app.engine.binance_client import send_test_order, get_account_status
+from apps.worker.app.engine.ibkr_client import send_ibkr_test_order, get_ibkr_account_status
 
 
 def _mask_api_key(value: str) -> str:
@@ -279,5 +279,157 @@ def execute_ibkr_test_order_for_user(
             "sent": True,
             "order_ref": order_ref,
         }
+    finally:
+        db.close()
+
+
+def get_binance_account_status_for_user(user_id: str):
+    db = SessionLocal()
+    try:
+        creds = get_decrypted_exchange_secret(
+            db=db,
+            user_id=user_id,
+            exchange="BINANCE",
+        )
+        if not creds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing credentials for BINANCE",
+            )
+        try:
+            raw = get_account_status(
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+            )
+        except Exception as exc:
+            log_audit_event(
+                db,
+                action="execution.binance.account_status.error",
+                user_id=user_id,
+                entity_type="execution",
+                details={"error": str(exc)},
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Binance account status failed: {exc}",
+            )
+
+        balances = []
+        for b in (raw.get("balances") or []):
+            free = float(b.get("free", 0) or 0)
+            locked = float(b.get("locked", 0) or 0)
+            total = free + locked
+            if total <= 0:
+                continue
+            balances.append(
+                {
+                    "asset": str(b.get("asset", "")),
+                    "free": free,
+                    "locked": locked,
+                    "total": total,
+                }
+            )
+        balances.sort(key=lambda x: x["total"], reverse=True)
+        balances = balances[:20]
+        out = {
+            "exchange": "BINANCE",
+            "mode": "testnet_account",
+            "account_id": None,
+            "can_trade": bool(raw.get("canTrade", True)),
+            "balances": balances,
+            "open_orders": None,
+            "positions": [],
+            "metrics": {
+                "maker_commission": raw.get("makerCommission"),
+                "taker_commission": raw.get("takerCommission"),
+                "permissions": raw.get("permissions", []),
+                "update_time": raw.get("updateTime"),
+            },
+        }
+        log_audit_event(
+            db,
+            action="execution.binance.account_status.success",
+            user_id=user_id,
+            entity_type="execution",
+            details={"balances_count": len(balances), "can_trade": out["can_trade"]},
+        )
+        db.commit()
+        return out
+    finally:
+        db.close()
+
+
+def get_ibkr_account_status_for_user(user_id: str):
+    db = SessionLocal()
+    try:
+        creds = get_decrypted_exchange_secret(
+            db=db,
+            user_id=user_id,
+            exchange="IBKR",
+        )
+        if not creds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing credentials for IBKR",
+            )
+        try:
+            raw = get_ibkr_account_status(
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+            )
+        except Exception as exc:
+            log_audit_event(
+                db,
+                action="execution.ibkr.account_status.error",
+                user_id=user_id,
+                entity_type="execution",
+                details={"error": str(exc)},
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"IBKR account status failed: {exc}",
+            )
+
+        positions = []
+        for p in (raw.get("positions") or []):
+            positions.append(
+                {
+                    "symbol": str(p.get("symbol", "")),
+                    "qty": p.get("qty"),
+                    "avg_price": p.get("avg_price"),
+                    "market_value": p.get("market_value"),
+                    "unrealized_pnl": p.get("unrealized_pnl"),
+                }
+            )
+        out = {
+            "exchange": "IBKR",
+            "mode": raw.get("mode", "simulated"),
+            "account_id": raw.get("account_id"),
+            "can_trade": bool(raw.get("can_trade", True)),
+            "balances": [],
+            "open_orders": len(raw.get("open_orders") or []),
+            "positions": positions,
+            "metrics": {
+                "currency": raw.get("currency"),
+                "cash": raw.get("cash"),
+                "buying_power": raw.get("buying_power"),
+                "net_liquidation": raw.get("net_liquidation"),
+            },
+        }
+        log_audit_event(
+            db,
+            action="execution.ibkr.account_status.success",
+            user_id=user_id,
+            entity_type="execution",
+            details={
+                "mode": out["mode"],
+                "positions_count": len(positions),
+                "can_trade": out["can_trade"],
+            },
+        )
+        db.commit()
+        return out
     finally:
         db.close()

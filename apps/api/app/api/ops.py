@@ -22,6 +22,7 @@ from apps.api.app.models.signal import Signal
 from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.models.user_2fa import UserTwoFactor
 from apps.api.app.schemas.execution import (
+    AccountStatusOut,
     BinanceTestOrderOut,
     BinanceTestOrderRequest,
     IbkrTestOrderOut,
@@ -104,6 +105,8 @@ from apps.api.app.services.strategy_runtime_policy import (
     upsert_runtime_policy,
 )
 from apps.worker.app.engine.execution_runtime import (
+    get_binance_account_status_for_user,
+    get_ibkr_account_status_for_user,
     execute_binance_test_order_for_user,
     execute_ibkr_test_order_for_user,
     prepare_execution_for_user,
@@ -2442,6 +2445,44 @@ def execution_ibkr_test_order(
         response_payload=result,
     )
     return result
+
+
+@router.get("/execution/binance/account-status", response_model=AccountStatusOut)
+def execution_binance_account_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="account_status",
+        exchange="BINANCE",
+    )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
+    return get_binance_account_status_for_user(user_id=current_user.id)
+
+
+@router.get("/execution/ibkr/account-status", response_model=AccountStatusOut)
+def execution_ibkr_account_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="account_status",
+        exchange="IBKR",
+    )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
+    return get_ibkr_account_status_for_user(user_id=current_user.id)
 
 
 @router.post("/security/reencrypt-exchange-secrets", response_model=ReencryptSecretsOut)
