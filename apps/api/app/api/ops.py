@@ -2067,9 +2067,29 @@ def admin_auto_pick_tick(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    top_n = max(1, min(top_n, 100))
+    out = run_auto_pick_tick_for_tenant(
+        db=db,
+        tenant_id=_tenant_id(current_user),
+        dry_run=dry_run,
+        top_n=top_n,
+        real_only=real_only,
+        include_service_users=include_service_users,
+    )
+    db.commit()
+    return out
+
+
+def run_auto_pick_tick_for_tenant(
+    db: Session,
+    tenant_id: str,
+    dry_run: bool = True,
+    top_n: int = 10,
+    real_only: bool = True,
+    include_service_users: bool = False,
+):
+    top_n = max(1, min(int(top_n), 100))
     users = (
-        db.execute(select(User).where(User.tenant_id == _tenant_id(current_user)).order_by(User.email.asc()))
+        db.execute(select(User).where(User.tenant_id == tenant_id).order_by(User.email.asc()))
         .scalars()
         .all()
     )

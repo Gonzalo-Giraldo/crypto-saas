@@ -19,12 +19,15 @@ import apps.api.app.models.user_risk_settings
 import apps.api.app.models.strategy_runtime_policy
 
 from fastapi import FastAPI
+import threading
+import time
 
-from apps.api.app.api.ops import router as ops_router
+from apps.api.app.api.ops import router as ops_router, run_auto_pick_tick_for_tenant
 from apps.api.app.api.users import router as users_router
 
-from apps.api.app.db.session import engine, Base
+from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
+from apps.api.app.core.config import settings
 
 app = FastAPI(title="crypto-saas API")
 
@@ -65,3 +68,79 @@ def root():
     return {"app": "crypto-saas", "docs": "/docs"}
 
 app.include_router(auth_router)
+
+_scheduler_stop_event = threading.Event()
+_scheduler_thread: threading.Thread | None = None
+_AUTO_PICK_LOCK_KEY = 887731
+
+
+def _auto_pick_tick_once() -> None:
+    db = SessionLocal()
+    try:
+        out = run_auto_pick_tick_for_tenant(
+            db=db,
+            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
+            real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
+            include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
+        )
+        print(
+            "[auto-pick-scheduler] tick ok",
+            {
+                "executed_count": out.get("executed_count", 0),
+                "dry_run": out.get("dry_run", True),
+                "top_n": out.get("top_n", 10),
+            },
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[auto-pick-scheduler] tick error: {exc}", flush=True)
+    finally:
+        db.close()
+
+
+def _auto_pick_tick_once_with_lock() -> None:
+    if settings.DATABASE_URL.startswith("sqlite"):
+        _auto_pick_tick_once()
+        return
+    with engine.begin() as conn:
+        got_lock = bool(
+            conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _AUTO_PICK_LOCK_KEY}).scalar()
+        )
+    if not got_lock:
+        return
+    try:
+        _auto_pick_tick_once()
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _AUTO_PICK_LOCK_KEY})
+
+
+def _scheduler_loop() -> None:
+    interval_minutes = max(1, int(settings.AUTO_PICK_INTERNAL_SCHEDULER_INTERVAL_MINUTES))
+    interval_seconds = interval_minutes * 60
+    while not _scheduler_stop_event.is_set():
+        now = time.time()
+        wait_seconds = interval_seconds - (now % interval_seconds)
+        if _scheduler_stop_event.wait(timeout=wait_seconds):
+            break
+        _auto_pick_tick_once_with_lock()
+
+
+@app.on_event("startup")
+def startup_auto_pick_scheduler() -> None:
+    global _scheduler_thread
+    if not settings.AUTO_PICK_INTERNAL_SCHEDULER_ENABLED:
+        return
+    if _scheduler_thread and _scheduler_thread.is_alive():
+        return
+    _scheduler_stop_event.clear()
+    _scheduler_thread = threading.Thread(target=_scheduler_loop, name="auto-pick-scheduler", daemon=True)
+    _scheduler_thread.start()
+    print("[auto-pick-scheduler] started", flush=True)
+
+
+@app.on_event("shutdown")
+def shutdown_auto_pick_scheduler() -> None:
+    _scheduler_stop_event.set()

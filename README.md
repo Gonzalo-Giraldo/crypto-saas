@@ -117,6 +117,14 @@ pytest -q tests/integration
   - `PASSWORD_MAX_AGE_DAYS=90` max password age in days (used when enforcement is enabled).
   - `ALLOWED_BINANCE_SYMBOLS=BTCUSDT,ETHUSDT` optional allowlist for BINANCE symbols.
   - `ALLOWED_IBKR_SYMBOLS=AAPL,MSFT,SPY` optional allowlist for IBKR symbols.
+  - Internal auto-pick scheduler (no external cron):
+    - `AUTO_PICK_INTERNAL_SCHEDULER_ENABLED=true|false` (default `false`)
+    - `AUTO_PICK_INTERNAL_SCHEDULER_INTERVAL_MINUTES=5`
+    - `AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN=true|false`
+    - `AUTO_PICK_INTERNAL_SCHEDULER_TOP_N=10`
+    - `AUTO_PICK_INTERNAL_REAL_ONLY=true|false`
+    - `AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS=false`
+    - `AUTO_PICK_INTERNAL_TENANT_ID=default`
   - Binance gateway route in API:
     - `BINANCE_GATEWAY_ENABLED=true|false`
     - `BINANCE_GATEWAY_BASE_URL=https://...`
