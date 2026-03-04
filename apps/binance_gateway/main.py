@@ -29,6 +29,11 @@ class BinanceTestOrderIn(BaseModel):
     qty: float
 
 
+class BinanceAccountStatusIn(BaseModel):
+    api_key: str
+    api_secret: str
+
+
 @app.get("/healthz")
 def healthz():
     if not HEALTHZ_CHECK_BINANCE:
@@ -80,6 +85,39 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
         raise HTTPException(status_code=502, detail=detail)
 
     return {"ok": True, "mode": "gateway_test_order"}
+
+
+@app.post("/binance/account-status")
+def binance_account_status(payload: BinanceAccountStatusIn, x_internal_token: str = Header(default="")):
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _enforce_rate_limit(x_internal_token)
+
+    params = {
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{BINANCE_BASE}/api/v3/account?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": payload.api_key}
+    r = requests.get(url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if r.status_code >= 400:
+        binance_code = None
+        try:
+            body = r.json()
+            binance_code = body.get("code")
+        except Exception:
+            pass
+        detail = f"binance_upstream_error status={r.status_code}"
+        if binance_code is not None:
+            detail += f" code={binance_code}"
+        raise HTTPException(status_code=502, detail=detail)
+    return r.json()
 
 
 def _enforce_rate_limit(key: str) -> None:

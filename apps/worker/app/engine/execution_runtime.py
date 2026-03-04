@@ -213,6 +213,46 @@ def _send_binance_test_order_via_gateway(
         raise RuntimeError(f"Binance gateway error {response.status_code}: {detail}")
 
 
+def _get_binance_account_status(
+    api_key: str,
+    api_secret: str,
+):
+    gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+    if not gateway_enabled:
+        return get_account_status(api_key=api_key, api_secret=api_secret)
+    try:
+        return _get_binance_account_status_via_gateway(
+            api_key=api_key,
+            api_secret=api_secret,
+        )
+    except Exception:
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            raise
+        return get_account_status(api_key=api_key, api_secret=api_secret)
+
+
+def _get_binance_account_status_via_gateway(
+    api_key: str,
+    api_secret: str,
+):
+    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+    url = f"{base}/binance/account-status"
+    headers = {"Content-Type": "application/json"}
+    if settings.BINANCE_GATEWAY_TOKEN:
+        headers["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
+    payload = {"api_key": api_key, "api_secret": api_secret}
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+    )
+    if response.status_code >= 400:
+        detail = response.text
+        raise RuntimeError(f"Binance gateway error {response.status_code}: {detail}")
+    return response.json()
+
+
 def execute_ibkr_test_order_for_user(
     user_id: str,
     symbol: str,
@@ -297,7 +337,7 @@ def get_binance_account_status_for_user(user_id: str):
                 detail="Missing credentials for BINANCE",
             )
         try:
-            raw = get_account_status(
+            raw = _get_binance_account_status(
                 api_key=creds["api_key"],
                 api_secret=creds["api_secret"],
             )
