@@ -117,11 +117,23 @@ pytest -q tests/integration
   - `PASSWORD_MAX_AGE_DAYS=90` max password age in days (used when enforcement is enabled).
   - `ALLOWED_BINANCE_SYMBOLS=BTCUSDT,ETHUSDT` optional allowlist for BINANCE symbols.
   - `ALLOWED_IBKR_SYMBOLS=AAPL,MSFT,SPY` optional allowlist for IBKR symbols.
+  - Binance gateway route in API:
+    - `BINANCE_GATEWAY_ENABLED=true|false`
+    - `BINANCE_GATEWAY_BASE_URL=https://...`
+    - `BINANCE_GATEWAY_TOKEN=...`
+    - `BINANCE_GATEWAY_TIMEOUT_SECONDS=12`
+    - `BINANCE_GATEWAY_FALLBACK_DIRECT=false` (recommended for strict routing)
 - Exchange credentials are stored encrypted at rest with `ENCRYPTION_KEY`.
 - Binance live trading is not enabled here; only testnet `order/test` endpoint is wired.
 - IBKR test-order supports:
   - simulated safe mode by default (no money movement),
   - optional bridge mode via `IBKR_BRIDGE_BASE_URL`.
+- Binance gateway service (`apps/binance_gateway`) supports:
+  - `BINANCE_GATEWAY_TOKEN` (required shared secret, header `X-Internal-Token`)
+  - `BINANCE_BASE_URL` (default `https://testnet.binance.vision`)
+  - `BINANCE_GATEWAY_TIMEOUT_SECONDS` (default `12`)
+  - `BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE=true|false` (default `false`)
+  - `BINANCE_GATEWAY_RATE_LIMIT_PER_MIN` (default `60`)
 - User risk profile assignment (email-based):
   - `RISK_PROFILE_MODEL2_EMAIL`
   - `RISK_PROFILE_LOOSE_EMAIL`
