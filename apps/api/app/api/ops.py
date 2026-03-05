@@ -170,6 +170,29 @@ def _ibkr_fallback_symbols() -> list[str]:
 
 
 def _fetch_binance_ticker_rows() -> list[dict]:
+    gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+    if gateway_enabled:
+        try:
+            base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+            url = f"{base}/binance/ticker-24hr"
+            body = json.dumps({"limit": 500}).encode("utf-8")
+            req = urllib_request.Request(
+                url,
+                method="POST",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            if settings.BINANCE_GATEWAY_TOKEN:
+                req.add_header("X-Internal-Token", settings.BINANCE_GATEWAY_TOKEN)
+            with urllib_request.urlopen(req, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))) as resp:  # noqa: S310
+                payload = json.loads(resp.read().decode("utf-8"))
+            rows = payload.get("rows") if isinstance(payload, dict) else None
+            if isinstance(rows, list):
+                return [p for p in rows if isinstance(p, dict)]
+        except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                return []
+
     base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
     url = f"{base}/api/v3/ticker/24hr"
     try:

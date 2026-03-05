@@ -34,6 +34,11 @@ class BinanceAccountStatusIn(BaseModel):
     api_secret: str
 
 
+class BinanceTicker24hIn(BaseModel):
+    symbols: list[str] | None = None
+    limit: int = 200
+
+
 @app.get("/healthz")
 def healthz():
     if not HEALTHZ_CHECK_BINANCE:
@@ -118,6 +123,38 @@ def binance_account_status(payload: BinanceAccountStatusIn, x_internal_token: st
             detail += f" code={binance_code}"
         raise HTTPException(status_code=502, detail=detail)
     return r.json()
+
+
+@app.post("/binance/ticker-24hr")
+def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Header(default="")):
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _enforce_rate_limit(x_internal_token)
+
+    url = f"{BINANCE_BASE}/api/v3/ticker/24hr"
+    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if r.status_code >= 400:
+        detail = f"binance_upstream_error status={r.status_code}"
+        raise HTTPException(status_code=502, detail=detail)
+    data = r.json()
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="invalid_ticker_payload")
+
+    symbols_filter = {str(s).upper().strip() for s in (payload.symbols or []) if str(s).strip()}
+    limit = max(1, min(int(payload.limit), 1000))
+    out: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper().strip()
+        if not symbol:
+            continue
+        if symbols_filter and symbol not in symbols_filter:
+            continue
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return {"rows": out, "count": len(out), "mode": "gateway_ticker_24hr"}
 
 
 def _enforce_rate_limit(key: str) -> None:
