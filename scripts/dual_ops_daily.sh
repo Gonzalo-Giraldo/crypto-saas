@@ -86,6 +86,22 @@ json_get() {
   python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get(sys.argv[1], ""))' "$key"
 }
 
+normalize_secret_value() {
+  local v="${1:-}"
+  # Trim outer whitespace
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  echo "$v"
+}
+
+is_skip_secret_value() {
+  local raw
+  raw="$(normalize_secret_value "${1:-}")"
+  local upper
+  upper="$(echo "$raw" | tr '[:lower:]' '[:upper:]')"
+  [[ -z "$upper" || "$upper" == "__SKIP__" || "$upper" == "SKIP" || "$upper" == "NONE" || "$upper" == "N/A" ]]
+}
+
 array_has_action() {
   local action="$1"
   python3 -c 'import json,sys; arr=json.load(sys.stdin); print("true" if any(x.get("action")==sys.argv[1] for x in arr) else "false")' "$action"
@@ -179,8 +195,12 @@ seed_exchange_secret_if_present() {
   local api_key="$3"
   local api_secret="$4"
   local label="$5"
+  local api_key_norm
+  local api_secret_norm
+  api_key_norm="$(normalize_secret_value "$api_key")"
+  api_secret_norm="$(normalize_secret_value "$api_secret")"
 
-  if [[ -z "$api_key" || -z "$api_secret" ]]; then
+  if is_skip_secret_value "$api_key_norm" || is_skip_secret_value "$api_secret_norm"; then
     echo "INFO | skip secret seed ($label): credentials not provided"
     return 0
   fi
@@ -189,7 +209,7 @@ seed_exchange_secret_if_present() {
   resp=$(curl -sS -X POST "$BASE_URL/users/exchange-secrets" \
     -H "Authorization: Bearer $token" \
     -H "Content-Type: application/json" \
-    --data "{\"exchange\":\"$exchange\",\"api_key\":\"$api_key\",\"api_secret\":\"$api_secret\"}" || true)
+    --data "{\"exchange\":\"$exchange\",\"api_key\":\"$api_key_norm\",\"api_secret\":\"$api_secret_norm\"}" || true)
   if [[ "$resp" == *"Encrypted credentials saved"* ]]; then
     pass "seed $label secret"
   else
