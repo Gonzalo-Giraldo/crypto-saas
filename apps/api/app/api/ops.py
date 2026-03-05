@@ -4719,7 +4719,29 @@ def ops_console_page():
     function parseNumberInput(v) {
       const raw = String(v ?? "").trim();
       if (!raw) return 0;
-      const n = Number(raw.replaceAll(",", ""));
+      let normalized = raw;
+      if (raw.includes(",") && !raw.includes(".")) {
+        const commaCount = (raw.match(/,/g) || []).length;
+        if (commaCount > 1) {
+          // Likely thousands separators: 50,000,000
+          normalized = raw.replaceAll(",", "");
+        } else {
+          const parts = raw.split(",");
+          const left = parts[0] || "";
+          const right = parts[1] || "";
+          // One comma: treat as decimal for short fractions (0,6 / 80,5),
+          // otherwise treat as thousands separator (100,000).
+          if (right.length <= 2) {
+            normalized = `${left}.${right}`;
+          } else {
+            normalized = `${left}${right}`;
+          }
+        }
+      } else {
+        // Format like 50,000.25
+        normalized = raw.replaceAll(",", "");
+      }
+      const n = Number(normalized);
       return Number.isFinite(n) ? n : 0;
     }
 
