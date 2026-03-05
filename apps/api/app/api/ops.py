@@ -180,6 +180,10 @@ def _binance_monitor_volume_floor() -> float:
     return 5_000_000.0
 
 
+def _is_binance_monitor_row_allowed(symbol: str, volume_24h_usdt: float) -> bool:
+    return _is_binance_directional_symbol(symbol) and float(volume_24h_usdt or 0.0) >= _binance_monitor_volume_floor()
+
+
 def _ibkr_fallback_symbols() -> list[str]:
     return [
         "SPY",
@@ -1966,22 +1970,28 @@ def admin_market_monitor_report(
     else:
         exchange_norm = "ALL"
     rows = db.execute(q.order_by(MarketTrendSnapshot.created_at.desc()).limit(limit)).scalars().all()
-    out_rows = [
-        MarketTrendSnapshotOut(
-            timestamp=(r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
-            bucket_5m=(r.bucket_5m if r.bucket_5m.tzinfo else r.bucket_5m.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
-            exchange=r.exchange,
-            symbol=r.symbol,
-            regime=r.regime,
-            confidence=float(r.confidence),
-            trend_score=float(r.trend_score),
-            momentum_score=float(r.momentum_score),
-            atr_pct=float(r.atr_pct),
-            volume_24h_usdt=float(r.volume_24h_usdt),
-            source=r.source,
+    out_rows: list[MarketTrendSnapshotOut] = []
+    for r in rows:
+        if (r.exchange or "").upper() == "BINANCE" and not _is_binance_monitor_row_allowed(
+            str(r.symbol or ""),
+            float(r.volume_24h_usdt or 0.0),
+        ):
+            continue
+        out_rows.append(
+            MarketTrendSnapshotOut(
+                timestamp=(r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
+                bucket_5m=(r.bucket_5m if r.bucket_5m.tzinfo else r.bucket_5m.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
+                exchange=r.exchange,
+                symbol=r.symbol,
+                regime=r.regime,
+                confidence=float(r.confidence),
+                trend_score=float(r.trend_score),
+                momentum_score=float(r.momentum_score),
+                atr_pct=float(r.atr_pct),
+                volume_24h_usdt=float(r.volume_24h_usdt),
+                source=r.source,
+            )
         )
-        for r in rows
-    ]
     return MarketTrendMonitorOut(
         generated_at=now.isoformat(),
         hours=hours,
