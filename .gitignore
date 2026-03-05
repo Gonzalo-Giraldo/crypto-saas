@@ -34,3 +34,4 @@ db.sqlite
 
 # Mypy
 .mypy_cache/
+.DS_Store
