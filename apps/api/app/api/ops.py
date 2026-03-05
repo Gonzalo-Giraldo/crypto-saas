@@ -4863,13 +4863,18 @@ def ops_console_page():
           btn.disabled = true;
           setBoMsg(`Saving runtime policy ${strategyId}/${exchange}...`);
           try {
-            await api(`/ops/admin/strategy-runtime-policies/${strategyId}/${exchange}`, {
+            const saved = await api(`/ops/admin/strategy-runtime-policies/${strategyId}/${exchange}`, {
               method: "PUT",
               headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
+            const idx = (state.runtimePolicies || []).findIndex((p) =>
+              String(p.strategy_id || "").toUpperCase() === String(strategyId || "").toUpperCase() &&
+              String(p.exchange || "").toUpperCase() === String(exchange || "").toUpperCase()
+            );
+            if (idx >= 0) state.runtimePolicies[idx] = saved;
             setBoMsg(`Runtime policy saved: ${strategyId}/${exchange}`);
-            await loadAll();
+            btn.disabled = false;
           } catch (e) {
             setBoMsg(`Runtime policy save failed: ${String(e.message || e)}`, true);
             btn.disabled = false;
