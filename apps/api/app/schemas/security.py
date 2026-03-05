@@ -269,3 +269,27 @@ class AutoPickReportOut(BaseModel):
     window_to: str
     interval_minutes: int
     rows: list[AutoPickReportItemOut]
+
+
+class MarketTrendSnapshotOut(BaseModel):
+    timestamp: str
+    bucket_5m: str
+    exchange: str
+    symbol: str
+    regime: str
+    confidence: float
+    trend_score: float
+    momentum_score: float
+    atr_pct: float
+    volume_24h_usdt: float
+    source: str
+
+
+class MarketTrendMonitorOut(BaseModel):
+    generated_at: str
+    hours: int
+    window_from: str
+    window_to: str
+    exchange: str
+    total_rows: int
+    rows: list[MarketTrendSnapshotOut]

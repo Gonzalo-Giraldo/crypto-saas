@@ -18,6 +18,7 @@ from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.models.exchange_secret import ExchangeSecret
 from apps.api.app.models.idempotency_key import IdempotencyKey
 from apps.api.app.models.position import Position
+from apps.api.app.models.market_trend_snapshot import MarketTrendSnapshot
 from apps.api.app.models.signal import Signal
 from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.models.user_2fa import UserTwoFactor
@@ -70,6 +71,8 @@ from apps.api.app.schemas.security import (
     StrategyRuntimePolicyUpdateRequest,
     AutoPickReportItemOut,
     AutoPickReportOut,
+    MarketTrendSnapshotOut,
+    MarketTrendMonitorOut,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -322,6 +325,171 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
         )
         for s in _binance_fallback_symbols()
     ]
+
+
+def _bucket_5m(dt: datetime) -> datetime:
+    d = dt.astimezone(timezone.utc)
+    minute_bucket = (d.minute // 5) * 5
+    return d.replace(minute=minute_bucket, second=0, microsecond=0)
+
+
+def _market_confidence_pct(*, trend_score: float, momentum_score: float, atr_pct: float, regime: str) -> float:
+    trend_strength = min(1.0, max(0.0, abs(float(trend_score))))
+    momentum_strength = min(1.0, max(0.0, abs(float(momentum_score))))
+    atr_norm = min(1.0, max(0.0, float(atr_pct) / 12.0))
+    volatility_fit = 1.0 - abs(atr_norm - 0.35)
+    volatility_fit = min(1.0, max(0.0, volatility_fit))
+    raw = (trend_strength * 0.45) + (momentum_strength * 0.35) + (volatility_fit * 0.20)
+    if (regime or "").lower() == "range":
+        raw *= 0.9
+    return round(min(100.0, max(0.0, raw * 100.0)), 2)
+
+
+def _build_market_monitor_rows(exchange: str) -> list[dict]:
+    ex = (exchange or "").upper()
+    if ex == "BINANCE":
+        ticker_rows = _fetch_binance_ticker_rows()
+        if ticker_rows:
+            ranked: list[tuple[dict, float]] = []
+            banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+            for item in ticker_rows:
+                symbol = str(item.get("symbol") or "").upper().strip()
+                if not symbol.endswith("USDT") or symbol.endswith(banned_suffixes):
+                    continue
+                try:
+                    qv = float(item.get("quoteVolume") or 0.0)
+                    pct = float(item.get("priceChangePercent") or 0.0)
+                    high = float(item.get("highPrice") or 0.0)
+                    low = float(item.get("lowPrice") or 0.0)
+                    last = float(item.get("lastPrice") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if last <= 0:
+                    continue
+                volatility = ((high - low) / last) * 100.0 if high > 0 and low > 0 else 0.0
+                trend = max(-1.0, min(1.0, pct / 8.0))
+                momentum = max(-1.0, min(1.0, pct / 6.0))
+                regime, _ = infer_market_regime(
+                    trend_score=float(trend),
+                    atr_pct=float(volatility),
+                    momentum_score=float(momentum),
+                )
+                ranked.append(
+                    (
+                        {
+                            "exchange": "BINANCE",
+                            "symbol": symbol,
+                            "trend_score": round(trend, 4),
+                            "momentum_score": round(momentum, 4),
+                            "atr_pct": round(max(0.0, volatility), 4),
+                            "volume_24h_usdt": round(max(0.0, qv), 2),
+                            "regime": regime,
+                            "source": "ticker_24h",
+                        },
+                        qv,
+                    )
+                )
+            ranked.sort(key=lambda x: x[1], reverse=True)
+            out = [r[0] for r in ranked[:12]]
+            if out:
+                return out
+        return [
+            {
+                "exchange": "BINANCE",
+                "symbol": s,
+                "trend_score": 0.0,
+                "momentum_score": 0.0,
+                "atr_pct": 6.5,
+                "volume_24h_usdt": 0.0,
+                "regime": "range",
+                "source": "fallback",
+            }
+            for s in _binance_fallback_symbols()
+        ]
+
+    base_by_symbol = {
+        "SPY": (0.20, 0.12, 1.8),
+        "QQQ": (0.25, 0.15, 2.0),
+        "IWM": (0.08, 0.05, 2.4),
+        "AAPL": (0.22, 0.18, 2.1),
+        "MSFT": (0.18, 0.14, 1.9),
+        "NVDA": (0.35, 0.30, 3.2),
+        "AMZN": (0.15, 0.10, 2.3),
+        "META": (0.17, 0.12, 2.5),
+        "TSLA": (0.28, 0.22, 3.8),
+    }
+    out: list[dict] = []
+    for s in _ibkr_fallback_symbols():
+        trend, momentum, atr = base_by_symbol.get(s, (0.0, 0.0, 2.2))
+        regime, _ = infer_market_regime(
+            trend_score=float(trend),
+            atr_pct=float(atr),
+            momentum_score=float(momentum),
+        )
+        out.append(
+            {
+                "exchange": "IBKR",
+                "symbol": s,
+                "trend_score": round(trend, 4),
+                "momentum_score": round(momentum, 4),
+                "atr_pct": round(atr, 4),
+                "volume_24h_usdt": 0.0,
+                "regime": regime,
+                "source": "equity_fallback",
+            }
+        )
+    return out
+
+
+def run_market_monitor_tick_for_tenant(
+    db: Session,
+    tenant_id: str,
+    *,
+    exchanges: tuple[str, ...] = ("BINANCE", "IBKR"),
+) -> dict:
+    now = datetime.now(timezone.utc)
+    bucket = _bucket_5m(now)
+    inserted = 0
+    detail: list[dict] = []
+    for exchange in exchanges:
+        ex = (exchange or "").upper()
+        rows = _build_market_monitor_rows(ex)
+        db.query(MarketTrendSnapshot).filter(
+            MarketTrendSnapshot.tenant_id == tenant_id,
+            MarketTrendSnapshot.exchange == ex,
+            MarketTrendSnapshot.bucket_5m == bucket,
+        ).delete(synchronize_session=False)
+        for row in rows:
+            confidence = _market_confidence_pct(
+                trend_score=float(row.get("trend_score") or 0.0),
+                momentum_score=float(row.get("momentum_score") or 0.0),
+                atr_pct=float(row.get("atr_pct") or 0.0),
+                regime=str(row.get("regime") or "range"),
+            )
+            db.add(
+                MarketTrendSnapshot(
+                    tenant_id=tenant_id,
+                    exchange=ex,
+                    symbol=str(row.get("symbol") or ""),
+                    regime=str(row.get("regime") or "range"),
+                    confidence=confidence,
+                    trend_score=float(row.get("trend_score") or 0.0),
+                    momentum_score=float(row.get("momentum_score") or 0.0),
+                    atr_pct=float(row.get("atr_pct") or 0.0),
+                    volume_24h_usdt=float(row.get("volume_24h_usdt") or 0.0),
+                    source=str(row.get("source") or "fallback"),
+                    bucket_5m=bucket,
+                )
+            )
+            inserted += 1
+        detail.append({"exchange": ex, "symbols": len(rows)})
+    db.commit()
+    return {
+        "tenant_id": tenant_id,
+        "bucket_5m": bucket.isoformat(),
+        "inserted": inserted,
+        "detail": detail,
+    }
 
 
 def _build_operational_readiness_report(
@@ -1703,6 +1871,75 @@ def auto_pick_report(
         window_from=from_dt.isoformat(),
         window_to=now.isoformat(),
         interval_minutes=interval_minutes,
+        rows=out_rows,
+    )
+
+
+@router.post("/admin/market-monitor/tick")
+def admin_market_monitor_tick(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    out = run_market_monitor_tick_for_tenant(
+        db=db,
+        tenant_id=_tenant_id(current_user),
+    )
+    log_audit_event(
+        db,
+        action="market.monitor.tick",
+        user_id=current_user.id,
+        entity_type="market_monitor",
+        details=out,
+    )
+    db.commit()
+    return out
+
+
+@router.get("/admin/market-monitor/report", response_model=MarketTrendMonitorOut)
+def admin_market_monitor_report(
+    hours: int = 2,
+    limit: int = 300,
+    exchange: str = "ALL",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    hours = max(1, min(hours, 48))
+    limit = max(1, min(limit, 5000))
+    now = datetime.now(timezone.utc)
+    from_dt = now - timedelta(hours=hours)
+    exchange_norm = (exchange or "ALL").upper().strip()
+    q = select(MarketTrendSnapshot).where(
+        MarketTrendSnapshot.tenant_id == _tenant_id(current_user),
+        MarketTrendSnapshot.created_at >= from_dt,
+    )
+    if exchange_norm in {"BINANCE", "IBKR"}:
+        q = q.where(MarketTrendSnapshot.exchange == exchange_norm)
+    else:
+        exchange_norm = "ALL"
+    rows = db.execute(q.order_by(MarketTrendSnapshot.created_at.desc()).limit(limit)).scalars().all()
+    out_rows = [
+        MarketTrendSnapshotOut(
+            timestamp=(r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
+            bucket_5m=(r.bucket_5m if r.bucket_5m.tzinfo else r.bucket_5m.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat(),
+            exchange=r.exchange,
+            symbol=r.symbol,
+            regime=r.regime,
+            confidence=float(r.confidence),
+            trend_score=float(r.trend_score),
+            momentum_score=float(r.momentum_score),
+            atr_pct=float(r.atr_pct),
+            volume_24h_usdt=float(r.volume_24h_usdt),
+            source=r.source,
+        )
+        for r in rows
+    ]
+    return MarketTrendMonitorOut(
+        generated_at=now.isoformat(),
+        hours=hours,
+        window_from=from_dt.isoformat(),
+        window_to=now.isoformat(),
+        exchange=exchange_norm,
+        total_rows=len(out_rows),
         rows=out_rows,
     )
 

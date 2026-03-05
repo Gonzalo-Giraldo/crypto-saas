@@ -17,12 +17,17 @@ import apps.api.app.models.idempotency_key
 import apps.api.app.models.risk_profile_config
 import apps.api.app.models.user_risk_settings
 import apps.api.app.models.strategy_runtime_policy
+import apps.api.app.models.market_trend_snapshot
 
 from fastapi import FastAPI
 import threading
 import time
 
-from apps.api.app.api.ops import router as ops_router, run_auto_pick_tick_for_tenant
+from apps.api.app.api.ops import (
+    router as ops_router,
+    run_auto_pick_tick_for_tenant,
+    run_market_monitor_tick_for_tenant,
+)
 from apps.api.app.api.users import router as users_router
 
 from apps.api.app.db.session import engine, Base, SessionLocal
@@ -90,6 +95,10 @@ _AUTO_PICK_LOCK_KEY = 887731
 def _auto_pick_tick_once() -> None:
     db = SessionLocal()
     try:
+        monitor = run_market_monitor_tick_for_tenant(
+            db=db,
+            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+        )
         out = run_auto_pick_tick_for_tenant(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
@@ -101,6 +110,7 @@ def _auto_pick_tick_once() -> None:
         print(
             "[auto-pick-scheduler] tick ok",
             {
+                "monitor_inserted": monitor.get("inserted", 0),
                 "executed_count": out.get("executed_count", 0),
                 "dry_run": out.get("dry_run", True),
                 "top_n": out.get("top_n", 10),
