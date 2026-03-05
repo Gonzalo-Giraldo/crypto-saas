@@ -155,6 +155,31 @@ def _binance_fallback_symbols() -> list[str]:
     ]
 
 
+def _is_binance_directional_symbol(symbol: str) -> bool:
+    s = (symbol or "").upper().strip()
+    if not s.endswith("USDT"):
+        return False
+    banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+    if s.endswith(banned_suffixes):
+        return False
+    non_directional = {
+        "USDCUSDT",
+        "BUSDUSDT",
+        "FDUSDUSDT",
+        "TUSDUSDT",
+        "EURUSDT",
+        "TRYUSDT",
+        "BRLUSDT",
+        "AUDUSDT",
+        "GBPUSDT",
+    }
+    return s not in non_directional
+
+
+def _binance_monitor_volume_floor() -> float:
+    return 5_000_000.0
+
+
 def _ibkr_fallback_symbols() -> list[str]:
     return [
         "SPY",
@@ -209,17 +234,16 @@ def _fetch_binance_ticker_rows() -> list[dict]:
 def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
     payload = _fetch_binance_ticker_rows()
     rows: list[tuple[str, float]] = []
-    banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
     for item in payload:
         symbol = str(item.get("symbol") or "").upper().strip()
-        if not symbol.endswith("USDT"):
-            continue
-        if symbol.endswith(banned_suffixes):
+        if not _is_binance_directional_symbol(symbol):
             continue
         try:
             vol = float(item.get("quoteVolume") or 0.0)
         except (TypeError, ValueError):
             vol = 0.0
+        if vol < _binance_monitor_volume_floor():
+            continue
         rows.append((symbol, vol))
     rows.sort(key=lambda x: x[1], reverse=True)
     out: list[str] = []
@@ -273,10 +297,9 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
     ticker_rows = _fetch_binance_ticker_rows()
     if ticker_rows:
         ranked: list[tuple[dict, float]] = []
-        banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
         for item in ticker_rows:
             symbol = str(item.get("symbol") or "").upper().strip()
-            if not symbol.endswith("USDT") or symbol.endswith(banned_suffixes):
+            if not _is_binance_directional_symbol(symbol):
                 continue
             try:
                 qv = float(item.get("quoteVolume") or 0.0)
@@ -287,6 +310,8 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
             except (TypeError, ValueError):
                 continue
             if last <= 0:
+                continue
+            if qv < _binance_monitor_volume_floor():
                 continue
             volatility = ((high - low) / last) * 100.0 if high > 0 and low > 0 else 0.0
             ranked.append(({
@@ -374,10 +399,9 @@ def _build_market_monitor_rows(exchange: str) -> list[dict]:
         ticker_rows = _fetch_binance_ticker_rows()
         if ticker_rows:
             ranked: list[tuple[dict, float]] = []
-            banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
             for item in ticker_rows:
                 symbol = str(item.get("symbol") or "").upper().strip()
-                if not symbol.endswith("USDT") or symbol.endswith(banned_suffixes):
+                if not _is_binance_directional_symbol(symbol):
                     continue
                 try:
                     qv = float(item.get("quoteVolume") or 0.0)
@@ -388,6 +412,8 @@ def _build_market_monitor_rows(exchange: str) -> list[dict]:
                 except (TypeError, ValueError):
                     continue
                 if last <= 0:
+                    continue
+                if qv < _binance_monitor_volume_floor():
                     continue
                 volatility = ((high - low) / last) * 100.0 if high > 0 and low > 0 else 0.0
                 trend = max(-1.0, min(1.0, pct / 8.0))
