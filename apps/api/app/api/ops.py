@@ -4873,6 +4873,29 @@ def ops_console_page():
               String(p.exchange || "").toUpperCase() === String(exchange || "").toUpperCase()
             );
             if (idx >= 0) state.runtimePolicies[idx] = saved;
+            // Normalize visible numeric format after save (e.g. 0.60 instead of .60)
+            const setFmt = (id, value, decimals=2) => {
+              const el = byId(id);
+              if (el) el.value = fmtNumber(value, decimals);
+            };
+            setFmt(`rp_rr_bull_${k}`, saved.rr_min_bull, 2);
+            setFmt(`rp_rr_bear_${k}`, saved.rr_min_bear, 2);
+            setFmt(`rp_rr_range_${k}`, saved.rr_min_range, 2);
+            setFmt(`rp_min_score_${k}`, saved.min_score_pct, 2);
+            setFmt(`rp_score_w_rules_${k}`, saved.score_weight_rules, 2);
+            setFmt(`rp_score_w_market_${k}`, saved.score_weight_market, 2);
+            setFmt(`rp_vol_bull_${k}`, saved.min_volume_24h_usdt_bull, 0);
+            setFmt(`rp_vol_bear_${k}`, saved.min_volume_24h_usdt_bear, 0);
+            setFmt(`rp_vol_range_${k}`, saved.min_volume_24h_usdt_range, 0);
+            setFmt(`rp_spread_bull_${k}`, saved.max_spread_bps_bull, 2);
+            setFmt(`rp_spread_bear_${k}`, saved.max_spread_bps_bear, 2);
+            setFmt(`rp_spread_range_${k}`, saved.max_spread_bps_range, 2);
+            setFmt(`rp_slip_bull_${k}`, saved.max_slippage_bps_bull, 2);
+            setFmt(`rp_slip_bear_${k}`, saved.max_slippage_bps_bear, 2);
+            setFmt(`rp_slip_range_${k}`, saved.max_slippage_bps_range, 2);
+            setFmt(`rp_hold_bull_${k}`, saved.max_hold_minutes_bull, 0);
+            setFmt(`rp_hold_bear_${k}`, saved.max_hold_minutes_bear, 0);
+            setFmt(`rp_hold_range_${k}`, saved.max_hold_minutes_range, 0);
             setBoMsg(`Runtime policy saved: ${strategyId}/${exchange}`);
             btn.disabled = false;
           } catch (e) {
