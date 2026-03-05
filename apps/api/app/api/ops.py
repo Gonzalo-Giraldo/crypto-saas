@@ -166,7 +166,7 @@ def _ibkr_fallback_symbols() -> list[str]:
     ]
 
 
-def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
+def _fetch_binance_ticker_rows() -> list[dict]:
     base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
     url = f"{base}/api/v3/ticker/24hr"
     try:
@@ -177,11 +177,14 @@ def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
         return []
     if not isinstance(payload, list):
         return []
+    return [p for p in payload if isinstance(p, dict)]
+
+
+def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
+    payload = _fetch_binance_ticker_rows()
     rows: list[tuple[str, float]] = []
     banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
     for item in payload:
-        if not isinstance(item, dict):
-            continue
         symbol = str(item.get("symbol") or "").upper().strip()
         if not symbol.endswith("USDT"):
             continue
@@ -209,6 +212,17 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
     ex = (exchange or "").upper()
     if ex == "IBKR":
         symbols = _ibkr_fallback_symbols()
+        base_by_symbol = {
+            "SPY": (0.20, 0.12, 1.8, 6.0, 8.0),
+            "QQQ": (0.25, 0.15, 2.0, 7.0, 9.0),
+            "IWM": (0.08, 0.05, 2.4, 8.0, 10.0),
+            "AAPL": (0.22, 0.18, 2.1, 7.0, 9.0),
+            "MSFT": (0.18, 0.14, 1.9, 6.0, 8.0),
+            "NVDA": (0.35, 0.30, 3.2, 9.0, 12.0),
+            "AMZN": (0.15, 0.10, 2.3, 7.0, 9.0),
+            "META": (0.17, 0.12, 2.5, 8.0, 10.0),
+            "TSLA": (0.28, 0.22, 3.8, 10.0, 13.0),
+        }
         return [
             PretradeCheckRequest(
                 symbol=s,
@@ -218,19 +232,76 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
                 trend_tf="4H",
                 signal_tf="1H",
                 timing_tf="15M",
-                spread_bps=8.0,
-                slippage_bps=10.0,
+                spread_bps=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[3],
+                slippage_bps=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[4],
                 volume_24h_usdt=0.0,
                 in_rth=True,
                 macro_event_block=False,
                 earnings_within_24h=False,
-                market_trend_score=0.0,
-                atr_pct=0.0,
-                momentum_score=0.0,
+                market_trend_score=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[0],
+                atr_pct=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[2],
+                momentum_score=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[1],
             )
             for s in symbols
         ]
-    symbols = _fetch_binance_auto_universe(limit=12) or _binance_fallback_symbols()
+    ticker_rows = _fetch_binance_ticker_rows()
+    if ticker_rows:
+        ranked: list[tuple[dict, float]] = []
+        banned_suffixes = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+        for item in ticker_rows:
+            symbol = str(item.get("symbol") or "").upper().strip()
+            if not symbol.endswith("USDT") or symbol.endswith(banned_suffixes):
+                continue
+            try:
+                qv = float(item.get("quoteVolume") or 0.0)
+                pct = float(item.get("priceChangePercent") or 0.0)
+                high = float(item.get("highPrice") or 0.0)
+                low = float(item.get("lowPrice") or 0.0)
+                last = float(item.get("lastPrice") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if last <= 0:
+                continue
+            volatility = ((high - low) / last) * 100.0 if high > 0 and low > 0 else 0.0
+            ranked.append(({
+                "symbol": symbol,
+                "quote_volume": qv,
+                "pct": pct,
+                "volatility": max(0.0, volatility),
+            }, qv))
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        selected = [r[0] for r in ranked[:12]]
+        out: list[PretradeCheckRequest] = []
+        for row in selected:
+            qv = float(row["quote_volume"])
+            pct = float(row["pct"])
+            vol = float(row["volatility"])
+            liq = min(1.0, qv / 200_000_000.0)
+            spread = max(3.0, 14.0 - (10.0 * liq))
+            slippage = max(5.0, 18.0 - (12.0 * liq))
+            trend = max(-1.0, min(1.0, pct / 8.0))
+            momentum = max(-1.0, min(1.0, pct / 6.0))
+            out.append(
+                PretradeCheckRequest(
+                    symbol=str(row["symbol"]),
+                    side="BUY",
+                    qty=0.01,
+                    rr_estimate=1.7,
+                    trend_tf="4H",
+                    signal_tf="1H",
+                    timing_tf="15M",
+                    spread_bps=round(spread, 2),
+                    slippage_bps=round(slippage, 2),
+                    volume_24h_usdt=qv,
+                    market_trend_score=round(trend, 3),
+                    atr_pct=round(vol, 3),
+                    momentum_score=round(momentum, 3),
+                    funding_rate_bps=0.0,
+                    crypto_event_block=False,
+                )
+            )
+        if out:
+            return out
     return [
         PretradeCheckRequest(
             symbol=s,
@@ -242,14 +313,14 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
             timing_tf="15M",
             spread_bps=7.0,
             slippage_bps=10.0,
-            volume_24h_usdt=90000000.0,
+            volume_24h_usdt=90_000_000.0,
             market_trend_score=0.0,
             atr_pct=0.0,
             momentum_score=0.0,
             funding_rate_bps=0.0,
             crypto_event_block=False,
         )
-        for s in symbols
+        for s in _binance_fallback_symbols()
     ]
 
 
@@ -636,20 +707,45 @@ def _evaluate_pretrade_for_user(
     }
 
 
-def _pretrade_score(result: dict, payload: PretradeCheckRequest) -> float:
+def _pretrade_scores(
+    result: dict,
+    payload: PretradeCheckRequest,
+    *,
+    score_weight_rules: float = 0.4,
+    score_weight_market: float = 0.6,
+) -> tuple[float, float, float]:
     checks = result.get("checks", [])
     total = max(1, len(checks))
     passed_count = sum(1 for c in checks if bool(c.get("passed")))
     ratio = passed_count / total
-    # Base technical score from gate quality + moderate bias for momentum/trend and cost control.
-    score = ratio * 70.0
-    score += max(-1.0, min(1.0, float(payload.market_trend_score))) * 10.0
-    score += max(-1.0, min(1.0, float(payload.momentum_score))) * 8.0
-    score += max(0.0, min(3.0, float(payload.rr_estimate))) * 4.0
-    score -= max(0.0, float(payload.spread_bps)) * 0.4
-    score -= max(0.0, float(payload.slippage_bps)) * 0.35
-    score = max(0.0, min(100.0, score))
-    return round(score, 2)
+    score_rules = ratio * 100.0
+
+    trend = max(-1.0, min(1.0, float(payload.market_trend_score)))
+    momentum = max(-1.0, min(1.0, float(payload.momentum_score)))
+    rr = max(0.0, min(3.0, float(payload.rr_estimate)))
+    spread = max(0.0, float(payload.spread_bps))
+    slippage = max(0.0, float(payload.slippage_bps))
+    atr_pct = max(0.0, float(payload.atr_pct))
+    vol_24h = max(0.0, float(payload.volume_24h_usdt))
+    liq = min(1.0, vol_24h / 200_000_000.0)
+    atr_penalty = max(0.0, atr_pct - 6.0) * 1.5
+
+    score_market = 45.0
+    score_market += trend * 18.0
+    score_market += momentum * 14.0
+    score_market += rr * 7.0
+    score_market += liq * 10.0
+    score_market -= spread * 0.6
+    score_market -= slippage * 0.55
+    score_market -= atr_penalty
+    score_market = max(0.0, min(100.0, score_market))
+
+    w_rules = max(0.0, float(score_weight_rules))
+    w_market = max(0.0, float(score_weight_market))
+    denom = max(0.0001, w_rules + w_market)
+    score_final = ((w_rules * score_rules) + (w_market * score_market)) / denom
+    score_final = max(0.0, min(100.0, score_final))
+    return round(score_rules, 2), round(score_market, 2), round(score_final, 2)
 
 
 def _scan_pretrade_candidates(
@@ -657,6 +753,9 @@ def _scan_pretrade_candidates(
     current_user: User,
     exchange: str,
     payload: PretradeScanRequest,
+    *,
+    score_weight_rules: float = 0.4,
+    score_weight_market: float = 0.6,
 ) -> dict:
     started = time.perf_counter()
     rows = []
@@ -698,13 +797,21 @@ def _scan_pretrade_candidates(
             passed_assets += 1
         else:
             blocked_assets += 1
+        score_rules, score_market, score_final = _pretrade_scores(
+            result,
+            candidate,
+            score_weight_rules=score_weight_rules,
+            score_weight_market=score_weight_market,
+        )
         rows.append(
             {
                 "symbol": candidate.symbol,
                 "side": candidate.side,
                 "qty": candidate.qty,
                 "passed": passed,
-                "score": _pretrade_score(result, candidate),
+                "score": score_final,
+                "score_rules": score_rules,
+                "score_market": score_market,
                 "market_regime": result.get("market_regime", "range"),
                 "regime_source": result.get("regime_source", "legacy"),
                 "passed_checks": len(checks) - len(failed_checks),
@@ -751,6 +858,8 @@ def _auto_pick_from_scan(
         exchange=exchange,
     )
     min_score_pct = float(runtime_policy.get("min_score_pct", 78.0))
+    score_weight_rules = float(runtime_policy.get("score_weight_rules", 0.4))
+    score_weight_market = float(runtime_policy.get("score_weight_market", 0.6))
     universe = _build_auto_pick_universe(exchange)
     scan_payload = PretradeScanRequest(
         candidates=universe,
@@ -763,12 +872,18 @@ def _auto_pick_from_scan(
         current_user=current_user,
         exchange=exchange,
         payload=scan_payload,
+        score_weight_rules=score_weight_rules,
+        score_weight_market=score_weight_market,
     )
     assets = scan.get("assets", [])
     top_candidate = assets[0] if assets else None
     avg_score = None
+    avg_score_rules = None
+    avg_score_market = None
     if assets:
         avg_score = round(sum(float(a.get("score") or 0.0) for a in assets) / len(assets), 2)
+        avg_score_rules = round(sum(float(a.get("score_rules") or 0.0) for a in assets) / len(assets), 2)
+        avg_score_market = round(sum(float(a.get("score_market") or 0.0) for a in assets) / len(assets), 2)
 
     if not universe:
         return {
@@ -779,10 +894,16 @@ def _auto_pick_from_scan(
             "selected_side": None,
             "selected_qty": None,
             "selected_score": None,
+            "selected_score_rules": None,
+            "selected_score_market": None,
             "selected_market_regime": None,
             "top_candidate_symbol": None,
             "top_candidate_score": None,
+            "top_candidate_score_rules": None,
+            "top_candidate_score_market": None,
             "avg_score": None,
+            "avg_score_rules": None,
+            "avg_score_market": None,
             "decision": "no_universe_symbols_configured",
             "top_failed_checks": ["allowlist_empty"],
             "execution": None,
@@ -805,10 +926,16 @@ def _auto_pick_from_scan(
             "selected_side": None,
             "selected_qty": None,
             "selected_score": None,
+            "selected_score_rules": None,
+            "selected_score_market": None,
             "selected_market_regime": None,
             "top_candidate_symbol": (top_candidate or {}).get("symbol"),
             "top_candidate_score": (top_candidate or {}).get("score"),
+            "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+            "top_candidate_score_market": (top_candidate or {}).get("score_market"),
             "avg_score": avg_score,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
             "decision": "no_candidate_passed",
             "top_failed_checks": top_failed_checks,
             "execution": None,
@@ -847,10 +974,16 @@ def _auto_pick_from_scan(
         "selected_side": selected["side"],
         "selected_qty": selected["qty"],
         "selected_score": selected["score"],
+        "selected_score_rules": selected["score_rules"],
+        "selected_score_market": selected["score_market"],
         "selected_market_regime": selected["market_regime"],
         "top_candidate_symbol": (top_candidate or {}).get("symbol"),
         "top_candidate_score": (top_candidate or {}).get("score"),
+        "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+        "top_candidate_score_market": (top_candidate or {}).get("score_market"),
         "avg_score": avg_score,
+        "avg_score_rules": avg_score_rules,
+        "avg_score_market": avg_score_market,
         "decision": decision,
         "top_failed_checks": [],
         "execution": execution,
@@ -1340,6 +1473,15 @@ def put_admin_strategy_runtime_policy(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rr_min_range out of range")
     if not (0.0 <= float(payload.min_score_pct) <= 100.0):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="min_score_pct out of range")
+    if not (0.0 <= float(payload.score_weight_rules) <= 1.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="score_weight_rules out of range")
+    if not (0.0 <= float(payload.score_weight_market) <= 1.0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="score_weight_market out of range")
+    if float(payload.score_weight_rules) + float(payload.score_weight_market) <= 0.0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="score_weight_rules + score_weight_market must be > 0",
+        )
     for name, value in {
         "max_spread_bps_bull": payload.max_spread_bps_bull,
         "max_spread_bps_bear": payload.max_spread_bps_bear,
@@ -1526,6 +1668,10 @@ def auto_pick_report(
         top_symbol = details.get("top_candidate_symbol")
         top_score = details.get("top_candidate_score")
         selected_score = details.get("selected_score")
+        top_score_rules = details.get("top_candidate_score_rules")
+        selected_score_rules = details.get("selected_score_rules")
+        top_score_market = details.get("top_candidate_score_market")
+        selected_score_market = details.get("selected_score_market")
         out_rows.append(
             AutoPickReportItemOut(
                 timestamp=created_at.isoformat(),
@@ -1539,7 +1685,11 @@ def auto_pick_report(
                 side=details.get("selected_side"),
                 qty=details.get("selected_qty"),
                 score=top_score if top_score is not None else selected_score,
+                score_rules=top_score_rules if top_score_rules is not None else selected_score_rules,
+                score_market=top_score_market if top_score_market is not None else selected_score_market,
                 avg_score=details.get("avg_score"),
+                avg_score_rules=details.get("avg_score_rules"),
+                avg_score_market=details.get("avg_score_market"),
                 market_regime=details.get("selected_market_regime"),
                 decision=decision,
                 reason=reason,
@@ -2005,10 +2155,16 @@ def pretrade_binance_auto_pick(
             "selected_side": out["selected_side"],
             "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
+            "selected_score_rules": out.get("selected_score_rules"),
+            "selected_score_market": out.get("selected_score_market"),
             "selected_market_regime": out["selected_market_regime"],
             "top_candidate_symbol": out.get("top_candidate_symbol"),
             "top_candidate_score": out.get("top_candidate_score"),
+            "top_candidate_score_rules": out.get("top_candidate_score_rules"),
+            "top_candidate_score_market": out.get("top_candidate_score_market"),
             "avg_score": out.get("avg_score"),
+            "avg_score_rules": out.get("avg_score_rules"),
+            "avg_score_market": out.get("avg_score_market"),
             "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
@@ -2049,10 +2205,16 @@ def pretrade_ibkr_auto_pick(
             "selected_side": out["selected_side"],
             "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
+            "selected_score_rules": out.get("selected_score_rules"),
+            "selected_score_market": out.get("selected_score_market"),
             "selected_market_regime": out["selected_market_regime"],
             "top_candidate_symbol": out.get("top_candidate_symbol"),
             "top_candidate_score": out.get("top_candidate_score"),
+            "top_candidate_score_rules": out.get("top_candidate_score_rules"),
+            "top_candidate_score_market": out.get("top_candidate_score_market"),
             "avg_score": out.get("avg_score"),
+            "avg_score_rules": out.get("avg_score_rules"),
+            "avg_score_market": out.get("avg_score_market"),
             "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
@@ -2127,10 +2289,16 @@ def run_auto_pick_tick_for_tenant(
                     "selected_side": out["selected_side"],
                     "selected_qty": out["selected_qty"],
                     "selected_score": out["selected_score"],
+                    "selected_score_rules": out.get("selected_score_rules"),
+                    "selected_score_market": out.get("selected_score_market"),
                     "selected_market_regime": out["selected_market_regime"],
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
                     "top_candidate_score": out.get("top_candidate_score"),
+                    "top_candidate_score_rules": out.get("top_candidate_score_rules"),
+                    "top_candidate_score_market": out.get("top_candidate_score_market"),
                     "avg_score": out.get("avg_score"),
+                    "avg_score_rules": out.get("avg_score_rules"),
+                    "avg_score_market": out.get("avg_score_market"),
                     "top_failed_checks": out.get("top_failed_checks", []),
                     "scanned_assets": out["scan"]["scanned_assets"],
                 },
@@ -2143,9 +2311,15 @@ def run_auto_pick_tick_for_tenant(
                     "selected": out["selected"],
                     "selected_symbol": out["selected_symbol"],
                     "selected_score": out["selected_score"],
+                    "selected_score_rules": out.get("selected_score_rules"),
+                    "selected_score_market": out.get("selected_score_market"),
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
                     "top_candidate_score": out.get("top_candidate_score"),
+                    "top_candidate_score_rules": out.get("top_candidate_score_rules"),
+                    "top_candidate_score_market": out.get("top_candidate_score_market"),
                     "avg_score": out.get("avg_score"),
+                    "avg_score_rules": out.get("avg_score_rules"),
+                    "avg_score_market": out.get("avg_score_market"),
                     "scanned_assets": out["scan"]["scanned_assets"],
                 }
             )
@@ -4129,6 +4303,13 @@ def ops_console_page():
     }
 
     function renderAutoPickBody(tbodyId, rows) {
+      const fmtScoreCell = (finalScore, rulesScore, marketScore) => {
+        if (finalScore == null) return "-";
+        if (rulesScore == null && marketScore == null) return String(finalScore);
+        const r = rulesScore == null ? "-" : String(rulesScore);
+        const m = marketScore == null ? "-" : String(marketScore);
+        return `${finalScore} (R ${r} | M ${m})`;
+      };
       byId(tbodyId).innerHTML = rows.map((r) => `
         <tr>
           <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
@@ -4136,8 +4317,8 @@ def ops_console_page():
           <td>${esc(r.symbol || "-")}</td>
           <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
           <td>${esc(r.reason || "-")}</td>
-          <td>${esc(r.score != null ? String(r.score) : "-")}</td>
-          <td>${esc(r.avg_score != null ? String(r.avg_score) : "-")}</td>
+          <td>${esc(fmtScoreCell(r.score, r.score_rules, r.score_market))}</td>
+          <td>${esc(fmtScoreCell(r.avg_score, r.avg_score_rules, r.avg_score_market))}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>
       `).join("") || '<tr><td colspan="8" class="muted">Sin eventos en esta ventana</td></tr>';
@@ -4297,7 +4478,11 @@ def ops_console_page():
             bought: false,
             reason: "no_compra: tick_no_ejecutado_en_ventana",
             score: null,
+            score_rules: null,
+            score_market: null,
             avg_score: null,
+            avg_score_rules: null,
+            avg_score_market: null,
             scanned_assets: 0,
           };
         }
@@ -4311,7 +4496,11 @@ def ops_console_page():
           bought: !!best.bought,
           reason: best.reason || "-",
           score: best.score,
+          score_rules: best.score_rules,
+          score_market: best.score_market,
           avg_score: best.avg_score,
+          avg_score_rules: best.avg_score_rules,
+          avg_score_market: best.avg_score_market,
           scanned_assets: Number(best.scanned_assets || 0),
         };
       }
@@ -4487,6 +4676,8 @@ def ops_console_page():
       "R:R minimo bajista": "Ganancia minima esperada frente a la perdida posible cuando el mercado baja.",
       "R:R minimo lateral": "Ganancia minima esperada frente a la perdida posible cuando el mercado esta lateral.",
       "Score minimo (%)": "Puntaje minimo requerido para permitir compra automatica.",
+      "Peso score reglas": "Peso para el puntaje de reglas y controles.",
+      "Peso score mercado": "Peso para el puntaje de condiciones de mercado.",
       "Volumen 24h minimo alcista": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado alcista.",
       "Volumen 24h minimo bajista": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado bajista.",
       "Volumen 24h minimo lateral": "Movimiento minimo del activo en 24 horas para permitir entrada en mercado lateral.",
@@ -4601,6 +4792,8 @@ def ops_console_page():
         numRow("R:R minimo bajista", "rr_min_bear", "rp_rr_bear", 2),
         numRow("R:R minimo lateral", "rr_min_range", "rp_rr_range", 2),
         numRow("Score minimo (%)", "min_score_pct", "rp_min_score", 2),
+        numRow("Peso score reglas", "score_weight_rules", "rp_score_w_rules", 2),
+        numRow("Peso score mercado", "score_weight_market", "rp_score_w_market", 2),
         numRow("Volumen 24h minimo alcista", "min_volume_24h_usdt_bull", "rp_vol_bull", 0),
         numRow("Volumen 24h minimo bajista", "min_volume_24h_usdt_bear", "rp_vol_bear", 0),
         numRow("Volumen 24h minimo lateral", "min_volume_24h_usdt_range", "rp_vol_range", 0),
@@ -4630,6 +4823,8 @@ def ops_console_page():
             rr_min_bear: parseNumberInput(byId(`rp_rr_bear_${k}`).value),
             rr_min_range: parseNumberInput(byId(`rp_rr_range_${k}`).value),
             min_score_pct: parseNumberInput(byId(`rp_min_score_${k}`).value),
+            score_weight_rules: parseNumberInput(byId(`rp_score_w_rules_${k}`).value),
+            score_weight_market: parseNumberInput(byId(`rp_score_w_market_${k}`).value),
             min_volume_24h_usdt_bull: parseNumberInput(byId(`rp_vol_bull_${k}`).value),
             min_volume_24h_usdt_bear: parseNumberInput(byId(`rp_vol_bear_${k}`).value),
             min_volume_24h_usdt_range: parseNumberInput(byId(`rp_vol_range_${k}`).value),

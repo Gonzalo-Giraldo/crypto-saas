@@ -198,6 +198,8 @@ class StrategyRuntimePolicyOut(BaseModel):
     rr_min_bear: float
     rr_min_range: float
     min_score_pct: float = 78.0
+    score_weight_rules: float = 0.4
+    score_weight_market: float = 0.6
     min_volume_24h_usdt_bull: float
     min_volume_24h_usdt_bear: float
     min_volume_24h_usdt_range: float
@@ -221,6 +223,8 @@ class StrategyRuntimePolicyUpdateRequest(BaseModel):
     rr_min_bear: float
     rr_min_range: float
     min_score_pct: float = 78.0
+    score_weight_rules: float = 0.4
+    score_weight_market: float = 0.6
     min_volume_24h_usdt_bull: float = 0.0
     min_volume_24h_usdt_bear: float = 0.0
     min_volume_24h_usdt_range: float = 0.0
@@ -247,7 +251,11 @@ class AutoPickReportItemOut(BaseModel):
     side: Optional[str] = None
     qty: Optional[float] = None
     score: Optional[float] = None
+    score_rules: Optional[float] = None
+    score_market: Optional[float] = None
     avg_score: Optional[float] = None
+    avg_score_rules: Optional[float] = None
+    avg_score_market: Optional[float] = None
     market_regime: Optional[str] = None
     decision: str
     reason: str

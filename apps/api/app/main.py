@@ -41,15 +41,28 @@ def _ensure_runtime_policy_columns():
         cols = {c["name"] for c in insp.get_columns("strategy_runtime_policy")}
     except Exception:
         return
-    if "min_score_pct" in cols:
-        return
     with engine.begin() as conn:
-        conn.execute(
-            text(
-                "ALTER TABLE strategy_runtime_policy "
-                "ADD COLUMN IF NOT EXISTS min_score_pct DOUBLE PRECISION NOT NULL DEFAULT 78.0"
+        if "min_score_pct" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE strategy_runtime_policy "
+                    "ADD COLUMN IF NOT EXISTS min_score_pct DOUBLE PRECISION NOT NULL DEFAULT 78.0"
+                )
             )
-        )
+        if "score_weight_rules" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE strategy_runtime_policy "
+                    "ADD COLUMN IF NOT EXISTS score_weight_rules DOUBLE PRECISION NOT NULL DEFAULT 0.4"
+                )
+            )
+        if "score_weight_market" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE strategy_runtime_policy "
+                    "ADD COLUMN IF NOT EXISTS score_weight_market DOUBLE PRECISION NOT NULL DEFAULT 0.6"
+                )
+            )
 
 
 _ensure_runtime_policy_columns()

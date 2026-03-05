@@ -23,6 +23,8 @@ class StrategyRuntimePolicy(Base):
     rr_min_bear = Column(Float, nullable=False, default=1.6)
     rr_min_range = Column(Float, nullable=False, default=1.8)
     min_score_pct = Column(Float, nullable=False, default=78.0)
+    score_weight_rules = Column(Float, nullable=False, default=0.4)
+    score_weight_market = Column(Float, nullable=False, default=0.6)
 
     min_volume_24h_usdt_bull = Column(Float, nullable=False, default=50000000.0)
     min_volume_24h_usdt_bear = Column(Float, nullable=False, default=70000000.0)

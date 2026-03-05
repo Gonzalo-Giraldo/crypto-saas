@@ -117,6 +117,8 @@ class PretradeScanAssetOut(BaseModel):
     qty: float
     passed: bool
     score: float
+    score_rules: Optional[float] = None
+    score_market: Optional[float] = None
     market_regime: str
     regime_source: str
     passed_checks: int
@@ -158,7 +160,16 @@ class PretradeAutoPickOut(BaseModel):
     selected_side: Optional[str] = None
     selected_qty: Optional[float] = None
     selected_score: Optional[float] = None
+    selected_score_rules: Optional[float] = None
+    selected_score_market: Optional[float] = None
     selected_market_regime: Optional[str] = None
+    top_candidate_symbol: Optional[str] = None
+    top_candidate_score: Optional[float] = None
+    top_candidate_score_rules: Optional[float] = None
+    top_candidate_score_market: Optional[float] = None
+    avg_score: Optional[float] = None
+    avg_score_rules: Optional[float] = None
+    avg_score_market: Optional[float] = None
     decision: str
     top_failed_checks: list[str] = Field(default_factory=list)
     execution: Optional[dict] = None
