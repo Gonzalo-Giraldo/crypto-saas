@@ -3799,6 +3799,7 @@ def ops_console_page():
             <button id="execExitBtn" class="ghost mini">Exit check</button>
             <button id="execTestOrderBtn" class="mini">Test order</button>
             <button id="execAutoPickBtn" class="ghost mini">Auto pick</button>
+            <button id="execAccountStatusBtn" class="ghost mini">Account status</button>
             <label class="muted" style="display:inline-flex;align-items:center;gap:6px">
               <input id="execAutoDryRun" type="checkbox" checked />
               dry_run
@@ -3808,6 +3809,29 @@ def ops_console_page():
           <div class="muted" style="margin-top:8px">Auto-pick analiza automaticamente el universo permitido por broker cada 5 minutos.</div>
           <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
           <pre id="execLabOut" class="mono" style="white-space:pre-wrap;background:#f7f9fc;border:1px solid var(--line);border-radius:10px;padding:10px;max-height:280px;overflow:auto;">{}</pre>
+          <div id="acctStatusCtl" class="card" style="margin-top:10px">
+            <div class="row">
+              <strong>Account Status</strong>
+              <span class="muted">Atributos de cuenta por broker</span>
+            </div>
+            <div id="acctStatusMsg" class="muted" style="margin-top:6px">No data</div>
+            <table style="margin-top:8px">
+              <thead>
+                <tr><th>Campo</th><th>Valor</th></tr>
+              </thead>
+              <tbody id="acctStatusSummaryBody">
+                <tr><td colspan="2" class="muted">No data</td></tr>
+              </tbody>
+            </table>
+            <table style="margin-top:8px">
+              <thead>
+                <tr><th>Balances / Positions (top 10)</th><th>Valor</th></tr>
+              </thead>
+              <tbody id="acctStatusItemsBody">
+                <tr><td colspan="2" class="muted">No data</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
         <div id="snapshotCtl" class="card" style="margin-top:10px;display:none">
           <div class="row">
@@ -4131,6 +4155,46 @@ def ops_console_page():
       byId("execLabOut").textContent = JSON.stringify(payload || {}, null, 2);
     }
 
+    function setAcctStatusMsg(msg, bad=false) {
+      const el = byId("acctStatusMsg");
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = bad ? "var(--bad)" : "var(--muted)";
+    }
+
+    function renderAccountStatus(payload) {
+      const summaryEl = byId("acctStatusSummaryBody");
+      const itemsEl = byId("acctStatusItemsBody");
+      if (!summaryEl || !itemsEl) return;
+      const p = payload || {};
+      const metrics = p.metrics || {};
+      const summaryRows = [
+        ["Exchange", p.exchange || "-"],
+        ["Mode", p.mode || "-"],
+        ["Account ID", p.account_id || "-"],
+        ["Can trade", p.can_trade == null ? "-" : (p.can_trade ? "yes" : "no")],
+        ["Open orders", p.open_orders == null ? "-" : String(p.open_orders)],
+      ];
+      Object.keys(metrics).slice(0, 8).forEach((k) => {
+        const v = metrics[k];
+        summaryRows.push([k, typeof v === "object" ? JSON.stringify(v) : String(v)]);
+      });
+      summaryEl.innerHTML = summaryRows.map(([k, v]) => `
+        <tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>
+      `).join("");
+
+      const items = [];
+      (p.balances || []).slice(0, 10).forEach((b) => {
+        items.push([`BAL ${b.asset || "-"}`, `free=${b.free ?? "-"} locked=${b.locked ?? "-"} total=${b.total ?? "-"}`]);
+      });
+      (p.positions || []).slice(0, 10).forEach((x) => {
+        items.push([`POS ${x.symbol || "-"}`, `qty=${x.qty ?? "-"} avg=${x.avg_price ?? "-"} mv=${x.market_value ?? "-"} upnl=${x.unrealized_pnl ?? "-"}`]);
+      });
+      itemsEl.innerHTML = items.map(([k, v]) => `
+        <tr><td>${esc(k)}</td><td class="mono">${esc(v)}</td></tr>
+      `).join("") || '<tr><td colspan="2" class="muted">No balances/positions</td></tr>';
+    }
+
     function setSnapshotMsg(msg, bad=false) {
       const el = byId("snapshotMsg");
       if (!el) return;
@@ -4176,8 +4240,11 @@ def ops_console_page():
       wrap.style.display = canUse ? "block" : "none";
       if (canUse) {
         setExecLabMsg("Ready");
+        setAcctStatusMsg("Ready");
       } else {
         setExecLabOut({});
+        byId("acctStatusSummaryBody").innerHTML = '<tr><td colspan="2" class="muted">No data</td></tr>';
+        byId("acctStatusItemsBody").innerHTML = '<tr><td colspan="2" class="muted">No data</td></tr>';
       }
     }
 
@@ -5311,6 +5378,24 @@ def ops_console_page():
         const picked = out.selected ? `${out.selected_symbol} score=${out.selected_score}` : "none";
         setExecLabMsg(`Auto pick ${exchange} completed | decision=${out.decision} | selected=${picked}`);
       } catch (e) {
+        setExecLabMsg(String(e.message || e), true);
+      }
+    });
+    byId("execAccountStatusBtn").addEventListener("click", async () => {
+      try {
+        const exchange = byId("execExchange").value;
+        const path = exchange === "IBKR"
+          ? "/ops/execution/ibkr/account-status"
+          : "/ops/execution/binance/account-status";
+        const out = await api(path, {
+          headers: { Authorization: `Bearer ${state.token}` },
+        });
+        setExecLabOut(out);
+        renderAccountStatus(out);
+        setAcctStatusMsg(`Account status ${exchange} loaded`);
+        setExecLabMsg(`Account status ${exchange} completed`);
+      } catch (e) {
+        setAcctStatusMsg(String(e.message || e), true);
         setExecLabMsg(String(e.message || e), true);
       }
     });
