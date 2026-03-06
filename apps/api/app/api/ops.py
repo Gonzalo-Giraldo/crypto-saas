@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
+import random
+import threading
 import time
 import uuid
 from typing import Optional
@@ -131,6 +133,11 @@ from apps.worker.app.engine.execution_runtime import (
 router = APIRouter(prefix="/ops", tags=["ops"])
 
 
+_binance_ticker_cache_lock = threading.Lock()
+_binance_ticker_cache_rows: list[dict] = []
+_binance_ticker_cache_expiry: float = 0.0
+
+
 def _is_real_user_email(email: str) -> bool:
     e = (email or "").lower()
     if e.startswith("smoke.") or e.startswith("disabled_"):
@@ -212,40 +219,80 @@ def _ibkr_fallback_symbols() -> list[str]:
 
 
 def _fetch_binance_ticker_rows() -> list[dict]:
+    cache_ttl = max(0, int(settings.BINANCE_TICKER_CACHE_SECONDS or 0))
+    now_ts = time.time()
+    if cache_ttl > 0:
+        with _binance_ticker_cache_lock:
+            if _binance_ticker_cache_rows and now_ts < _binance_ticker_cache_expiry:
+                return list(_binance_ticker_cache_rows)
+
+    def _update_cache(rows: list[dict]) -> list[dict]:
+        if cache_ttl <= 0:
+            return rows
+        with _binance_ticker_cache_lock:
+            global _binance_ticker_cache_rows, _binance_ticker_cache_expiry
+            _binance_ticker_cache_rows = list(rows)
+            _binance_ticker_cache_expiry = time.time() + cache_ttl
+        return rows
+
+    max_retries = max(0, int(settings.BINANCE_HTTP_MAX_RETRIES or 0))
+    backoff_base = max(0.05, float(settings.BINANCE_HTTP_RETRY_BACKOFF_SECONDS or 0.6))
+
+    def _should_retry_http_error(exc: Exception) -> bool:
+        if isinstance(exc, urllib_error.HTTPError):
+            code = int(getattr(exc, "code", 0) or 0)
+            return code == 429 or code >= 500
+        return isinstance(exc, urllib_error.URLError)
+
+    def _run_request(req: urllib_request.Request, timeout: int) -> list[dict]:
+        attempts = max_retries + 1
+        for attempt in range(attempts):
+            try:
+                with urllib_request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                    payload = json.loads(resp.read().decode("utf-8"))
+                if isinstance(payload, dict):
+                    rows = payload.get("rows")
+                    if isinstance(rows, list):
+                        return [p for p in rows if isinstance(p, dict)]
+                if isinstance(payload, list):
+                    return [p for p in payload if isinstance(p, dict)]
+                return []
+            except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+                is_last = attempt >= attempts - 1
+                if is_last or not _should_retry_http_error(exc):
+                    break
+                sleep_s = backoff_base * (2 ** attempt) + random.uniform(0.0, 0.25)
+                time.sleep(sleep_s)
+        return []
+
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if gateway_enabled:
-        try:
-            base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
-            url = f"{base}/binance/ticker-24hr"
-            body = json.dumps({"limit": 500}).encode("utf-8")
-            req = urllib_request.Request(
-                url,
-                method="POST",
-                data=body,
-                headers={"Content-Type": "application/json"},
-            )
-            if settings.BINANCE_GATEWAY_TOKEN:
-                req.add_header("X-Internal-Token", settings.BINANCE_GATEWAY_TOKEN)
-            with urllib_request.urlopen(req, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))) as resp:  # noqa: S310
-                payload = json.loads(resp.read().decode("utf-8"))
-            rows = payload.get("rows") if isinstance(payload, dict) else None
-            if isinstance(rows, list):
-                return [p for p in rows if isinstance(p, dict)]
-        except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
-            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                return []
+        base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+        url = f"{base}/binance/ticker-24hr"
+        body = json.dumps({"limit": 500}).encode("utf-8")
+        req = urllib_request.Request(
+            url,
+            method="POST",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        if settings.BINANCE_GATEWAY_TOKEN:
+            req.add_header("X-Internal-Token", settings.BINANCE_GATEWAY_TOKEN)
+        rows = _run_request(req, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)))
+        if rows:
+            return _update_cache(rows)
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            with _binance_ticker_cache_lock:
+                return list(_binance_ticker_cache_rows)
 
     base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
     url = f"{base}/api/v3/ticker/24hr"
-    try:
-        req = urllib_request.Request(url, method="GET")
-        with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return []
-    if not isinstance(payload, list):
-        return []
-    return [p for p in payload if isinstance(p, dict)]
+    req = urllib_request.Request(url, method="GET")
+    rows = _run_request(req, timeout=6)
+    if rows:
+        return _update_cache(rows)
+    with _binance_ticker_cache_lock:
+        return list(_binance_ticker_cache_rows)
 
 
 def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
