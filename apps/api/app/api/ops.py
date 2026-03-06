@@ -5681,6 +5681,7 @@ def ops_console_page():
                 <th><button id="autoPickTimeSortBtn" class="ghost mini">Hora</button></th>
                 <th>Email</th>
                 <th><button id="autoPickSymbolSortBtn" class="ghost mini">Activo</button></th>
+                <th>Direction</th>
                 <th>Compro</th>
                 <th>Motivo</th>
                 <th>Score</th>
@@ -5691,7 +5692,7 @@ def ops_console_page():
               </tr>
             </thead>
             <tbody id="autoPickReportBodyBinance">
-              <tr><td colspan="10" class="muted">No data</td></tr>
+              <tr><td colspan="11" class="muted">No data</td></tr>
             </tbody>
           </table>
           <div style="margin-top:10px"><strong>IBKR</strong></div>
@@ -5701,6 +5702,7 @@ def ops_console_page():
                 <th><button id="autoPickTimeSortBtn2" class="ghost mini">Hora</button></th>
                 <th>Email</th>
                 <th><button id="autoPickSymbolSortBtn2" class="ghost mini">Activo</button></th>
+                <th>Direction</th>
                 <th>Compro</th>
                 <th>Motivo</th>
                 <th>Score</th>
@@ -5711,7 +5713,7 @@ def ops_console_page():
               </tr>
             </thead>
             <tbody id="autoPickReportBodyIbkr">
-              <tr><td colspan="10" class="muted">No data</td></tr>
+              <tr><td colspan="11" class="muted">No data</td></tr>
             </tbody>
           </table>
         </div>
@@ -5968,11 +5970,23 @@ def ops_console_page():
         const c = fmtTrendVal(t1h);
         return `${a} / ${b} / ${c}`;
       };
+      const directionOf = (row) => {
+        const side = String(row.side || "").toUpperCase();
+        if (side === "BUY") return "LONG";
+        if (side === "SELL") return "SHORT";
+        return "-";
+      };
+      const directionBadgeClass = (dir) => {
+        if (dir === "LONG") return "green";
+        if (dir === "SHORT") return "yellow";
+        return "gray";
+      };
       byId(tbodyId).innerHTML = rows.map((r) => `
         <tr>
           <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
           <td>${esc(r.user_email)}</td>
           <td>${esc(r.symbol || "-")}</td>
+          <td><span class="badge ${directionBadgeClass(directionOf(r))}">${esc(directionOf(r))}</span></td>
           <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
           <td>${esc(r.reason || "-")}</td>
           <td>${esc(fmtScoreCell(r.score, r.score_rules, r.score_market))}</td>
@@ -5981,7 +5995,7 @@ def ops_console_page():
           <td>${esc(fmtScoreCell(r.avg_score, r.avg_score_rules, r.avg_score_market))}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>
-      `).join("") || '<tr><td colspan="10" class="muted">Sin eventos en esta ventana</td></tr>';
+      `).join("") || '<tr><td colspan="11" class="muted">Sin eventos en esta ventana</td></tr>';
     }
 
     function renderAutoPickRows() {
@@ -6103,8 +6117,8 @@ def ops_console_page():
       if (canUse) {
         setAutoPickReportMsg("Ready");
       } else {
-        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="10" class="muted">No data</td></tr>';
-        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="10" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="11" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="11" class="muted">No data</td></tr>';
       }
     }
 
