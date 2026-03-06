@@ -1704,7 +1704,12 @@ def _auto_pick_from_scan(
         })
 
     passed_assets = [a for a in assets if bool(a.get("passed"))]
-    score_eligible = [a for a in passed_assets if float(a.get("score") or 0.0) >= min_score_pct]
+    def _score_threshold(asset: dict) -> float:
+        side = str(asset.get("side") or "BUY").upper()
+        if side == "SELL":
+            return max(float(min_score_pct) + 4.0, 85.0)
+        return float(min_score_pct)
+    score_eligible = [a for a in passed_assets if float(a.get("score") or 0.0) >= _score_threshold(a)]
     if not score_eligible:
         top_failed_checks: list[str] = []
         if assets:
@@ -1760,6 +1765,42 @@ def _auto_pick_from_scan(
         selected_score=selected_score,
         min_score_pct=min_score_pct,
     )
+    selected_side = str(selected.get("side") or "BUY").upper()
+    if selected_side == "SELL" and liquidity_state != "green":
+        return _finalize({
+            "exchange": exchange,
+            "dry_run": bool(payload.dry_run),
+            "requested_direction": payload.direction,
+            "selected": False,
+            "selected_symbol": None,
+            "selected_side": None,
+            "selected_qty": None,
+            "selected_score": None,
+            "selected_score_rules": None,
+            "selected_score_market": None,
+            "selected_trend_score": None,
+            "selected_trend_score_1d": None,
+            "selected_trend_score_4h": None,
+            "selected_trend_score_1h": None,
+            "selected_market_regime": None,
+            "selected_liquidity_state": liquidity_state,
+            "selected_size_multiplier": 0.0,
+            "top_candidate_symbol": top_candidate_symbol,
+            "top_candidate_score": (top_candidate or {}).get("score"),
+            "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+            "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "avg_score": avg_score,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
+            "decision": "no_candidate_passed",
+            "top_failed_checks": ["short_requires_green_liquidity"],
+            "execution": None,
+            "scan": scan,
+        }, max_spread=max_spread, max_slippage=max_slippage)
     if liquidity_state == "red":
         return _finalize({
             "exchange": exchange,
@@ -1799,6 +1840,9 @@ def _auto_pick_from_scan(
     selected_qty = float(selected["qty"]) * float(size_multiplier)
     if selected_qty <= 0:
         selected_qty = float(selected["qty"])
+    if selected_side == "SELL":
+        selected_qty = selected_qty * 0.35
+        size_multiplier = float(size_multiplier) * 0.35
     execution = None
     decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
     if not payload.dry_run:
@@ -1894,6 +1938,9 @@ def _build_strategy_checks(
 
     allow_regime = bool(runtime_policy.get(f"allow_{market_regime}", True))
     rr_min = float(runtime_policy.get(f"rr_min_{market_regime}", 1.5))
+    is_short = str(payload.side or "BUY").upper() == "SELL"
+    if is_short:
+        rr_min = max(rr_min, 2.0)
     checks.append(
         {
             "name": "market_regime_allowed",
@@ -1916,6 +1963,31 @@ def _build_strategy_checks(
             "detail": f"rr={payload.rr_estimate} required>={rr_min}",
         }
     )
+    if is_short:
+        t1d = payload.market_trend_score_1d if payload.market_trend_score_1d is not None else payload.market_trend_score
+        t4h = payload.market_trend_score_4h if payload.market_trend_score_4h is not None else payload.market_trend_score
+        t1h = payload.market_trend_score_1h if payload.market_trend_score_1h is not None else payload.market_trend_score
+        checks.append(
+            {
+                "name": "short_mtf_1d_strong_bear",
+                "passed": float(t1d) <= -0.40,
+                "detail": f"value={round(float(t1d),6)} required<=-0.40",
+            }
+        )
+        checks.append(
+            {
+                "name": "short_mtf_4h_strong_bear",
+                "passed": float(t4h) <= -0.35,
+                "detail": f"value={round(float(t4h),6)} required<=-0.35",
+            }
+        )
+        checks.append(
+            {
+                "name": "short_mtf_1h_bear",
+                "passed": float(t1h) <= -0.25,
+                "detail": f"value={round(float(t1h),6)} required<=-0.25",
+            }
+        )
     checks.append(
         {
             "name": "strategy_trend_tf",
