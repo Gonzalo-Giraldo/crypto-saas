@@ -62,6 +62,9 @@ class PretradeCheckRequest(BaseModel):
     funding_rate_bps: float = 0.0
     market_session: str = "AUTO"
     market_trend_score: float = 0.0
+    market_trend_score_1d: Optional[float] = None
+    market_trend_score_4h: Optional[float] = None
+    market_trend_score_1h: Optional[float] = None
     atr_pct: float = 0.0
     momentum_score: float = 0.0
 
@@ -162,6 +165,10 @@ class PretradeAutoPickOut(BaseModel):
     selected_score: Optional[float] = None
     selected_score_rules: Optional[float] = None
     selected_score_market: Optional[float] = None
+    selected_trend_score: Optional[float] = None
+    selected_trend_score_1d: Optional[float] = None
+    selected_trend_score_4h: Optional[float] = None
+    selected_trend_score_1h: Optional[float] = None
     selected_market_regime: Optional[str] = None
     selected_liquidity_state: Optional[str] = None
     selected_size_multiplier: Optional[float] = None
