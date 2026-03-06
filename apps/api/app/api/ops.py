@@ -2487,12 +2487,16 @@ def auto_pick_report(
     hours: int = 2,
     limit: int = 500,
     interval_minutes: int = 5,
+    direction: str = "ALL",
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
     hours = max(1, min(hours, 48))
     limit = max(1, min(limit, 2000))
     interval_minutes = max(1, min(interval_minutes, 60))
+    direction_norm = (direction or "ALL").upper().strip()
+    if direction_norm not in {"ALL", "LONG", "SHORT", "BOTH"}:
+        direction_norm = "ALL"
     now = datetime.now(timezone.utc)
     from_dt = now - timedelta(hours=hours)
     tenant_ids = select(User.id).where(User.tenant_id == _tenant_id(current_user))
@@ -2523,6 +2527,9 @@ def auto_pick_report(
             details = json.loads(r.details) if r.details else {}
         except Exception:
             details = {}
+        row_direction = str(details.get("requested_direction") or "LONG").upper().strip()
+        if direction_norm != "ALL" and row_direction != direction_norm:
+            continue
         created_at = r.created_at
         if created_at and created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
@@ -5604,6 +5611,11 @@ def ops_console_page():
               dry_run
             </label>
             <input id="execAutoTopN" type="number" min="1" max="100" value="10" style="max-width:90px" />
+            <select id="execAutoDirection" style="max-width:120px">
+              <option value="LONG" selected>LONG</option>
+              <option value="SHORT">SHORT</option>
+              <option value="BOTH">BOTH</option>
+            </select>
           </div>
           <div class="muted" style="margin-top:8px">Auto-pick analiza automaticamente el universo permitido por broker cada 5 minutos.</div>
           <div id="execLabMsg" class="muted" style="margin-top:6px">No data</div>
@@ -5652,6 +5664,12 @@ def ops_console_page():
           </div>
           <div class="row" style="margin-top:8px">
             <input id="autoPickHours" type="number" min="1" max="48" value="2" style="max-width:90px" />
+            <select id="autoPickDirection" style="max-width:130px">
+              <option value="ALL" selected>ALL</option>
+              <option value="LONG">LONG</option>
+              <option value="SHORT">SHORT</option>
+              <option value="BOTH">BOTH</option>
+            </select>
             <button id="autoPickLoadBtn" class="ghost mini">Cargar ahora</button>
           </div>
           <div id="autoPickReportMsg" class="muted" style="margin-top:6px">No report loaded</div>
@@ -5939,10 +5957,15 @@ def ops_console_page():
         const m = marketScore == null ? "-" : String(marketScore);
         return `${finalScore} (R ${r} | M ${m})`;
       };
+      const fmtTrendVal = (v) => {
+        if (v == null || Number.isNaN(Number(v))) return "-";
+        const n = Number(v);
+        return n.toFixed(3).replace(/\.?0+$/, "");
+      };
       const fmtTrendMtfCell = (t1d, t4h, t1h) => {
-        const a = t1d == null ? "-" : String(t1d);
-        const b = t4h == null ? "-" : String(t4h);
-        const c = t1h == null ? "-" : String(t1h);
+        const a = fmtTrendVal(t1d);
+        const b = fmtTrendVal(t4h);
+        const c = fmtTrendVal(t1h);
         return `${a} / ${b} / ${c}`;
       };
       byId(tbodyId).innerHTML = rows.map((r) => `
@@ -5953,7 +5976,7 @@ def ops_console_page():
           <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
           <td>${esc(r.reason || "-")}</td>
           <td>${esc(fmtScoreCell(r.score, r.score_rules, r.score_market))}</td>
-          <td>${esc(String(r.top_candidate_trend_score ?? r.trend_score ?? "-"))}</td>
+          <td>${esc(fmtTrendVal(r.top_candidate_trend_score ?? r.trend_score))}</td>
           <td>${esc(fmtTrendMtfCell(r.top_candidate_trend_score_1d, r.top_candidate_trend_score_4h, r.top_candidate_trend_score_1h))}</td>
           <td>${esc(fmtScoreCell(r.avg_score, r.avg_score_rules, r.avg_score_market))}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
@@ -6088,85 +6111,21 @@ def ops_console_page():
     async function loadAutoPickReport() {
       if (!state.token) throw new Error("Token required");
       const hours = Math.max(1, Math.min(48, parseInt(byId("autoPickHours").value || "2", 10)));
-      const out = await api(`/ops/admin/auto-pick/report?hours=${hours}&limit=500&interval_minutes=5`, {
+      const direction = String(byId("autoPickDirection").value || "ALL").toUpperCase();
+      const out = await api(`/ops/admin/auto-pick/report?hours=${hours}&limit=500&interval_minutes=5&direction=${encodeURIComponent(direction)}`, {
         headers: { Authorization: `Bearer ${state.token}` },
       });
       state.autoPickReportData = out;
       const apiRows = Array.isArray(out.rows) ? out.rows : [];
-      const intervalMinutes = Math.max(1, Number(out.interval_minutes || 5));
-      const intervalMs = intervalMinutes * 60 * 1000;
-      const periods = Math.max(1, Math.floor((hours * 60) / intervalMinutes));
-      const nowMs = Date.now();
-      const lastBucket = Math.floor(nowMs / intervalMs) * intervalMs;
-      const firstBucket = lastBucket - ((periods - 1) * intervalMs);
-
-      function pickBucketRow(exchange, from, to) {
-        const rows = apiRows.filter((r) => {
-          const ex = String(r.exchange || "").toUpperCase();
-          const ts = new Date(r.timestamp || 0).getTime();
-          return ex === exchange && ts >= from && ts < to;
-        });
-        if (!rows.length) {
-          return {
-            timestamp: new Date(from).toISOString(),
-            user_email: "-",
-            exchange,
-            symbol: "-",
-            bought: false,
-            reason: "no_compra: tick_no_ejecutado_en_ventana",
-            score: null,
-            score_rules: null,
-            score_market: null,
-            top_candidate_trend_score: null,
-            top_candidate_trend_score_1d: null,
-            top_candidate_trend_score_4h: null,
-            top_candidate_trend_score_1h: null,
-            avg_score: null,
-            avg_score_rules: null,
-            avg_score_market: null,
-            scanned_assets: 0,
-          };
-        }
-        rows.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-        const best = rows[0];
-        return {
-          timestamp: best.timestamp || new Date(from).toISOString(),
-          user_email: best.user_email || "-",
-          exchange,
-          symbol: best.symbol || "-",
-          bought: !!best.bought,
-          reason: best.reason || "-",
-          score: best.score,
-          score_rules: best.score_rules,
-          score_market: best.score_market,
-          trend_score: best.trend_score,
-          trend_score_1d: best.trend_score_1d,
-          trend_score_4h: best.trend_score_4h,
-          trend_score_1h: best.trend_score_1h,
-          top_candidate_trend_score: best.top_candidate_trend_score,
-          top_candidate_trend_score_1d: best.top_candidate_trend_score_1d,
-          top_candidate_trend_score_4h: best.top_candidate_trend_score_4h,
-          top_candidate_trend_score_1h: best.top_candidate_trend_score_1h,
-          avg_score: best.avg_score,
-          avg_score_rules: best.avg_score_rules,
-          avg_score_market: best.avg_score_market,
-          scanned_assets: Number(best.scanned_assets || 0),
-        };
-      }
-
-      const rows = [];
-      for (let i = 0; i < periods; i += 1) {
-        const from = firstBucket + (i * intervalMs);
-        const to = from + intervalMs;
-        rows.push(pickBucketRow("BINANCE", from, to));
-        rows.push(pickBucketRow("IBKR", from, to));
-      }
-      state.autoPickViewRows = rows;
+      state.autoPickViewRows = apiRows.map((r) => ({
+        ...r,
+        scanned_assets: Number(r.scanned_assets || 0),
+      }));
       renderAutoPickRows();
       const total = state.autoPickViewRows.length;
       const b = state.autoPickViewRows.filter((r) => String(r.exchange).toUpperCase() === "BINANCE").length;
       const i = state.autoPickViewRows.filter((r) => String(r.exchange).toUpperCase() === "IBKR").length;
-      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | filas esperadas por broker=${periods} | total=${total} | BINANCE=${b} | IBKR=${i}`);
+      setAutoPickReportMsg(`Actualizado: ${fmtBogotaDateTime(out.generated_at)} | ventana=${out.hours}h | direction=${direction} | total=${total} | BINANCE=${b} | IBKR=${i}`);
     }
 
     function authHeaders(token, isForm=false) {
@@ -7265,17 +7224,18 @@ def ops_console_page():
         const exchange = byId("execExchange").value;
         const topN = Number(byId("execAutoTopN").value || "10");
         const dryRun = !!byId("execAutoDryRun").checked;
+        const direction = String(byId("execAutoDirection").value || "LONG").toUpperCase();
         const path = exchange === "IBKR"
           ? "/ops/execution/pretrade/ibkr/auto-pick"
           : "/ops/execution/pretrade/binance/auto-pick";
         const out = await api(path, {
           method: "POST",
           headers: { Authorization: `Bearer ${state.token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ top_n: topN, dry_run: dryRun }),
+          body: JSON.stringify({ top_n: topN, dry_run: dryRun, direction }),
         });
         setExecLabOut(out);
         const picked = out.selected ? `${out.selected_symbol} score=${out.selected_score}` : "none";
-        setExecLabMsg(`Auto pick ${exchange} completed | decision=${out.decision} | selected=${picked}`);
+        setExecLabMsg(`Auto pick ${exchange} ${direction} completed | decision=${out.decision} | selected=${picked}`);
       } catch (e) {
         setExecLabMsg(String(e.message || e), true);
       }
