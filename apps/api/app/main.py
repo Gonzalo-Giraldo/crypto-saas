@@ -18,6 +18,9 @@ import apps.api.app.models.risk_profile_config
 import apps.api.app.models.user_risk_settings
 import apps.api.app.models.strategy_runtime_policy
 import apps.api.app.models.market_trend_snapshot
+import apps.api.app.models.learning_decision
+import apps.api.app.models.learning_outcome
+import apps.api.app.models.learning_rollup_hourly
 
 from fastapi import FastAPI
 import threading
@@ -27,6 +30,7 @@ from apps.api.app.api.ops import (
     router as ops_router,
     run_auto_pick_tick_for_tenant,
     run_market_monitor_tick_for_tenant,
+    run_learning_pipeline_tick,
 )
 from apps.api.app.api.users import router as users_router
 
@@ -106,6 +110,10 @@ def _auto_pick_tick_once() -> None:
             top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
             real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
             include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
+        )
+        run_learning_pipeline_tick(
+            db=db,
+            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
         print(
             "[auto-pick-scheduler] tick ok",

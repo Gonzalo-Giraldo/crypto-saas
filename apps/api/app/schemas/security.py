@@ -320,3 +320,92 @@ class MarketTrendMonitorOut(BaseModel):
     exchange: str
     total_rows: int
     rows: list[MarketTrendSnapshotOut]
+
+
+class LearningLabelRunOut(BaseModel):
+    dry_run: bool
+    horizon_minutes: int
+    scanned: int
+    labeled: int
+    expired: int
+    no_price: int
+
+
+class LearningRetentionRunOut(BaseModel):
+    dry_run: bool
+    raw_ttl_days: int
+    rollup_ttl_days: int
+    deleted_snapshots: int
+    deleted_outcomes: int
+    deleted_rollups: int
+
+
+class LearningDatasetRowOut(BaseModel):
+    decision_id: str
+    timestamp: str
+    due_at: Optional[str] = None
+    tenant_id: str
+    user_id: str
+    exchange: str
+    symbol: Optional[str] = None
+    decision: str
+    selected: bool
+    dry_run: bool
+    selected_score: Optional[float] = None
+    selected_score_rules: Optional[float] = None
+    selected_score_market: Optional[float] = None
+    selected_liquidity_state: Optional[str] = None
+    rr_estimate: Optional[float] = None
+    trend_score: Optional[float] = None
+    momentum_score: Optional[float] = None
+    atr_pct: Optional[float] = None
+    volume_24h_usdt: Optional[float] = None
+    horizon_minutes: int
+    outcome_status: Optional[str] = None
+    return_pct: Optional[float] = None
+    pnl_quote: Optional[float] = None
+    hit: Optional[bool] = None
+
+
+class LearningDatasetOut(BaseModel):
+    generated_at: str
+    hours: int
+    window_from: str
+    window_to: str
+    rows: list[LearningDatasetRowOut]
+
+
+class LearningRollupRowOut(BaseModel):
+    bucket_hour: str
+    exchange: str
+    symbol: Optional[str] = None
+    horizon_minutes: int
+    samples: int
+    hit_rate_pct: float
+    avg_return_pct: float
+    p50_return_pct: float
+    p90_return_pct: float
+    avg_score: Optional[float] = None
+    avg_score_rules: Optional[float] = None
+    avg_score_market: Optional[float] = None
+    green_count: int
+    gray_count: int
+    red_count: int
+
+
+class LearningRollupOut(BaseModel):
+    generated_at: str
+    hours: int
+    window_from: str
+    window_to: str
+    rows: list[LearningRollupRowOut]
+
+
+class LearningStatusOut(BaseModel):
+    generated_at: str
+    pending: int
+    labeled: int
+    expired: int
+    no_price: int
+    snapshots_total: int
+    outcomes_total: int

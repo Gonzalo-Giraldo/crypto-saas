@@ -3,12 +3,13 @@ import hashlib
 import hmac
 import json
 import time
+import uuid
 from typing import Optional
 from urllib import error as urllib_error, parse as urllib_parse, request as urllib_request
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.deps import get_current_user, require_any_role, require_role
@@ -19,6 +20,9 @@ from apps.api.app.models.exchange_secret import ExchangeSecret
 from apps.api.app.models.idempotency_key import IdempotencyKey
 from apps.api.app.models.position import Position
 from apps.api.app.models.market_trend_snapshot import MarketTrendSnapshot
+from apps.api.app.models.learning_decision import LearningDecisionSnapshot
+from apps.api.app.models.learning_outcome import LearningDecisionOutcome
+from apps.api.app.models.learning_rollup_hourly import LearningRollupHourly
 from apps.api.app.models.signal import Signal
 from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.models.user_2fa import UserTwoFactor
@@ -75,6 +79,13 @@ from apps.api.app.schemas.security import (
     AutoPickLiquidityReportOut,
     MarketTrendSnapshotOut,
     MarketTrendMonitorOut,
+    LearningDatasetOut,
+    LearningDatasetRowOut,
+    LearningLabelRunOut,
+    LearningRetentionRunOut,
+    LearningRollupOut,
+    LearningRollupRowOut,
+    LearningStatusOut,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -1063,6 +1074,143 @@ def _classify_liquidity_state(
     return "red", 0.0
 
 
+def _partition_ym(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m")
+
+
+def _bucket_1h(dt: datetime) -> datetime:
+    d = dt.astimezone(timezone.utc)
+    return d.replace(minute=0, second=0, microsecond=0)
+
+
+def _to_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    d = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return d.astimezone(timezone.utc).isoformat()
+
+
+def _safe_json(value) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=True)
+    except Exception:
+        return "[]"
+
+
+def _fetch_binance_price_map(symbols: list[str]) -> dict[str, float]:
+    wanted = {str(s or "").upper().strip() for s in symbols if str(s or "").strip()}
+    if not wanted:
+        return {}
+    out: dict[str, float] = {}
+    for item in _fetch_binance_ticker_rows():
+        symbol = str(item.get("symbol") or "").upper().strip()
+        if symbol not in wanted:
+            continue
+        try:
+            px = float(item.get("lastPrice") or 0.0)
+        except (TypeError, ValueError):
+            px = 0.0
+        if px > 0:
+            out[symbol] = px
+    return out
+
+
+def _record_learning_decision_snapshot(
+    *,
+    db: Session,
+    current_user: User,
+    exchange: str,
+    payload: PretradeAutoPickRequest,
+    out: dict,
+    selected_candidate: Optional[PretradeCheckRequest],
+    min_score_pct: float,
+    score_weight_rules: float,
+    score_weight_market: float,
+    max_spread: Optional[float],
+    max_slippage: Optional[float],
+) -> None:
+    if not settings.LEARNING_PIPELINE_ENABLED:
+        return
+    now = datetime.now(timezone.utc)
+    horizon = max(5, int(settings.LEARNING_LABEL_HORIZON_MINUTES))
+    decision_id = str(uuid.uuid4())
+    symbol = out.get("selected_symbol")
+    entry_price = None
+    entry_price_source = None
+    if symbol and str(exchange).upper() == "BINANCE":
+        price_map = _fetch_binance_price_map([str(symbol)])
+        entry_price = price_map.get(str(symbol).upper())
+        if entry_price:
+            entry_price_source = "binance_ticker_24h"
+
+    snap = LearningDecisionSnapshot(
+        decision_id=decision_id,
+        tenant_id=_tenant_id(current_user),
+        user_id=current_user.id,
+        user_email=current_user.email,
+        exchange=str(exchange).upper(),
+        partition_ym=_partition_ym(now),
+        decision_ts=now,
+        target_horizon_minutes=horizon,
+        dry_run=bool(payload.dry_run),
+        selected=bool(out.get("selected", False)),
+        decision=str(out.get("decision") or "unknown"),
+        selected_symbol=symbol,
+        selected_side=out.get("selected_side"),
+        selected_qty=out.get("selected_qty"),
+        selected_score=out.get("selected_score"),
+        selected_score_rules=out.get("selected_score_rules"),
+        selected_score_market=out.get("selected_score_market"),
+        selected_market_regime=out.get("selected_market_regime"),
+        selected_liquidity_state=out.get("selected_liquidity_state"),
+        selected_size_multiplier=out.get("selected_size_multiplier"),
+        top_candidate_symbol=out.get("top_candidate_symbol"),
+        top_candidate_score=out.get("top_candidate_score"),
+        top_candidate_score_rules=out.get("top_candidate_score_rules"),
+        top_candidate_score_market=out.get("top_candidate_score_market"),
+        avg_score=out.get("avg_score"),
+        avg_score_rules=out.get("avg_score_rules"),
+        avg_score_market=out.get("avg_score_market"),
+        scanned_assets=int((out.get("scan") or {}).get("scanned_assets") or 0),
+        min_score_pct=float(min_score_pct),
+        score_weight_rules=float(score_weight_rules),
+        score_weight_market=float(score_weight_market),
+        spread_bps=float(selected_candidate.spread_bps) if selected_candidate else None,
+        slippage_bps=float(selected_candidate.slippage_bps) if selected_candidate else None,
+        max_spread_bps=float(max_spread) if max_spread is not None else None,
+        max_slippage_bps=float(max_slippage) if max_slippage is not None else None,
+        rr_estimate=float(selected_candidate.rr_estimate) if selected_candidate else None,
+        trend_score=float(selected_candidate.market_trend_score) if selected_candidate else None,
+        momentum_score=float(selected_candidate.momentum_score) if selected_candidate else None,
+        atr_pct=float(selected_candidate.atr_pct) if selected_candidate else None,
+        volume_24h_usdt=float(selected_candidate.volume_24h_usdt) if selected_candidate else None,
+        entry_price=entry_price,
+        entry_price_source=entry_price_source,
+        top_failed_checks_json=_safe_json(out.get("top_failed_checks") or []),
+        checks_json=_safe_json((out.get("scan") or {}).get("assets") or []),
+    )
+    db.add(snap)
+    db.flush()
+
+    due_at = now + timedelta(minutes=horizon)
+    outcome = LearningDecisionOutcome(
+        decision_id=decision_id,
+        tenant_id=_tenant_id(current_user),
+        user_id=current_user.id,
+        exchange=str(exchange).upper(),
+        symbol=symbol,
+        partition_ym=_partition_ym(now),
+        decision_ts=now,
+        due_at=due_at,
+        horizon_minutes=horizon,
+        outcome_status="pending",
+        entry_price=entry_price,
+        price_source=entry_price_source,
+        label_rule="ret_pct_gt_0",
+    )
+    db.add(outcome)
+
+
 def _scan_pretrade_candidates(
     db: Session,
     current_user: User,
@@ -1205,8 +1353,34 @@ def _auto_pick_from_scan(
         avg_score_rules = round(sum(float(a.get("score_rules") or 0.0) for a in assets) / len(assets), 2)
         avg_score_market = round(sum(float(a.get("score_market") or 0.0) for a in assets) / len(assets), 2)
 
+    def _finalize(response: dict, *, max_spread: Optional[float] = None, max_slippage: Optional[float] = None) -> dict:
+        try:
+            selected_symbol = response.get("selected_symbol")
+            selected_candidate = (
+                candidate_by_symbol.get(str(selected_symbol).upper())
+                if selected_symbol
+                else None
+            )
+            _record_learning_decision_snapshot(
+                db=db,
+                current_user=current_user,
+                exchange=exchange,
+                payload=payload,
+                out=response,
+                selected_candidate=selected_candidate,
+                min_score_pct=min_score_pct,
+                score_weight_rules=score_weight_rules,
+                score_weight_market=score_weight_market,
+                max_spread=max_spread,
+                max_slippage=max_slippage,
+            )
+        except Exception:
+            # Learning must never block trading decisions.
+            pass
+        return response
+
     if not universe:
-        return {
+        return _finalize({
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
             "selected": False,
@@ -1228,7 +1402,7 @@ def _auto_pick_from_scan(
             "top_failed_checks": ["allowlist_empty"],
             "execution": None,
             "scan": scan,
-        }
+        })
 
     passed_assets = [a for a in assets if bool(a.get("passed"))]
     score_eligible = [a for a in passed_assets if float(a.get("score") or 0.0) >= min_score_pct]
@@ -1238,7 +1412,7 @@ def _auto_pick_from_scan(
             top_failed_checks = list(assets[0].get("failed_checks") or [])
         if passed_assets and "score_below_min_threshold" not in top_failed_checks:
             top_failed_checks = ["score_below_min_threshold", *top_failed_checks]
-        return {
+        return _finalize({
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
             "selected": False,
@@ -1260,7 +1434,7 @@ def _auto_pick_from_scan(
             "top_failed_checks": top_failed_checks,
             "execution": None,
             "scan": scan,
-        }
+        })
 
     selected = score_eligible[0]
     regime = str(selected.get("market_regime") or "range")
@@ -1279,7 +1453,7 @@ def _auto_pick_from_scan(
         min_score_pct=min_score_pct,
     )
     if liquidity_state == "red":
-        return {
+        return _finalize({
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
             "selected": False,
@@ -1303,7 +1477,7 @@ def _auto_pick_from_scan(
             "top_failed_checks": ["effective_liquidity_failed"],
             "execution": None,
             "scan": scan,
-        }
+        }, max_spread=max_spread, max_slippage=max_slippage)
 
     selected_qty = float(selected["qty"]) * float(size_multiplier)
     if selected_qty <= 0:
@@ -1331,7 +1505,7 @@ def _auto_pick_from_scan(
             decision = "insufficient_resources_or_execution_error"
             execution = {"error": str(exc.detail)}
 
-    return {
+    return _finalize({
         "exchange": exchange,
         "dry_run": bool(payload.dry_run),
         "selected": True,
@@ -1355,7 +1529,7 @@ def _auto_pick_from_scan(
         "top_failed_checks": [],
         "execution": execution,
         "scan": scan,
-    }
+    }, max_spread=max_spread, max_slippage=max_slippage)
 
 
 def _build_strategy_checks(
@@ -2780,6 +2954,527 @@ def run_auto_pick_tick_for_tenant(
         "executed_count": len(executed),
         "results": executed,
     }
+
+
+def _label_learning_outcomes(
+    *,
+    db: Session,
+    tenant_id: str,
+    horizon_minutes: Optional[int] = None,
+    limit: int = 500,
+    dry_run: bool = True,
+) -> dict:
+    now = datetime.now(timezone.utc)
+    grace_minutes = max(0, int(settings.LEARNING_LABEL_GRACE_MINUTES))
+    q = (
+        select(LearningDecisionOutcome)
+        .where(
+            LearningDecisionOutcome.tenant_id == tenant_id,
+            LearningDecisionOutcome.outcome_status.in_(["pending", "no_price"]),
+            LearningDecisionOutcome.due_at <= now,
+        )
+        .order_by(LearningDecisionOutcome.due_at.asc())
+        .limit(max(1, min(int(limit), 5000)))
+    )
+    if horizon_minutes is not None:
+        q = q.where(LearningDecisionOutcome.horizon_minutes == int(horizon_minutes))
+
+    rows = db.execute(q).scalars().all()
+    scanned = len(rows)
+    labeled = 0
+    expired = 0
+    no_price = 0
+    if not rows:
+        return {
+            "dry_run": bool(dry_run),
+            "horizon_minutes": int(horizon_minutes or settings.LEARNING_LABEL_HORIZON_MINUTES),
+            "scanned": 0,
+            "labeled": 0,
+            "expired": 0,
+            "no_price": 0,
+        }
+
+    symbols = [str(r.symbol or "") for r in rows if (r.exchange or "").upper() == "BINANCE" and r.symbol]
+    binance_prices = _fetch_binance_price_map(symbols)
+    decision_ids = [r.decision_id for r in rows]
+    snap_rows = db.execute(
+        select(LearningDecisionSnapshot).where(LearningDecisionSnapshot.decision_id.in_(decision_ids))
+    ).scalars().all()
+    snap_by_decision = {s.decision_id: s for s in snap_rows}
+
+    for row in rows:
+        snap = snap_by_decision.get(row.decision_id)
+        side = str((snap.selected_side if snap else "") or "BUY").upper()
+        sign = -1.0 if side == "SELL" else 1.0
+        qty = float((snap.selected_qty if snap else 0.0) or 0.0)
+        entry = float((row.entry_price or (snap.entry_price if snap else 0.0)) or 0.0)
+        symbol = str((row.symbol or (snap.selected_symbol if snap else "")) or "").upper()
+        exchange = str(row.exchange or "").upper()
+
+        exit_price = None
+        price_source = None
+        if exchange == "BINANCE" and symbol:
+            px = binance_prices.get(symbol)
+            if px and px > 0:
+                exit_price = float(px)
+                price_source = "binance_ticker_24h"
+
+        if not exit_price or not entry or entry <= 0:
+            can_expire = now >= (row.due_at + timedelta(minutes=grace_minutes))
+            if can_expire:
+                expired += 1
+                if not dry_run:
+                    row.outcome_status = "expired"
+                    row.labeled_at = now
+                    row.meta_json = _safe_json({"reason": "missing_price_or_entry"})
+            else:
+                no_price += 1
+                if not dry_run:
+                    row.outcome_status = "no_price"
+            continue
+
+        ret_pct = ((exit_price - entry) / entry) * 100.0 * sign
+        pnl_quote = qty * (exit_price - entry) * sign
+        hit = bool(ret_pct > 0.0)
+        labeled += 1
+        if not dry_run:
+            row.outcome_status = "labeled"
+            row.labeled_at = now
+            row.exit_price = round(exit_price, 10)
+            row.price_source = price_source
+            row.return_pct = round(ret_pct, 6)
+            row.pnl_quote = round(pnl_quote, 10)
+            row.hit = hit
+            row.max_drawdown_pct = None
+            row.max_runup_pct = None
+            row.meta_json = _safe_json({"labeled_from": "ticker_24h"})
+
+    if not dry_run:
+        db.flush()
+    return {
+        "dry_run": bool(dry_run),
+        "horizon_minutes": int(horizon_minutes or settings.LEARNING_LABEL_HORIZON_MINUTES),
+        "scanned": scanned,
+        "labeled": labeled,
+        "expired": expired,
+        "no_price": no_price,
+    }
+
+
+def _run_learning_retention(
+    *,
+    db: Session,
+    dry_run: bool = True,
+    raw_ttl_days: Optional[int] = None,
+    rollup_ttl_days: Optional[int] = None,
+) -> dict:
+    raw_days = max(7, int(raw_ttl_days or settings.LEARNING_RAW_TTL_DAYS))
+    rollup_days = max(30, int(rollup_ttl_days or settings.LEARNING_ROLLUP_TTL_DAYS))
+    now = datetime.now(timezone.utc)
+    raw_cutoff = now - timedelta(days=raw_days)
+    rollup_cutoff = now - timedelta(days=rollup_days)
+
+    delete_snap_q = delete(LearningDecisionSnapshot).where(LearningDecisionSnapshot.decision_ts < raw_cutoff)
+    delete_outcome_q = delete(LearningDecisionOutcome).where(LearningDecisionOutcome.decision_ts < raw_cutoff)
+    delete_rollup_q = delete(LearningRollupHourly).where(LearningRollupHourly.bucket_hour < rollup_cutoff)
+
+    if dry_run:
+        snap_count = db.execute(
+            select(func.count()).select_from(LearningDecisionSnapshot).where(LearningDecisionSnapshot.decision_ts < raw_cutoff)
+        ).scalar_one()
+        out_count = db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(LearningDecisionOutcome.decision_ts < raw_cutoff)
+        ).scalar_one()
+        roll_count = db.execute(
+            select(func.count()).select_from(LearningRollupHourly).where(LearningRollupHourly.bucket_hour < rollup_cutoff)
+        ).scalar_one()
+    else:
+        snap_count = db.execute(delete_snap_q).rowcount or 0
+        out_count = db.execute(delete_outcome_q).rowcount or 0
+        roll_count = db.execute(delete_rollup_q).rowcount or 0
+        db.flush()
+
+    return {
+        "dry_run": bool(dry_run),
+        "raw_ttl_days": raw_days,
+        "rollup_ttl_days": rollup_days,
+        "deleted_snapshots": int(snap_count),
+        "deleted_outcomes": int(out_count),
+        "deleted_rollups": int(roll_count),
+    }
+
+
+def _percentile(values: list[float], p: float) -> float:
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return float(values[0])
+    vals = sorted(float(v) for v in values)
+    pos = (len(vals) - 1) * p
+    lo = int(pos)
+    hi = min(lo + 1, len(vals) - 1)
+    if lo == hi:
+        return float(vals[lo])
+    frac = pos - lo
+    return float(vals[lo] + (vals[hi] - vals[lo]) * frac)
+
+
+def _refresh_learning_rollup_hourly(
+    *,
+    db: Session,
+    tenant_id: str,
+    hours: int = 48,
+    dry_run: bool = False,
+) -> dict:
+    window_hours = max(1, min(int(hours), 24 * 30))
+    now = datetime.now(timezone.utc)
+    from_dt = now - timedelta(hours=window_hours)
+    rows = db.execute(
+        select(LearningDecisionOutcome, LearningDecisionSnapshot)
+        .join(
+            LearningDecisionSnapshot,
+            LearningDecisionSnapshot.decision_id == LearningDecisionOutcome.decision_id,
+        )
+        .where(
+            LearningDecisionOutcome.tenant_id == tenant_id,
+            LearningDecisionOutcome.outcome_status == "labeled",
+            LearningDecisionOutcome.labeled_at >= from_dt,
+        )
+    ).all()
+
+    grouped: dict[tuple, list[tuple[LearningDecisionOutcome, LearningDecisionSnapshot]]] = {}
+    for outcome, snap in rows:
+        key = (
+            _bucket_1h(outcome.labeled_at or outcome.decision_ts),
+            str(outcome.exchange or "UNKNOWN"),
+            str(outcome.symbol or snap.selected_symbol or ""),
+            int(outcome.horizon_minutes or 60),
+        )
+        grouped.setdefault(key, []).append((outcome, snap))
+
+    upserted = 0
+    if not dry_run:
+        db.execute(
+            delete(LearningRollupHourly).where(
+                LearningRollupHourly.tenant_id == tenant_id,
+                LearningRollupHourly.bucket_hour >= from_dt,
+            )
+        )
+    for key, items in grouped.items():
+        bucket_hour, exchange, symbol, horizon = key
+        returns = [float(o.return_pct or 0.0) for o, _ in items]
+        scores = [float(s.selected_score or 0.0) for _, s in items if s.selected_score is not None]
+        scores_rules = [float(s.selected_score_rules or 0.0) for _, s in items if s.selected_score_rules is not None]
+        scores_market = [float(s.selected_score_market or 0.0) for _, s in items if s.selected_score_market is not None]
+        green = sum(1 for _, s in items if str(s.selected_liquidity_state or "").lower() == "green")
+        gray = sum(1 for _, s in items if str(s.selected_liquidity_state or "").lower() == "gray")
+        red = sum(1 for _, s in items if str(s.selected_liquidity_state or "").lower() == "red")
+        samples = len(items)
+        hit_rate = (sum(1 for o, _ in items if bool(o.hit)) / samples) * 100.0 if samples else 0.0
+
+        if not dry_run:
+            db.add(
+                LearningRollupHourly(
+                    tenant_id=tenant_id,
+                    partition_ym=_partition_ym(bucket_hour),
+                    bucket_hour=bucket_hour,
+                    exchange=exchange,
+                    symbol=symbol or None,
+                    horizon_minutes=horizon,
+                    samples=samples,
+                    hit_rate_pct=round(hit_rate, 4),
+                    avg_return_pct=round(sum(returns) / samples if samples else 0.0, 6),
+                    p50_return_pct=round(_percentile(returns, 0.50), 6),
+                    p90_return_pct=round(_percentile(returns, 0.90), 6),
+                    avg_score=round(sum(scores) / len(scores), 4) if scores else None,
+                    avg_score_rules=round(sum(scores_rules) / len(scores_rules), 4) if scores_rules else None,
+                    avg_score_market=round(sum(scores_market) / len(scores_market), 4) if scores_market else None,
+                    green_count=green,
+                    gray_count=gray,
+                    red_count=red,
+                )
+            )
+        upserted += 1
+
+    if not dry_run:
+        db.flush()
+    return {"hours": window_hours, "groups": len(grouped), "upserted": upserted, "dry_run": bool(dry_run)}
+
+
+def run_learning_pipeline_tick(db: Session, tenant_id: str) -> None:
+    if not settings.LEARNING_PIPELINE_ENABLED:
+        return
+    now = datetime.now(timezone.utc)
+    try:
+        label_interval = max(1, int(settings.LEARNING_LABEL_INTERVAL_MINUTES))
+        if now.minute % label_interval == 0:
+            _label_learning_outcomes(
+                db=db,
+                tenant_id=tenant_id,
+                horizon_minutes=int(settings.LEARNING_LABEL_HORIZON_MINUTES),
+                limit=500,
+                dry_run=False,
+            )
+
+        rollup_interval = max(1, int(settings.LEARNING_ROLLUP_INTERVAL_MINUTES))
+        if now.minute % rollup_interval == 0:
+            _refresh_learning_rollup_hourly(
+                db=db,
+                tenant_id=tenant_id,
+                hours=48,
+                dry_run=False,
+            )
+
+        if settings.LEARNING_RETENTION_ENABLED:
+            retention_interval = max(5, int(settings.LEARNING_RETENTION_INTERVAL_MINUTES))
+            if now.minute % retention_interval == 0:
+                _run_learning_retention(db=db, dry_run=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+@router.post("/admin/learning/label", response_model=LearningLabelRunOut)
+def admin_learning_label(
+    dry_run: bool = True,
+    horizon_minutes: Optional[int] = None,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    out = _label_learning_outcomes(
+        db=db,
+        tenant_id=_tenant_id(current_user),
+        horizon_minutes=horizon_minutes,
+        limit=limit,
+        dry_run=dry_run,
+    )
+    if not dry_run:
+        db.commit()
+    return out
+
+
+@router.post("/admin/learning/retention/run", response_model=LearningRetentionRunOut)
+def admin_learning_retention(
+    dry_run: bool = True,
+    raw_ttl_days: Optional[int] = None,
+    rollup_ttl_days: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    _ = current_user
+    out = _run_learning_retention(
+        db=db,
+        dry_run=dry_run,
+        raw_ttl_days=raw_ttl_days,
+        rollup_ttl_days=rollup_ttl_days,
+    )
+    if not dry_run:
+        db.commit()
+    return out
+
+
+@router.post("/admin/learning/rollup/refresh")
+def admin_learning_rollup_refresh(
+    hours: int = 48,
+    dry_run: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    out = _refresh_learning_rollup_hourly(
+        db=db,
+        tenant_id=_tenant_id(current_user),
+        hours=hours,
+        dry_run=dry_run,
+    )
+    if not dry_run:
+        db.commit()
+    return out
+
+
+@router.get("/admin/learning/status", response_model=LearningStatusOut)
+def admin_learning_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    tenant = _tenant_id(current_user)
+    now = datetime.now(timezone.utc)
+    pending = db.execute(
+        select(func.count()).select_from(LearningDecisionOutcome).where(
+            LearningDecisionOutcome.tenant_id == tenant,
+            LearningDecisionOutcome.outcome_status == "pending",
+        )
+    ).scalar_one()
+    labeled = db.execute(
+        select(func.count()).select_from(LearningDecisionOutcome).where(
+            LearningDecisionOutcome.tenant_id == tenant,
+            LearningDecisionOutcome.outcome_status == "labeled",
+        )
+    ).scalar_one()
+    expired = db.execute(
+        select(func.count()).select_from(LearningDecisionOutcome).where(
+            LearningDecisionOutcome.tenant_id == tenant,
+            LearningDecisionOutcome.outcome_status == "expired",
+        )
+    ).scalar_one()
+    no_price = db.execute(
+        select(func.count()).select_from(LearningDecisionOutcome).where(
+            LearningDecisionOutcome.tenant_id == tenant,
+            LearningDecisionOutcome.outcome_status == "no_price",
+        )
+    ).scalar_one()
+    snapshots_total = db.execute(
+        select(func.count()).select_from(LearningDecisionSnapshot).where(
+            LearningDecisionSnapshot.tenant_id == tenant,
+        )
+    ).scalar_one()
+    outcomes_total = db.execute(
+        select(func.count()).select_from(LearningDecisionOutcome).where(
+            LearningDecisionOutcome.tenant_id == tenant,
+        )
+    ).scalar_one()
+    return LearningStatusOut(
+        generated_at=now.isoformat(),
+        pending=int(pending),
+        labeled=int(labeled),
+        expired=int(expired),
+        no_price=int(no_price),
+        snapshots_total=int(snapshots_total),
+        outcomes_total=int(outcomes_total),
+    )
+
+
+@router.get("/admin/learning/dataset", response_model=LearningDatasetOut)
+def admin_learning_dataset(
+    hours: int = 24,
+    limit: int = 1000,
+    outcome_status: str = "ALL",
+    exchange: str = "ALL",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    hours = max(1, min(int(hours), 24 * 30))
+    limit = max(1, min(int(limit), 5000))
+    now = datetime.now(timezone.utc)
+    from_dt = now - timedelta(hours=hours)
+    tenant = _tenant_id(current_user)
+    status_norm = str(outcome_status or "ALL").upper().strip()
+    exchange_norm = str(exchange or "ALL").upper().strip()
+
+    q = (
+        select(LearningDecisionSnapshot, LearningDecisionOutcome)
+        .outerjoin(
+            LearningDecisionOutcome,
+            and_(
+                LearningDecisionOutcome.decision_id == LearningDecisionSnapshot.decision_id,
+                LearningDecisionOutcome.horizon_minutes == LearningDecisionSnapshot.target_horizon_minutes,
+            ),
+        )
+        .where(
+            LearningDecisionSnapshot.tenant_id == tenant,
+            LearningDecisionSnapshot.decision_ts >= from_dt,
+        )
+        .order_by(LearningDecisionSnapshot.decision_ts.desc())
+        .limit(limit)
+    )
+    if exchange_norm in {"BINANCE", "IBKR"}:
+        q = q.where(LearningDecisionSnapshot.exchange == exchange_norm)
+    if status_norm != "ALL":
+        q = q.where(LearningDecisionOutcome.outcome_status == status_norm.lower())
+
+    rows = db.execute(q).all()
+    out_rows: list[LearningDatasetRowOut] = []
+    for snap, outcome in rows:
+        out_rows.append(
+            LearningDatasetRowOut(
+                decision_id=snap.decision_id,
+                timestamp=_to_utc_iso(snap.decision_ts) or now.isoformat(),
+                due_at=_to_utc_iso(outcome.due_at if outcome else None),
+                tenant_id=snap.tenant_id,
+                user_id=snap.user_id,
+                exchange=snap.exchange,
+                symbol=snap.selected_symbol,
+                decision=snap.decision,
+                selected=bool(snap.selected),
+                dry_run=bool(snap.dry_run),
+                selected_score=snap.selected_score,
+                selected_score_rules=snap.selected_score_rules,
+                selected_score_market=snap.selected_score_market,
+                selected_liquidity_state=snap.selected_liquidity_state,
+                rr_estimate=snap.rr_estimate,
+                trend_score=snap.trend_score,
+                momentum_score=snap.momentum_score,
+                atr_pct=snap.atr_pct,
+                volume_24h_usdt=snap.volume_24h_usdt,
+                horizon_minutes=int(snap.target_horizon_minutes or 60),
+                outcome_status=(outcome.outcome_status if outcome else None),
+                return_pct=(outcome.return_pct if outcome else None),
+                pnl_quote=(outcome.pnl_quote if outcome else None),
+                hit=(outcome.hit if outcome else None),
+            )
+        )
+    return LearningDatasetOut(
+        generated_at=now.isoformat(),
+        hours=hours,
+        window_from=from_dt.isoformat(),
+        window_to=now.isoformat(),
+        rows=out_rows,
+    )
+
+
+@router.get("/admin/learning/rollup", response_model=LearningRollupOut)
+def admin_learning_rollup(
+    hours: int = 72,
+    limit: int = 2000,
+    exchange: str = "ALL",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    hours = max(1, min(int(hours), 24 * 30))
+    limit = max(1, min(int(limit), 5000))
+    now = datetime.now(timezone.utc)
+    from_dt = now - timedelta(hours=hours)
+    tenant = _tenant_id(current_user)
+    exchange_norm = str(exchange or "ALL").upper().strip()
+    q = (
+        select(LearningRollupHourly)
+        .where(
+            LearningRollupHourly.tenant_id == tenant,
+            LearningRollupHourly.bucket_hour >= from_dt,
+        )
+        .order_by(LearningRollupHourly.bucket_hour.desc())
+        .limit(limit)
+    )
+    if exchange_norm in {"BINANCE", "IBKR"}:
+        q = q.where(LearningRollupHourly.exchange == exchange_norm)
+    rows = db.execute(q).scalars().all()
+    out_rows = [
+        LearningRollupRowOut(
+            bucket_hour=_to_utc_iso(r.bucket_hour) or now.isoformat(),
+            exchange=r.exchange,
+            symbol=r.symbol,
+            horizon_minutes=int(r.horizon_minutes),
+            samples=int(r.samples),
+            hit_rate_pct=float(r.hit_rate_pct or 0.0),
+            avg_return_pct=float(r.avg_return_pct or 0.0),
+            p50_return_pct=float(r.p50_return_pct or 0.0),
+            p90_return_pct=float(r.p90_return_pct or 0.0),
+            avg_score=r.avg_score,
+            avg_score_rules=r.avg_score_rules,
+            avg_score_market=r.avg_score_market,
+            green_count=int(r.green_count or 0),
+            gray_count=int(r.gray_count or 0),
+            red_count=int(r.red_count or 0),
+        )
+        for r in rows
+    ]
+    return LearningRollupOut(
+        generated_at=now.isoformat(),
+        hours=hours,
+        window_from=from_dt.isoformat(),
+        window_to=now.isoformat(),
+        rows=out_rows,
+    )
 
 
 @router.get("/admin/auto-pick/liquidity-report", response_model=AutoPickLiquidityReportOut)
