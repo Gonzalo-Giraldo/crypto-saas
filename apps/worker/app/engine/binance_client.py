@@ -18,6 +18,34 @@ _price_by_symbol: dict[str, float] = {}
 _price_cache_expiry: float = 0.0
 
 
+def _gateway_enabled() -> bool:
+    return bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+
+
+def _gateway_headers() -> dict[str, str]:
+    out = {"Content-Type": "application/json"}
+    if settings.BINANCE_GATEWAY_TOKEN:
+        out["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
+    return out
+
+
+def _post_gateway(path: str, payload: dict, timeout: int = 10) -> dict | None:
+    if not _gateway_enabled():
+        return None
+    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+    url = f"{base}{path}"
+    response = requests.post(
+        url,
+        headers=_gateway_headers(),
+        json=payload,
+        timeout=max(3, timeout),
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Binance gateway error {response.status_code}: {response.text}")
+    body = response.json()
+    return body if isinstance(body, dict) else None
+
+
 def send_test_order(
     api_key: str,
     api_secret: str,
@@ -70,16 +98,27 @@ def _fetch_exchange_info_symbols(symbols: list[str]) -> dict[str, dict]:
         if _exchange_info_by_symbol and now < _exchange_info_cache_expiry:
             return {s: _exchange_info_by_symbol[s] for s in wanted if s in _exchange_info_by_symbol}
 
-    endpoint = "/api/v3/exchangeInfo"
-    base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
-    query = urlencode({"symbols": str(wanted).replace("'", '"')})
-    url = f"{base_url}{endpoint}?{query}"
-    response = requests.get(url, timeout=10)
-    if response.status_code >= 400:
-        detail = response.text
-        raise RuntimeError(f"Binance exchangeInfo error {response.status_code}: {detail}")
-    body = response.json()
-    rows = body.get("symbols") if isinstance(body, dict) else None
+    rows = None
+    if _gateway_enabled():
+        try:
+            body = _post_gateway("/binance/exchange-info", {"symbols": wanted}, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)))
+            got = body.get("symbols") if isinstance(body, dict) else None
+            if isinstance(got, list):
+                rows = got
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                raise
+    if rows is None:
+        endpoint = "/api/v3/exchangeInfo"
+        base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+        query = urlencode({"symbols": str(wanted).replace("'", '"')})
+        url = f"{base_url}{endpoint}?{query}"
+        response = requests.get(url, timeout=10)
+        if response.status_code >= 400:
+            detail = response.text
+            raise RuntimeError(f"Binance exchangeInfo error {response.status_code}: {detail}")
+        body = response.json()
+        rows = body.get("symbols") if isinstance(body, dict) else None
     if not isinstance(rows, list):
         return {}
     parsed: dict[str, dict] = {}
@@ -107,14 +146,25 @@ def _fetch_symbol_price(symbol: str) -> float | None:
         if _price_by_symbol and now < _price_cache_expiry and sym in _price_by_symbol:
             return float(_price_by_symbol[sym])
 
-    endpoint = "/api/v3/ticker/price"
-    base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
-    query = urlencode({"symbol": sym})
-    url = f"{base_url}{endpoint}?{query}"
-    response = requests.get(url, timeout=8)
-    if response.status_code >= 400:
-        return None
-    body = response.json()
+    body = None
+    if _gateway_enabled():
+        try:
+            got = _post_gateway("/binance/ticker-price", {"symbol": sym}, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)))
+            row = got.get("row") if isinstance(got, dict) else None
+            if isinstance(row, dict):
+                body = row
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                return None
+    if body is None:
+        endpoint = "/api/v3/ticker/price"
+        base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+        query = urlencode({"symbol": sym})
+        url = f"{base_url}{endpoint}?{query}"
+        response = requests.get(url, timeout=8)
+        if response.status_code >= 400:
+            return None
+        body = response.json()
     try:
         px = float(body.get("price") or 0.0)
     except Exception:

@@ -309,17 +309,43 @@ def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list
         if cached and now_ts < cached[0]:
             return list(cached[1])
 
-    base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
-    url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': '1h', 'limit': lim})}"
-    try:
-        req = urllib_request.Request(url, method="GET")
-        with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
-        return []
-    if not isinstance(payload, list):
-        return []
-    rows = [row for row in payload if isinstance(row, list) and len(row) >= 6]
+    rows: list[list] = []
+    gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+    if gateway_enabled:
+        try:
+            base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+            url = f"{base}/binance/klines"
+            body = json.dumps({"symbol": sym, "interval": "1h", "limit": lim}).encode("utf-8")
+            req = urllib_request.Request(
+                url,
+                method="POST",
+                data=body,
+                headers={"Content-Type": "application/json"},
+            )
+            if settings.BINANCE_GATEWAY_TOKEN:
+                req.add_header("X-Internal-Token", settings.BINANCE_GATEWAY_TOKEN)
+            with urllib_request.urlopen(req, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))) as resp:  # noqa: S310
+                payload = json.loads(resp.read().decode("utf-8"))
+            got = payload.get("rows") if isinstance(payload, dict) else None
+            if isinstance(got, list):
+                rows = [row for row in got if isinstance(row, list) and len(row) >= 6]
+        except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                return []
+
+    if not rows:
+        base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
+        url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': '1h', 'limit': lim})}"
+        try:
+            req = urllib_request.Request(url, method="GET")
+            with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        rows = [row for row in payload if isinstance(row, list) and len(row) >= 6]
+
     with _binance_klines_cache_lock:
         _binance_klines_cache[sym] = (time.time() + cache_ttl, rows)
     return rows

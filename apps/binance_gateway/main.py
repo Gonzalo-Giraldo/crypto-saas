@@ -40,6 +40,20 @@ class BinanceTicker24hIn(BaseModel):
     limit: int = 200
 
 
+class BinanceKlinesIn(BaseModel):
+    symbol: str
+    interval: str = "1h"
+    limit: int = 120
+
+
+class BinanceExchangeInfoIn(BaseModel):
+    symbols: list[str]
+
+
+class BinanceTickerPriceIn(BaseModel):
+    symbol: str
+
+
 @app.get("/healthz")
 def healthz():
     if not HEALTHZ_CHECK_BINANCE:
@@ -158,6 +172,72 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
         if len(out) >= limit:
             break
     return {"rows": out, "count": len(out), "mode": "gateway_ticker_24hr"}
+
+
+@app.post("/binance/klines")
+def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(default="")):
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _enforce_rate_limit(x_internal_token)
+
+    symbol = str(payload.symbol or "").upper().strip()
+    interval = str(payload.interval or "1h").strip()
+    limit = max(10, min(int(payload.limit or 120), 1000))
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol_required")
+    url = f"{BINANCE_BASE}/api/v3/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
+    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if r.status_code >= 400:
+        detail = f"binance_upstream_error status={r.status_code}"
+        raise HTTPException(status_code=502, detail=detail)
+    data = r.json()
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="invalid_klines_payload")
+    rows = [x for x in data if isinstance(x, list)]
+    return {"rows": rows, "count": len(rows), "mode": "gateway_klines"}
+
+
+@app.post("/binance/exchange-info")
+def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str = Header(default="")):
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _enforce_rate_limit(x_internal_token)
+
+    symbols = sorted({str(s).upper().strip() for s in (payload.symbols or []) if str(s).strip()})
+    if not symbols:
+        raise HTTPException(status_code=400, detail="symbols_required")
+    query = urlencode({"symbols": str(symbols).replace("'", '"')})
+    url = f"{BINANCE_BASE}/api/v3/exchangeInfo?{query}"
+    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if r.status_code >= 400:
+        detail = f"binance_upstream_error status={r.status_code}"
+        raise HTTPException(status_code=502, detail=detail)
+    data = r.json()
+    rows = data.get("symbols") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=502, detail="invalid_exchange_info_payload")
+    return {"symbols": rows, "count": len(rows), "mode": "gateway_exchange_info"}
+
+
+@app.post("/binance/ticker-price")
+def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = Header(default="")):
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _enforce_rate_limit(x_internal_token)
+
+    symbol = str(payload.symbol or "").upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol_required")
+    query = urlencode({"symbol": symbol})
+    url = f"{BINANCE_BASE}/api/v3/ticker/price?{query}"
+    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if r.status_code >= 400:
+        detail = f"binance_upstream_error status={r.status_code}"
+        raise HTTPException(status_code=502, detail=detail)
+    data = r.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="invalid_ticker_price_payload")
+    return {"row": data, "mode": "gateway_ticker_price"}
 
 
 def _enforce_rate_limit(key: str) -> None:
