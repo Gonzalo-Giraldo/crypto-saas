@@ -71,6 +71,8 @@ from apps.api.app.schemas.security import (
     StrategyRuntimePolicyUpdateRequest,
     AutoPickReportItemOut,
     AutoPickReportOut,
+    AutoPickLiquidityEventOut,
+    AutoPickLiquidityReportOut,
     MarketTrendSnapshotOut,
     MarketTrendMonitorOut,
 )
@@ -1033,6 +1035,34 @@ def _pretrade_scores(
     return round(score_rules, 2), round(score_market, 2), round(score_final, 2)
 
 
+def _classify_liquidity_state(
+    *,
+    spread_bps: float,
+    slippage_bps: float,
+    max_spread_bps: float,
+    max_slippage_bps: float,
+    selected_score: float,
+    min_score_pct: float,
+) -> tuple[str, float]:
+    # Green: strong margin vs limits and score comfortably above threshold.
+    green = (
+        spread_bps <= (0.80 * max_spread_bps)
+        and slippage_bps <= (0.80 * max_slippage_bps)
+        and selected_score >= (min_score_pct + 2.0)
+    )
+    if green:
+        return "green", 1.0
+    # Gray: still tradable but with tighter edge; reduce size.
+    gray = (
+        spread_bps <= max_spread_bps
+        and slippage_bps <= max_slippage_bps
+        and selected_score >= min_score_pct
+    )
+    if gray:
+        return "gray", 0.5
+    return "red", 0.0
+
+
 def _scan_pretrade_candidates(
     db: Session,
     current_user: User,
@@ -1164,6 +1194,7 @@ def _auto_pick_from_scan(
         score_weight_rules=score_weight_rules,
         score_weight_market=score_weight_market,
     )
+    candidate_by_symbol = {c.symbol.upper(): c for c in universe}
     assets = scan.get("assets", [])
     top_candidate = assets[0] if assets else None
     avg_score = None
@@ -1232,8 +1263,53 @@ def _auto_pick_from_scan(
         }
 
     selected = score_eligible[0]
+    regime = str(selected.get("market_regime") or "range")
+    max_spread = float(runtime_policy.get(f"max_spread_bps_{regime}", 15.0))
+    max_slippage = float(runtime_policy.get(f"max_slippage_bps_{regime}", 20.0))
+    candidate = candidate_by_symbol.get(str(selected.get("symbol") or "").upper())
+    cand_spread = float(candidate.spread_bps) if candidate else max_spread
+    cand_slippage = float(candidate.slippage_bps) if candidate else max_slippage
+    selected_score = float(selected.get("score") or 0.0)
+    liquidity_state, size_multiplier = _classify_liquidity_state(
+        spread_bps=cand_spread,
+        slippage_bps=cand_slippage,
+        max_spread_bps=max_spread,
+        max_slippage_bps=max_slippage,
+        selected_score=selected_score,
+        min_score_pct=min_score_pct,
+    )
+    if liquidity_state == "red":
+        return {
+            "exchange": exchange,
+            "dry_run": bool(payload.dry_run),
+            "selected": False,
+            "selected_symbol": None,
+            "selected_side": None,
+            "selected_qty": None,
+            "selected_score": None,
+            "selected_score_rules": None,
+            "selected_score_market": None,
+            "selected_market_regime": None,
+            "selected_liquidity_state": "red",
+            "selected_size_multiplier": 0.0,
+            "top_candidate_symbol": (top_candidate or {}).get("symbol"),
+            "top_candidate_score": (top_candidate or {}).get("score"),
+            "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+            "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+            "avg_score": avg_score,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
+            "decision": "no_candidate_passed",
+            "top_failed_checks": ["effective_liquidity_failed"],
+            "execution": None,
+            "scan": scan,
+        }
+
+    selected_qty = float(selected["qty"]) * float(size_multiplier)
+    if selected_qty <= 0:
+        selected_qty = float(selected["qty"])
     execution = None
-    decision = "dry_run_selected"
+    decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
     if not payload.dry_run:
         try:
             if exchange == "BINANCE":
@@ -1241,16 +1317,16 @@ def _auto_pick_from_scan(
                     user_id=current_user.id,
                     symbol=selected["symbol"],
                     side=selected["side"],
-                    qty=selected["qty"],
+                    qty=selected_qty,
                 )
             else:
                 execution = execute_ibkr_test_order_for_user(
                     user_id=current_user.id,
                     symbol=selected["symbol"],
                     side=selected["side"],
-                    qty=selected["qty"],
+                    qty=selected_qty,
                 )
-            decision = "executed_test_order"
+            decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
         except HTTPException as exc:
             decision = "insufficient_resources_or_execution_error"
             execution = {"error": str(exc.detail)}
@@ -1261,11 +1337,13 @@ def _auto_pick_from_scan(
         "selected": True,
         "selected_symbol": selected["symbol"],
         "selected_side": selected["side"],
-        "selected_qty": selected["qty"],
+        "selected_qty": round(selected_qty, 8),
         "selected_score": selected["score"],
         "selected_score_rules": selected["score_rules"],
         "selected_score_market": selected["score_market"],
         "selected_market_regime": selected["market_regime"],
+        "selected_liquidity_state": liquidity_state,
+        "selected_size_multiplier": round(float(size_multiplier), 4),
         "top_candidate_symbol": (top_candidate or {}).get("symbol"),
         "top_candidate_score": (top_candidate or {}).get("score"),
         "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
@@ -2522,6 +2600,8 @@ def pretrade_binance_auto_pick(
             "selected_score_rules": out.get("selected_score_rules"),
             "selected_score_market": out.get("selected_score_market"),
             "selected_market_regime": out["selected_market_regime"],
+            "selected_liquidity_state": out.get("selected_liquidity_state"),
+            "selected_size_multiplier": out.get("selected_size_multiplier"),
             "top_candidate_symbol": out.get("top_candidate_symbol"),
             "top_candidate_score": out.get("top_candidate_score"),
             "top_candidate_score_rules": out.get("top_candidate_score_rules"),
@@ -2572,6 +2652,8 @@ def pretrade_ibkr_auto_pick(
             "selected_score_rules": out.get("selected_score_rules"),
             "selected_score_market": out.get("selected_score_market"),
             "selected_market_regime": out["selected_market_regime"],
+            "selected_liquidity_state": out.get("selected_liquidity_state"),
+            "selected_size_multiplier": out.get("selected_size_multiplier"),
             "top_candidate_symbol": out.get("top_candidate_symbol"),
             "top_candidate_score": out.get("top_candidate_score"),
             "top_candidate_score_rules": out.get("top_candidate_score_rules"),
@@ -2656,6 +2738,8 @@ def run_auto_pick_tick_for_tenant(
                     "selected_score_rules": out.get("selected_score_rules"),
                     "selected_score_market": out.get("selected_score_market"),
                     "selected_market_regime": out["selected_market_regime"],
+                    "selected_liquidity_state": out.get("selected_liquidity_state"),
+                    "selected_size_multiplier": out.get("selected_size_multiplier"),
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
                     "top_candidate_score": out.get("top_candidate_score"),
                     "top_candidate_score_rules": out.get("top_candidate_score_rules"),
@@ -2677,6 +2761,8 @@ def run_auto_pick_tick_for_tenant(
                     "selected_score": out["selected_score"],
                     "selected_score_rules": out.get("selected_score_rules"),
                     "selected_score_market": out.get("selected_score_market"),
+                    "selected_liquidity_state": out.get("selected_liquidity_state"),
+                    "selected_size_multiplier": out.get("selected_size_multiplier"),
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
                     "top_candidate_score": out.get("top_candidate_score"),
                     "top_candidate_score_rules": out.get("top_candidate_score_rules"),
@@ -2694,6 +2780,93 @@ def run_auto_pick_tick_for_tenant(
         "executed_count": len(executed),
         "results": executed,
     }
+
+
+@router.get("/admin/auto-pick/liquidity-report", response_model=AutoPickLiquidityReportOut)
+def admin_auto_pick_liquidity_report(
+    hours: int = 24,
+    limit: int = 1000,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    hours = max(1, min(hours, 168))
+    limit = max(1, min(limit, 5000))
+    now = datetime.now(timezone.utc)
+    from_dt = now - timedelta(hours=hours)
+    tenant_ids = select(User.id).where(User.tenant_id == _tenant_id(current_user))
+    user_rows = db.execute(
+        select(User.id, User.email).where(User.tenant_id == _tenant_id(current_user))
+    ).all()
+    email_by_id = {uid: email for uid, email in user_rows}
+    logs = db.execute(
+        select(AuditLog)
+        .where(
+            AuditLog.user_id.in_(tenant_ids),
+            AuditLog.action == "pretrade.auto_pick.completed",
+            AuditLog.created_at >= from_dt,
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
+    ).scalars().all()
+
+    events: list[AutoPickLiquidityEventOut] = []
+    green = gray = red = blocked = 0
+    for r in logs:
+        try:
+            details = json.loads(r.details) if r.details else {}
+        except Exception:
+            details = {}
+        decision = str(details.get("decision") or "unknown")
+        selected = bool(details.get("selected", False))
+        state = str(details.get("selected_liquidity_state") or "").lower().strip()
+        if state not in {"green", "gray", "red"}:
+            if not selected:
+                state = "red"
+            elif "gray" in decision:
+                state = "gray"
+            else:
+                state = "green"
+        if state == "green":
+            green += 1
+        elif state == "gray":
+            gray += 1
+        else:
+            red += 1
+        if not selected:
+            blocked += 1
+        created_at = r.created_at
+        if created_at and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        created_at = (created_at or now).astimezone(timezone.utc)
+        events.append(
+            AutoPickLiquidityEventOut(
+                timestamp=created_at.isoformat(),
+                user_email=email_by_id.get(r.user_id, "unknown"),
+                exchange=str(details.get("exchange") or "UNKNOWN"),
+                decision=decision,
+                selected_symbol=details.get("selected_symbol"),
+                selected_score=details.get("selected_score"),
+                selected_qty=details.get("selected_qty"),
+                liquidity_state=state,
+                size_multiplier=details.get("selected_size_multiplier"),
+                scanned_assets=int(details.get("scanned_assets") or 0),
+            )
+        )
+    total = len(events)
+    blocked_rate = round((blocked / total) * 100.0, 2) if total else 0.0
+    return AutoPickLiquidityReportOut(
+        generated_at=now.isoformat(),
+        hours=hours,
+        window_from=from_dt.isoformat(),
+        window_to=now.isoformat(),
+        total_events=total,
+        green_events=green,
+        gray_events=gray,
+        red_events=red,
+        blocked_events=blocked,
+        blocked_rate_pct=blocked_rate,
+        rows=events,
+    )
 
 
 @router.post("/execution/exit/binance/check", response_model=ExitCheckOut)

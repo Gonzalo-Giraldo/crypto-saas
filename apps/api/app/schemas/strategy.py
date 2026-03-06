@@ -163,6 +163,8 @@ class PretradeAutoPickOut(BaseModel):
     selected_score_rules: Optional[float] = None
     selected_score_market: Optional[float] = None
     selected_market_regime: Optional[str] = None
+    selected_liquidity_state: Optional[str] = None
+    selected_size_multiplier: Optional[float] = None
     top_candidate_symbol: Optional[str] = None
     top_candidate_score: Optional[float] = None
     top_candidate_score_rules: Optional[float] = None

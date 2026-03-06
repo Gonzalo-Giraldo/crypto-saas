@@ -271,6 +271,33 @@ class AutoPickReportOut(BaseModel):
     rows: list[AutoPickReportItemOut]
 
 
+class AutoPickLiquidityEventOut(BaseModel):
+    timestamp: str
+    user_email: str
+    exchange: str
+    decision: str
+    selected_symbol: Optional[str] = None
+    selected_score: Optional[float] = None
+    selected_qty: Optional[float] = None
+    liquidity_state: Optional[str] = None
+    size_multiplier: Optional[float] = None
+    scanned_assets: int = 0
+
+
+class AutoPickLiquidityReportOut(BaseModel):
+    generated_at: str
+    hours: int
+    window_from: str
+    window_to: str
+    total_events: int
+    green_events: int
+    gray_events: int
+    red_events: int
+    blocked_events: int
+    blocked_rate_pct: float
+    rows: list[AutoPickLiquidityEventOut]
+
+
 class MarketTrendSnapshotOut(BaseModel):
     timestamp: str
     bucket_5m: str
