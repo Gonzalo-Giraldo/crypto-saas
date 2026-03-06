@@ -146,6 +146,7 @@ class PretradeAutoPickRequest(BaseModel):
     candidates: list[PretradeCheckRequest] = Field(default_factory=list)
     top_n: int = 10
     dry_run: bool = True
+    direction: str = "LONG"
 
     @field_validator("top_n")
     @classmethod
@@ -154,10 +155,19 @@ class PretradeAutoPickRequest(BaseModel):
             raise ValueError("top_n must be between 1 and 200")
         return value
 
+    @field_validator("direction")
+    @classmethod
+    def validate_direction(cls, value: str):
+        normalized = (value or "LONG").upper().strip()
+        if normalized not in {"LONG", "SHORT", "BOTH"}:
+            raise ValueError("direction must be LONG, SHORT or BOTH")
+        return normalized
+
 
 class PretradeAutoPickOut(BaseModel):
     exchange: str
     dry_run: bool
+    requested_direction: str = "LONG"
     selected: bool
     selected_symbol: Optional[str] = None
     selected_side: Optional[str] = None

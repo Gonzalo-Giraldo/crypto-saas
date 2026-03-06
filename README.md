@@ -188,6 +188,10 @@ pytest -q tests/integration
 - Auto-pick output now includes selected and top-candidate trend fields:
   - `selected_trend_score`, `selected_trend_score_1d`, `selected_trend_score_4h`, `selected_trend_score_1h`
   - `top_candidate_trend_score`, `top_candidate_trend_score_1d`, `top_candidate_trend_score_4h`, `top_candidate_trend_score_1h`
+- Auto-pick direction control:
+  - request supports `direction=LONG|SHORT|BOTH` (default `LONG`).
+  - `SHORT` is enabled for `IBKR`.
+  - for `BINANCE`, `SHORT` returns no universe (`short_not_supported_for_exchange`) in current spot/test-order setup.
 - `/ops/console` auto-pick report table includes trend columns:
   - `Tendencia`
   - `MTF 1D/4H/1H`

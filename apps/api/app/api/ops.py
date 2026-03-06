@@ -450,8 +450,23 @@ def _build_auto_pick_universe(
     *,
     db: Session | None = None,
     tenant_id: str | None = None,
+    direction: str = "LONG",
 ) -> list[PretradeCheckRequest]:
     ex = (exchange or "").upper()
+    pick_direction = (direction or "LONG").upper().strip()
+
+    def _sides_for_direction() -> list[str]:
+        if pick_direction == "LONG":
+            return ["BUY"]
+        if pick_direction == "SHORT":
+            return ["SELL"] if ex == "IBKR" else []
+        # BOTH
+        return ["BUY", "SELL"] if ex == "IBKR" else ["BUY"]
+
+    sides = _sides_for_direction()
+    if not sides:
+        return []
+
     if ex == "IBKR":
         symbols = _ibkr_fallback_symbols()
         base_by_symbol = {
@@ -465,27 +480,30 @@ def _build_auto_pick_universe(
             "META": (0.17, 0.12, 2.5, 8.0, 10.0),
             "TSLA": (0.28, 0.22, 3.8, 10.0, 13.0),
         }
-        return [
-            PretradeCheckRequest(
-                symbol=s,
-                side="BUY",
-                qty=1.0,
-                rr_estimate=1.6,
-                trend_tf="4H",
-                signal_tf="1H",
-                timing_tf="15M",
-                spread_bps=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[3],
-                slippage_bps=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[4],
-                volume_24h_usdt=0.0,
-                in_rth=True,
-                macro_event_block=False,
-                earnings_within_24h=False,
-                market_trend_score=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[0],
-                atr_pct=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[2],
-                momentum_score=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[1],
-            )
-            for s in symbols
-        ]
+        out_ibkr: list[PretradeCheckRequest] = []
+        for s in symbols:
+            for side in sides:
+                out_ibkr.append(
+                    PretradeCheckRequest(
+                        symbol=s,
+                        side=side,
+                        qty=1.0,
+                        rr_estimate=1.6,
+                        trend_tf="4H",
+                        signal_tf="1H",
+                        timing_tf="15M",
+                        spread_bps=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[3],
+                        slippage_bps=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[4],
+                        volume_24h_usdt=0.0,
+                        in_rth=True,
+                        macro_event_block=False,
+                        earnings_within_24h=False,
+                        market_trend_score=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[0],
+                        atr_pct=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[2],
+                        momentum_score=base_by_symbol.get(s, (0.0, 0.0, 2.2, 8.0, 10.0))[1],
+                    )
+                )
+        return out_ibkr
     # Prefer the latest market-monitor bucket so auto-pick uses the same filtered universe.
     if db is not None and tenant_id:
         latest_bucket = db.execute(
@@ -517,28 +535,29 @@ def _build_auto_pick_universe(
                     liq = min(1.0, qv / 200_000_000.0)
                     spread = max(3.0, 14.0 - (10.0 * liq))
                     slippage = max(5.0, 18.0 - (12.0 * liq))
-                    out.append(
-                        PretradeCheckRequest(
-                            symbol=str(r.symbol),
-                            side="BUY",
-                            qty=0.01,
-                            rr_estimate=1.7,
-                            trend_tf="4H",
-                            signal_tf="1H",
-                            timing_tf="15M",
-                            spread_bps=round(spread, 2),
-                            slippage_bps=round(slippage, 2),
-                            volume_24h_usdt=qv,
-                            market_trend_score=round(float(r.trend_score or 0.0), 3),
-                            market_trend_score_1d=None,
-                            market_trend_score_4h=None,
-                            market_trend_score_1h=None,
-                            atr_pct=round(float(r.atr_pct or 0.0), 3),
-                            momentum_score=round(float(r.momentum_score or 0.0), 3),
-                            funding_rate_bps=0.0,
-                            crypto_event_block=False,
+                    for side in sides:
+                        out.append(
+                            PretradeCheckRequest(
+                                symbol=str(r.symbol),
+                                side=side,
+                                qty=0.01,
+                                rr_estimate=1.7,
+                                trend_tf="4H",
+                                signal_tf="1H",
+                                timing_tf="15M",
+                                spread_bps=round(spread, 2),
+                                slippage_bps=round(slippage, 2),
+                                volume_24h_usdt=qv,
+                                market_trend_score=round(float(r.trend_score or 0.0), 3),
+                                market_trend_score_1d=None,
+                                market_trend_score_4h=None,
+                                market_trend_score_1h=None,
+                                atr_pct=round(float(r.atr_pct or 0.0), 3),
+                                momentum_score=round(float(r.momentum_score or 0.0), 3),
+                                funding_rate_bps=0.0,
+                                crypto_event_block=False,
+                            )
                         )
-                    )
                 return out
 
     ticker_rows = _fetch_binance_ticker_rows()
@@ -589,34 +608,35 @@ def _build_auto_pick_universe(
             liq = min(1.0, qv / 200_000_000.0)
             spread = max(3.0, 14.0 - (10.0 * liq))
             slippage = max(5.0, 18.0 - (12.0 * liq))
-            out.append(
-                PretradeCheckRequest(
-                    symbol=str(row["symbol"]),
-                    side="BUY",
-                    qty=0.01,
-                    rr_estimate=1.7,
-                    trend_tf="4H",
-                    signal_tf="1H",
-                    timing_tf="15M",
-                    spread_bps=round(spread, 2),
-                    slippage_bps=round(slippage, 2),
-                    volume_24h_usdt=qv,
-                    market_trend_score=round(trend, 3),
-                    market_trend_score_1d=round(float(mtf.get("trend_1d")) if mtf is not None and mtf.get("trend_1d") is not None else trend, 6),
-                    market_trend_score_4h=round(float(mtf.get("trend_4h")) if mtf is not None and mtf.get("trend_4h") is not None else trend, 6),
-                    market_trend_score_1h=round(float(mtf.get("trend_1h")) if mtf is not None and mtf.get("trend_1h") is not None else trend, 6),
-                    atr_pct=round(vol, 3),
-                    momentum_score=round(momentum, 3),
-                    funding_rate_bps=0.0,
-                    crypto_event_block=False,
+            for side in sides:
+                out.append(
+                    PretradeCheckRequest(
+                        symbol=str(row["symbol"]),
+                        side=side,
+                        qty=0.01,
+                        rr_estimate=1.7,
+                        trend_tf="4H",
+                        signal_tf="1H",
+                        timing_tf="15M",
+                        spread_bps=round(spread, 2),
+                        slippage_bps=round(slippage, 2),
+                        volume_24h_usdt=qv,
+                        market_trend_score=round(trend, 3),
+                        market_trend_score_1d=round(float(mtf.get("trend_1d")) if mtf is not None and mtf.get("trend_1d") is not None else trend, 6),
+                        market_trend_score_4h=round(float(mtf.get("trend_4h")) if mtf is not None and mtf.get("trend_4h") is not None else trend, 6),
+                        market_trend_score_1h=round(float(mtf.get("trend_1h")) if mtf is not None and mtf.get("trend_1h") is not None else trend, 6),
+                        atr_pct=round(vol, 3),
+                        momentum_score=round(momentum, 3),
+                        funding_rate_bps=0.0,
+                        crypto_event_block=False,
+                    )
                 )
-            )
         if out:
             return out
     return [
         PretradeCheckRequest(
             symbol=s,
-            side="BUY",
+            side=side,
             qty=0.01,
             rr_estimate=1.7,
             trend_tf="4H",
@@ -634,6 +654,7 @@ def _build_auto_pick_universe(
             funding_rate_bps=0.0,
             crypto_event_block=False,
         )
+        for side in sides
         for s in _binance_fallback_symbols()
     ]
 
@@ -1229,8 +1250,12 @@ def _pretrade_scores(
     ratio = passed_count / total
     score_rules = ratio * 100.0
 
-    trend = max(-1.0, min(1.0, float(payload.market_trend_score)))
-    momentum = max(-1.0, min(1.0, float(payload.momentum_score)))
+    trend_raw = max(-1.0, min(1.0, float(payload.market_trend_score)))
+    momentum_raw = max(-1.0, min(1.0, float(payload.momentum_score)))
+    side = str(payload.side or "BUY").upper()
+    # For SHORT candidates, negative trend/momentum should increase score.
+    trend = trend_raw if side == "BUY" else (-trend_raw)
+    momentum = momentum_raw if side == "BUY" else (-momentum_raw)
     rr = max(0.0, min(3.0, float(payload.rr_estimate)))
     spread = max(0.0, float(payload.spread_bps))
     slippage = max(0.0, float(payload.slippage_bps))
@@ -1538,6 +1563,7 @@ def _auto_pick_from_scan(
         exchange,
         db=db,
         tenant_id=_tenant_id(current_user),
+        direction=payload.direction,
     )
     scan_payload = PretradeScanRequest(
         candidates=universe,
@@ -1643,6 +1669,7 @@ def _auto_pick_from_scan(
         return _finalize({
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
+            "requested_direction": payload.direction,
             "selected": False,
             "selected_symbol": None,
             "selected_side": None,
@@ -1667,7 +1694,11 @@ def _auto_pick_from_scan(
             "avg_score_rules": None,
             "avg_score_market": None,
             "decision": "no_universe_symbols_configured",
-            "top_failed_checks": ["allowlist_empty"],
+            "top_failed_checks": (
+                ["short_not_supported_for_exchange"]
+                if (exchange or "").upper() == "BINANCE" and str(payload.direction).upper() == "SHORT"
+                else ["allowlist_empty"]
+            ),
             "execution": None,
             "scan": scan,
         })
@@ -1683,6 +1714,7 @@ def _auto_pick_from_scan(
         return _finalize({
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
+            "requested_direction": payload.direction,
             "selected": False,
             "selected_symbol": None,
             "selected_side": None,
@@ -1732,6 +1764,7 @@ def _auto_pick_from_scan(
         return _finalize({
             "exchange": exchange,
             "dry_run": bool(payload.dry_run),
+            "requested_direction": payload.direction,
             "selected": False,
             "selected_symbol": None,
             "selected_side": None,
@@ -1800,6 +1833,7 @@ def _auto_pick_from_scan(
     return _finalize({
         "exchange": exchange,
         "dry_run": bool(payload.dry_run),
+        "requested_direction": payload.direction,
         "selected": True,
         "selected_symbol": selected_symbol,
         "selected_side": selected["side"],
@@ -3081,6 +3115,7 @@ def pretrade_binance_auto_pick(
         details={
             "exchange": "BINANCE",
             "dry_run": bool(payload.dry_run),
+            "requested_direction": out.get("requested_direction", payload.direction),
             "decision": out["decision"],
             "selected": out["selected"],
             "selected_symbol": out["selected_symbol"],
@@ -3141,6 +3176,7 @@ def pretrade_ibkr_auto_pick(
         details={
             "exchange": "IBKR",
             "dry_run": bool(payload.dry_run),
+            "requested_direction": out.get("requested_direction", payload.direction),
             "decision": out["decision"],
             "selected": out["selected"],
             "selected_symbol": out["selected_symbol"],
@@ -3179,6 +3215,7 @@ def pretrade_ibkr_auto_pick(
 def admin_auto_pick_tick(
     dry_run: bool = True,
     top_n: int = 10,
+    direction: str = "LONG",
     real_only: bool = True,
     include_service_users: bool = False,
     db: Session = Depends(get_db),
@@ -3189,6 +3226,7 @@ def admin_auto_pick_tick(
         tenant_id=_tenant_id(current_user),
         dry_run=dry_run,
         top_n=top_n,
+        direction=direction,
         real_only=real_only,
         include_service_users=include_service_users,
     )
@@ -3201,10 +3239,14 @@ def run_auto_pick_tick_for_tenant(
     tenant_id: str,
     dry_run: bool = True,
     top_n: int = 10,
+    direction: str = "LONG",
     real_only: bool = True,
     include_service_users: bool = False,
 ):
     top_n = max(1, min(int(top_n), 100))
+    direction = str(direction or "LONG").upper().strip()
+    if direction not in {"LONG", "SHORT", "BOTH"}:
+        direction = "LONG"
     users = (
         db.execute(select(User).where(User.tenant_id == tenant_id).order_by(User.email.asc()))
         .scalars()
@@ -3225,7 +3267,7 @@ def run_auto_pick_tick_for_tenant(
                 db=db,
                 current_user=u,
                 exchange=exchange,
-                payload=PretradeAutoPickRequest(top_n=top_n, dry_run=dry_run),
+                payload=PretradeAutoPickRequest(top_n=top_n, dry_run=dry_run, direction=direction),
             )
             log_audit_event(
                 db,
@@ -3235,6 +3277,7 @@ def run_auto_pick_tick_for_tenant(
                 details={
                     "exchange": exchange,
                     "dry_run": bool(dry_run),
+                    "requested_direction": out.get("requested_direction", direction),
                     "decision": out["decision"],
                     "selected": out["selected"],
                     "selected_symbol": out["selected_symbol"],
@@ -3269,6 +3312,7 @@ def run_auto_pick_tick_for_tenant(
                 {
                     "user_email": u.email,
                     "exchange": exchange,
+                    "requested_direction": out.get("requested_direction", direction),
                     "decision": out["decision"],
                     "selected": out["selected"],
                     "selected_symbol": out["selected_symbol"],
@@ -3299,6 +3343,7 @@ def run_auto_pick_tick_for_tenant(
     return {
         "dry_run": bool(dry_run),
         "top_n": top_n,
+        "direction": direction,
         "executed_count": len(executed),
         "results": executed,
     }
