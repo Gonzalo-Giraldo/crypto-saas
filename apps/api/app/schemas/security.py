@@ -257,10 +257,12 @@ class AutoPickReportItemOut(BaseModel):
     trend_score_1d: Optional[float] = None
     trend_score_4h: Optional[float] = None
     trend_score_1h: Optional[float] = None
+    micro_trend_15m: Optional[float] = None
     top_candidate_trend_score: Optional[float] = None
     top_candidate_trend_score_1d: Optional[float] = None
     top_candidate_trend_score_4h: Optional[float] = None
     top_candidate_trend_score_1h: Optional[float] = None
+    top_candidate_micro_trend_15m: Optional[float] = None
     avg_score: Optional[float] = None
     avg_score_rules: Optional[float] = None
     avg_score_market: Optional[float] = None

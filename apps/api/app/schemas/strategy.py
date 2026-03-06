@@ -65,6 +65,7 @@ class PretradeCheckRequest(BaseModel):
     market_trend_score_1d: Optional[float] = None
     market_trend_score_4h: Optional[float] = None
     market_trend_score_1h: Optional[float] = None
+    market_micro_trend_15m: Optional[float] = None
     atr_pct: float = 0.0
     momentum_score: float = 0.0
 
@@ -179,6 +180,7 @@ class PretradeAutoPickOut(BaseModel):
     selected_trend_score_1d: Optional[float] = None
     selected_trend_score_4h: Optional[float] = None
     selected_trend_score_1h: Optional[float] = None
+    selected_micro_trend_15m: Optional[float] = None
     selected_market_regime: Optional[str] = None
     selected_liquidity_state: Optional[str] = None
     selected_size_multiplier: Optional[float] = None
@@ -190,6 +192,7 @@ class PretradeAutoPickOut(BaseModel):
     top_candidate_trend_score_1d: Optional[float] = None
     top_candidate_trend_score_4h: Optional[float] = None
     top_candidate_trend_score_1h: Optional[float] = None
+    top_candidate_micro_trend_15m: Optional[float] = None
     avg_score: Optional[float] = None
     avg_score_rules: Optional[float] = None
     avg_score_market: Optional[float] = None

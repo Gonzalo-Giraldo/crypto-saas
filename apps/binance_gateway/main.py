@@ -12,7 +12,9 @@ from pydantic import BaseModel
 app = FastAPI()
 
 INTERNAL_TOKEN = os.getenv("BINANCE_GATEWAY_TOKEN", "")
-BINANCE_BASE = os.getenv("BINANCE_BASE_URL", "https://testnet.binance.vision").rstrip("/")
+_legacy_base = os.getenv("BINANCE_BASE_URL", "").rstrip("/")
+BINANCE_SPOT_BASE = os.getenv("BINANCE_SPOT_BASE_URL", _legacy_base or "https://testnet.binance.vision").rstrip("/")
+BINANCE_FUTURES_BASE = os.getenv("BINANCE_FUTURES_BASE_URL", "https://testnet.binancefuture.com").rstrip("/")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("BINANCE_GATEWAY_TIMEOUT_SECONDS", "12"))
 HEALTHZ_CHECK_BINANCE = os.getenv("BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE", "false").lower() == "true"
 RATE_LIMIT_PER_MIN = int(os.getenv("BINANCE_GATEWAY_RATE_LIMIT_PER_MIN", "60"))
@@ -28,6 +30,7 @@ class BinanceTestOrderIn(BaseModel):
     side: str
     qty: float
     client_order_id: str | None = None
+    market: str | None = None
 
 
 class BinanceAccountStatusIn(BaseModel):
@@ -38,20 +41,35 @@ class BinanceAccountStatusIn(BaseModel):
 class BinanceTicker24hIn(BaseModel):
     symbols: list[str] | None = None
     limit: int = 200
+    market: str | None = None
 
 
 class BinanceKlinesIn(BaseModel):
     symbol: str
     interval: str = "1h"
     limit: int = 120
+    market: str | None = None
 
 
 class BinanceExchangeInfoIn(BaseModel):
     symbols: list[str]
+    market: str | None = None
 
 
 class BinanceTickerPriceIn(BaseModel):
     symbol: str
+    market: str | None = None
+
+
+def _resolve_market(value: str | None) -> str:
+    market = str(value or "SPOT").upper().strip()
+    if market not in {"SPOT", "FUTURES"}:
+        raise HTTPException(status_code=400, detail="market must be SPOT or FUTURES")
+    return market
+
+
+def _base_url_for_market(market: str) -> str:
+    return BINANCE_FUTURES_BASE if market == "FUTURES" else BINANCE_SPOT_BASE
 
 
 @app.get("/healthz")
@@ -60,7 +78,7 @@ def healthz():
         return {"status": "ok", "binance_check": "skipped"}
 
     try:
-        r = requests.get(f"{BINANCE_BASE}/api/v3/time", timeout=max(2, REQUEST_TIMEOUT_SECONDS))
+        r = requests.get(f"{BINANCE_SPOT_BASE}/api/v3/time", timeout=max(2, REQUEST_TIMEOUT_SECONDS))
         ok = r.status_code == 200
         return {"status": "ok" if ok else "degraded", "binance_check": r.status_code}
     except Exception:
@@ -72,6 +90,13 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
     if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
         raise HTTPException(status_code=403, detail="forbidden")
     _enforce_rate_limit(x_internal_token)
+
+    market = _resolve_market(payload.market)
+    base_url = _base_url_for_market(market)
+    if market == "FUTURES":
+        endpoint = "/fapi/v1/order/test"
+    else:
+        endpoint = "/api/v3/order/test"
 
     params = {
         "symbol": payload.symbol.upper(),
@@ -89,7 +114,7 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
         hashlib.sha256,
     ).hexdigest()
 
-    url = f"{BINANCE_BASE}/api/v3/order/test?{query}&signature={signature}"
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
     headers = {"X-MBX-APIKEY": payload.api_key}
     r = requests.post(url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
 
@@ -106,7 +131,7 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
             detail += f" code={binance_code}"
         raise HTTPException(status_code=502, detail=detail)
 
-    return {"ok": True, "mode": "gateway_test_order"}
+    return {"ok": True, "mode": f"gateway_test_order_{market.lower()}"}
 
 
 @app.post("/binance/account-status")
@@ -148,7 +173,11 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
         raise HTTPException(status_code=403, detail="forbidden")
     _enforce_rate_limit(x_internal_token)
 
-    url = f"{BINANCE_BASE}/api/v3/ticker/24hr"
+    market = _resolve_market(payload.market)
+    if market == "FUTURES":
+        url = f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/24hr"
+    else:
+        url = f"{BINANCE_SPOT_BASE}/api/v3/ticker/24hr"
     r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
         detail = f"binance_upstream_error status={r.status_code}"
@@ -171,7 +200,7 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
         out.append(item)
         if len(out) >= limit:
             break
-    return {"rows": out, "count": len(out), "mode": "gateway_ticker_24hr"}
+    return {"rows": out, "count": len(out), "mode": f"gateway_ticker_24hr_{market.lower()}"}
 
 
 @app.post("/binance/klines")
@@ -180,12 +209,16 @@ def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(defa
         raise HTTPException(status_code=403, detail="forbidden")
     _enforce_rate_limit(x_internal_token)
 
+    market = _resolve_market(payload.market)
     symbol = str(payload.symbol or "").upper().strip()
     interval = str(payload.interval or "1h").strip()
     limit = max(10, min(int(payload.limit or 120), 1000))
     if not symbol:
         raise HTTPException(status_code=400, detail="symbol_required")
-    url = f"{BINANCE_BASE}/api/v3/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
+    if market == "FUTURES":
+        url = f"{BINANCE_FUTURES_BASE}/fapi/v1/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
+    else:
+        url = f"{BINANCE_SPOT_BASE}/api/v3/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
     r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
         detail = f"binance_upstream_error status={r.status_code}"
@@ -194,7 +227,7 @@ def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(defa
     if not isinstance(data, list):
         raise HTTPException(status_code=502, detail="invalid_klines_payload")
     rows = [x for x in data if isinstance(x, list)]
-    return {"rows": rows, "count": len(rows), "mode": "gateway_klines"}
+    return {"rows": rows, "count": len(rows), "mode": f"gateway_klines_{market.lower()}"}
 
 
 @app.post("/binance/exchange-info")
@@ -203,11 +236,18 @@ def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str 
         raise HTTPException(status_code=403, detail="forbidden")
     _enforce_rate_limit(x_internal_token)
 
+    market = _resolve_market(payload.market)
     symbols = sorted({str(s).upper().strip() for s in (payload.symbols or []) if str(s).strip()})
     if not symbols:
         raise HTTPException(status_code=400, detail="symbols_required")
     query = urlencode({"symbols": str(symbols).replace("'", '"')})
-    url = f"{BINANCE_BASE}/api/v3/exchangeInfo?{query}"
+    if market == "FUTURES":
+        if len(symbols) == 1:
+            url = f"{BINANCE_FUTURES_BASE}/fapi/v1/exchangeInfo?{urlencode({'symbol': symbols[0]})}"
+        else:
+            url = f"{BINANCE_FUTURES_BASE}/fapi/v1/exchangeInfo"
+    else:
+        url = f"{BINANCE_SPOT_BASE}/api/v3/exchangeInfo?{query}"
     r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
         detail = f"binance_upstream_error status={r.status_code}"
@@ -216,7 +256,10 @@ def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str 
     rows = data.get("symbols") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         raise HTTPException(status_code=502, detail="invalid_exchange_info_payload")
-    return {"symbols": rows, "count": len(rows), "mode": "gateway_exchange_info"}
+    if market == "FUTURES":
+        wanted = set(symbols)
+        rows = [row for row in rows if str((row or {}).get("symbol") or "").upper() in wanted]
+    return {"symbols": rows, "count": len(rows), "mode": f"gateway_exchange_info_{market.lower()}"}
 
 
 @app.post("/binance/ticker-price")
@@ -225,11 +268,15 @@ def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = 
         raise HTTPException(status_code=403, detail="forbidden")
     _enforce_rate_limit(x_internal_token)
 
+    market = _resolve_market(payload.market)
     symbol = str(payload.symbol or "").upper().strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="symbol_required")
     query = urlencode({"symbol": symbol})
-    url = f"{BINANCE_BASE}/api/v3/ticker/price?{query}"
+    if market == "FUTURES":
+        url = f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/price?{query}"
+    else:
+        url = f"{BINANCE_SPOT_BASE}/api/v3/ticker/price?{query}"
     r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
         detail = f"binance_upstream_error status={r.status_code}"
@@ -237,7 +284,7 @@ def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = 
     data = r.json()
     if not isinstance(data, dict):
         raise HTTPException(status_code=502, detail="invalid_ticker_price_payload")
-    return {"row": data, "mode": "gateway_ticker_price"}
+    return {"row": data, "mode": f"gateway_ticker_price_{market.lower()}"}
 
 
 def _enforce_rate_limit(key: str) -> None:

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ENCRYPTION_KEY: str
     BINANCE_TESTNET_BASE_URL: str = "https://testnet.binance.vision"
+    BINANCE_FUTURES_BASE_URL: str = "https://testnet.binancefuture.com"
     BINANCE_GATEWAY_ENABLED: bool = False
     BINANCE_GATEWAY_BASE_URL: str = ""
     BINANCE_GATEWAY_TOKEN: str = ""

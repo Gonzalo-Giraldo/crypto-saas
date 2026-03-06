@@ -18,6 +18,29 @@ _price_by_symbol: dict[str, float] = {}
 _price_cache_expiry: float = 0.0
 
 
+def _normalize_market(market: str | None) -> str:
+    m = str(market or "SPOT").upper().strip()
+    return "FUTURES" if m == "FUTURES" else "SPOT"
+
+
+def _base_url_for_market(market: str) -> str:
+    if market == "FUTURES":
+        return settings.BINANCE_FUTURES_BASE_URL.rstrip("/")
+    return settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+
+
+def _order_test_endpoint_for_market(market: str) -> str:
+    return "/fapi/v1/order/test" if market == "FUTURES" else "/api/v3/order/test"
+
+
+def _exchange_info_endpoint_for_market(market: str) -> str:
+    return "/fapi/v1/exchangeInfo" if market == "FUTURES" else "/api/v3/exchangeInfo"
+
+
+def _ticker_price_endpoint_for_market(market: str) -> str:
+    return "/fapi/v1/ticker/price" if market == "FUTURES" else "/api/v3/ticker/price"
+
+
 def _gateway_enabled() -> bool:
     return bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
 
@@ -54,9 +77,11 @@ def send_test_order(
     quantity: float,
     order_type: str = "MARKET",
     client_order_id: str | None = None,
+    market: str = "SPOT",
 ):
-    endpoint = "/api/v3/order/test"
-    base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+    market_norm = _normalize_market(market)
+    endpoint = _order_test_endpoint_for_market(market_norm)
+    base_url = _base_url_for_market(market_norm)
 
     params = {
         "symbol": symbol.upper(),
@@ -101,7 +126,11 @@ def _fetch_exchange_info_symbols(symbols: list[str]) -> dict[str, dict]:
     rows = None
     if _gateway_enabled():
         try:
-            body = _post_gateway("/binance/exchange-info", {"symbols": wanted}, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)))
+            body = _post_gateway(
+                "/binance/exchange-info",
+                {"symbols": wanted, "market": "SPOT"},
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
             got = body.get("symbols") if isinstance(body, dict) else None
             if isinstance(got, list):
                 rows = got
@@ -109,8 +138,8 @@ def _fetch_exchange_info_symbols(symbols: list[str]) -> dict[str, dict]:
             if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
                 raise
     if rows is None:
-        endpoint = "/api/v3/exchangeInfo"
-        base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+        endpoint = _exchange_info_endpoint_for_market("SPOT")
+        base_url = _base_url_for_market("SPOT")
         query = urlencode({"symbols": str(wanted).replace("'", '"')})
         url = f"{base_url}{endpoint}?{query}"
         response = requests.get(url, timeout=10)
@@ -149,7 +178,11 @@ def _fetch_symbol_price(symbol: str) -> float | None:
     body = None
     if _gateway_enabled():
         try:
-            got = _post_gateway("/binance/ticker-price", {"symbol": sym}, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)))
+            got = _post_gateway(
+                "/binance/ticker-price",
+                {"symbol": sym, "market": "SPOT"},
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
             row = got.get("row") if isinstance(got, dict) else None
             if isinstance(row, dict):
                 body = row
@@ -157,8 +190,8 @@ def _fetch_symbol_price(symbol: str) -> float | None:
             if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
                 return None
     if body is None:
-        endpoint = "/api/v3/ticker/price"
-        base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
+        endpoint = _ticker_price_endpoint_for_market("SPOT")
+        base_url = _base_url_for_market("SPOT")
         query = urlencode({"symbol": sym})
         url = f"{base_url}{endpoint}?{query}"
         response = requests.get(url, timeout=8)
@@ -194,7 +227,9 @@ def _normalize_qty_to_step(qty: Decimal, step: Decimal) -> Decimal:
 def prepare_binance_market_order_quantity(
     symbol: str,
     requested_qty: float,
+    market: str = "SPOT",
 ) -> dict:
+    market_norm = _normalize_market(market)
     sym = str(symbol or "").upper().strip()
     if not sym:
         raise RuntimeError("symbol is required")
@@ -202,7 +237,10 @@ def prepare_binance_market_order_quantity(
     if req_qty <= 0:
         raise RuntimeError("quantity must be > 0")
 
-    info = _fetch_exchange_info_symbols([sym]).get(sym)
+    if market_norm == "FUTURES":
+        info = _fetch_exchange_info_symbols_for_market([sym], market="FUTURES").get(sym)
+    else:
+        info = _fetch_exchange_info_symbols([sym]).get(sym)
     if not info:
         raise RuntimeError(f"Binance exchangeInfo missing for {sym}")
     filters = {str(f.get("filterType") or ""): f for f in info.get("filters") or [] if isinstance(f, dict)}
@@ -230,7 +268,10 @@ def prepare_binance_market_order_quantity(
         mn = filters.get("MIN_NOTIONAL")
         if isinstance(mn, dict):
             min_notional = _to_decimal(mn.get("minNotional"), "0")
-    price = _to_decimal(_fetch_symbol_price(sym), "0")
+    if market_norm == "FUTURES":
+        price = _to_decimal(_fetch_symbol_price_for_market(sym, market="FUTURES"), "0")
+    else:
+        price = _to_decimal(_fetch_symbol_price(sym), "0")
     notional = qty_norm * price if price > 0 else Decimal("0")
     if min_notional > 0 and price > 0 and notional < min_notional:
         raise RuntimeError(
@@ -247,6 +288,7 @@ def prepare_binance_market_order_quantity(
         "min_notional": float(min_notional),
         "price": float(price) if price > 0 else None,
         "estimated_notional": float(notional) if notional > 0 else None,
+        "market": market_norm,
     }
 
 
@@ -273,3 +315,84 @@ def get_account_status(
         detail = response.text
         raise RuntimeError(f"Binance account error {response.status_code}: {detail}")
     return response.json()
+
+
+def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "SPOT") -> dict[str, dict]:
+    market_norm = _normalize_market(market)
+    if market_norm == "SPOT":
+        return _fetch_exchange_info_symbols(symbols)
+    wanted = sorted({str(s or "").upper().strip() for s in symbols if str(s or "").strip()})
+    if not wanted:
+        return {}
+    rows = None
+    if _gateway_enabled():
+        try:
+            body = _post_gateway(
+                "/binance/exchange-info",
+                {"symbols": wanted, "market": market_norm},
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
+            got = body.get("symbols") if isinstance(body, dict) else None
+            if isinstance(got, list):
+                rows = got
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                raise
+    if rows is None:
+        endpoint = _exchange_info_endpoint_for_market(market_norm)
+        base_url = _base_url_for_market(market_norm)
+        url = f"{base_url}{endpoint}"
+        if market_norm == "FUTURES" and len(wanted) == 1:
+            url = f"{url}?{urlencode({'symbol': wanted[0]})}"
+        response = requests.get(url, timeout=10)
+        if response.status_code >= 400:
+            detail = response.text
+            raise RuntimeError(f"Binance exchangeInfo error {response.status_code}: {detail}")
+        body = response.json()
+        rows = body.get("symbols") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return {}
+    parsed: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper().strip()
+        if symbol in wanted:
+            parsed[symbol] = row
+    return parsed
+
+
+def _fetch_symbol_price_for_market(symbol: str, market: str = "SPOT") -> float | None:
+    market_norm = _normalize_market(market)
+    if market_norm == "SPOT":
+        return _fetch_symbol_price(symbol)
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return None
+    body = None
+    if _gateway_enabled():
+        try:
+            got = _post_gateway(
+                "/binance/ticker-price",
+                {"symbol": sym, "market": market_norm},
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
+            row = got.get("row") if isinstance(got, dict) else None
+            if isinstance(row, dict):
+                body = row
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                return None
+    if body is None:
+        endpoint = _ticker_price_endpoint_for_market(market_norm)
+        base_url = _base_url_for_market(market_norm)
+        query = urlencode({"symbol": sym})
+        response = requests.get(f"{base_url}{endpoint}?{query}", timeout=8)
+        if response.status_code >= 400:
+            return None
+        body = response.json()
+    try:
+        px = float(body.get("price") or 0.0)
+    except Exception:
+        return None
+    return px if px > 0 else None

@@ -137,7 +137,7 @@ _binance_ticker_cache_lock = threading.Lock()
 _binance_ticker_cache_rows: list[dict] = []
 _binance_ticker_cache_expiry: float = 0.0
 _binance_klines_cache_lock = threading.Lock()
-_binance_klines_cache: dict[str, tuple[float, list[list]]] = {}
+_binance_klines_cache: dict[tuple[str, str], tuple[float, list[list]]] = {}
 
 
 def _is_real_user_email(email: str) -> bool:
@@ -297,15 +297,17 @@ def _fetch_binance_ticker_rows() -> list[dict]:
         return list(_binance_ticker_cache_rows)
 
 
-def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list]:
+def _fetch_binance_klines(symbol: str, interval: str, limit: int) -> list[list]:
     sym = str(symbol or "").upper().strip()
+    iv = str(interval or "1h").strip()
     if not sym:
         return []
-    lim = max(30, min(int(limit or settings.BINANCE_MTF_KLINES_LIMIT or 120), 500))
+    lim = max(30, min(int(limit), 500))
     cache_ttl = max(5, int(settings.BINANCE_MTF_CACHE_SECONDS or 60))
     now_ts = time.time()
+    key = (sym, iv)
     with _binance_klines_cache_lock:
-        cached = _binance_klines_cache.get(sym)
+        cached = _binance_klines_cache.get(key)
         if cached and now_ts < cached[0]:
             return list(cached[1])
 
@@ -315,7 +317,7 @@ def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list
         try:
             base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
             url = f"{base}/binance/klines"
-            body = json.dumps({"symbol": sym, "interval": "1h", "limit": lim}).encode("utf-8")
+            body = json.dumps({"symbol": sym, "interval": iv, "limit": lim}).encode("utf-8")
             req = urllib_request.Request(
                 url,
                 method="POST",
@@ -335,7 +337,7 @@ def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list
 
     if not rows:
         base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
-        url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': '1h', 'limit': lim})}"
+        url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': iv, 'limit': lim})}"
         try:
             req = urllib_request.Request(url, method="GET")
             with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
@@ -347,8 +349,24 @@ def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list
         rows = [row for row in payload if isinstance(row, list) and len(row) >= 6]
 
     with _binance_klines_cache_lock:
-        _binance_klines_cache[sym] = (time.time() + cache_ttl, rows)
+        _binance_klines_cache[key] = (time.time() + cache_ttl, rows)
     return rows
+
+
+def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list]:
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return []
+    lim = max(30, min(int(limit or settings.BINANCE_MTF_KLINES_LIMIT or 120), 500))
+    return _fetch_binance_klines(sym, "1h", lim)
+
+
+def _fetch_binance_15m_klines(symbol: str, limit: int = 96) -> list[list]:
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return []
+    lim = max(30, min(int(limit), 500))
+    return _fetch_binance_klines(sym, "15m", lim)
 
 
 def _clip(value: float, lo: float, hi: float) -> float:
@@ -407,6 +425,24 @@ def _compute_binance_mtf_signal(symbol: str) -> dict | None:
     atr = sum(trs) / len(trs) if trs else 0.0
     atr_pct = (atr / close_now) * 100.0 if close_now > 0 else 0.0
 
+    micro_15m = None
+    rows_15m = _fetch_binance_15m_klines(symbol=symbol, limit=96)
+    if len(rows_15m) >= 7:
+        closes_15m: list[float] = []
+        for row in rows_15m:
+            try:
+                closes_15m.append(float(row[4]))
+            except (TypeError, ValueError):
+                closes_15m = []
+                break
+        if len(closes_15m) >= 7 and closes_15m[-1] > 0:
+            c_now = closes_15m[-1]
+            r15_1 = (c_now - closes_15m[-2]) / closes_15m[-2] if closes_15m[-2] > 0 else 0.0
+            r15_3 = (c_now - closes_15m[-4]) / closes_15m[-4] if closes_15m[-4] > 0 else 0.0
+            r15_6 = (c_now - closes_15m[-7]) / closes_15m[-7] if closes_15m[-7] > 0 else 0.0
+            micro_raw = (0.5 * r15_6) + (0.3 * r15_3) + (0.2 * r15_1)
+            micro_15m = round(_clip(micro_raw / 0.012, -1.0, 1.0), 4)
+
     return {
         "trend_score": round(_clip(trend_score, -1.0, 1.0), 4),
         "momentum_score": round(_clip(momentum_score, -1.0, 1.0), 4),
@@ -414,6 +450,7 @@ def _compute_binance_mtf_signal(symbol: str) -> dict | None:
         "trend_1d": round(r_1d, 6),
         "trend_4h": round(r_4h, 6),
         "trend_1h": round(r_1h, 6),
+        "micro_trend_15m": micro_15m,
         "source": "klines_1h_mtf",
     }
 
@@ -459,9 +496,9 @@ def _build_auto_pick_universe(
         if pick_direction == "LONG":
             return ["BUY"]
         if pick_direction == "SHORT":
-            return ["SELL"] if ex == "IBKR" else []
+            return ["SELL"]
         # BOTH
-        return ["BUY", "SELL"] if ex == "IBKR" else ["BUY"]
+        return ["BUY", "SELL"]
 
     sides = _sides_for_direction()
     if not sides:
@@ -552,6 +589,7 @@ def _build_auto_pick_universe(
                                 market_trend_score_1d=None,
                                 market_trend_score_4h=None,
                                 market_trend_score_1h=None,
+                                market_micro_trend_15m=None,
                                 atr_pct=round(float(r.atr_pct or 0.0), 3),
                                 momentum_score=round(float(r.momentum_score or 0.0), 3),
                                 funding_rate_bps=0.0,
@@ -625,6 +663,11 @@ def _build_auto_pick_universe(
                         market_trend_score_1d=round(float(mtf.get("trend_1d")) if mtf is not None and mtf.get("trend_1d") is not None else trend, 6),
                         market_trend_score_4h=round(float(mtf.get("trend_4h")) if mtf is not None and mtf.get("trend_4h") is not None else trend, 6),
                         market_trend_score_1h=round(float(mtf.get("trend_1h")) if mtf is not None and mtf.get("trend_1h") is not None else trend, 6),
+                        market_micro_trend_15m=(
+                            round(float(mtf.get("micro_trend_15m")), 6)
+                            if mtf is not None and mtf.get("micro_trend_15m") is not None
+                            else None
+                        ),
                         atr_pct=round(vol, 3),
                         momentum_score=round(momentum, 3),
                         funding_rate_bps=0.0,
@@ -649,6 +692,7 @@ def _build_auto_pick_universe(
             market_trend_score_1d=None,
             market_trend_score_4h=None,
             market_trend_score_1h=None,
+            market_micro_trend_15m=None,
             atr_pct=0.0,
             momentum_score=0.0,
             funding_rate_bps=0.0,
@@ -1252,10 +1296,13 @@ def _pretrade_scores(
 
     trend_raw = max(-1.0, min(1.0, float(payload.market_trend_score)))
     momentum_raw = max(-1.0, min(1.0, float(payload.momentum_score)))
+    micro_raw = payload.market_micro_trend_15m
+    micro_raw = 0.0 if micro_raw is None else max(-1.0, min(1.0, float(micro_raw)))
     side = str(payload.side or "BUY").upper()
     # For SHORT candidates, negative trend/momentum should increase score.
     trend = trend_raw if side == "BUY" else (-trend_raw)
     momentum = momentum_raw if side == "BUY" else (-momentum_raw)
+    micro = micro_raw if side == "BUY" else (-micro_raw)
     rr = max(0.0, min(3.0, float(payload.rr_estimate)))
     spread = max(0.0, float(payload.spread_bps))
     slippage = max(0.0, float(payload.slippage_bps))
@@ -1265,8 +1312,11 @@ def _pretrade_scores(
     atr_penalty = max(0.0, atr_pct - 6.0) * 1.5
 
     score_market = 45.0
-    score_market += trend * 18.0
+    score_market += trend * 16.0
     score_market += momentum * 14.0
+    # Micro trend is confirmation only; dampen impact in noisy volatility.
+    micro_mult = 0.6 if atr_pct > 6.0 else 1.0
+    score_market += micro * 4.0 * micro_mult
     score_market += rr * 7.0
     score_market += liq * 10.0
     score_market -= spread * 0.6
@@ -1588,7 +1638,10 @@ def _auto_pick_from_scan(
         if top_candidate_symbol
         else None
     )
-    def _resolve_trend_fields(symbol: Optional[str], candidate_obj: Optional[PretradeCheckRequest]) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    def _resolve_trend_fields(
+        symbol: Optional[str],
+        candidate_obj: Optional[PretradeCheckRequest],
+    ) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]:
         trend = float(candidate_obj.market_trend_score) if candidate_obj else None
         trend_1d = (
             float(candidate_obj.market_trend_score_1d)
@@ -1605,10 +1658,15 @@ def _auto_pick_from_scan(
             if candidate_obj and candidate_obj.market_trend_score_1h is not None
             else None
         )
+        micro_15m = (
+            float(candidate_obj.market_micro_trend_15m)
+            if candidate_obj and candidate_obj.market_micro_trend_15m is not None
+            else None
+        )
         # For BINANCE, fill missing MTF fields directly from klines signal when snapshots
         # only provided aggregate trend_score.
         if (exchange or "").upper() == "BINANCE" and symbol and (
-            trend is None or trend_1d is None or trend_4h is None or trend_1h is None
+            trend is None or trend_1d is None or trend_4h is None or trend_1h is None or micro_15m is None
         ):
             try:
                 mtf = _compute_binance_mtf_signal(str(symbol).upper())
@@ -1623,13 +1681,16 @@ def _auto_pick_from_scan(
                     trend_4h = float(mtf.get("trend_4h"))
                 if trend_1h is None and mtf.get("trend_1h") is not None:
                     trend_1h = float(mtf.get("trend_1h"))
-        return trend, trend_1d, trend_4h, trend_1h
+                if micro_15m is None and mtf.get("micro_trend_15m") is not None:
+                    micro_15m = float(mtf.get("micro_trend_15m"))
+        return trend, trend_1d, trend_4h, trend_1h, micro_15m
 
     (
         top_candidate_trend_score,
         top_candidate_trend_score_1d,
         top_candidate_trend_score_4h,
         top_candidate_trend_score_1h,
+        top_candidate_micro_trend_15m,
     ) = _resolve_trend_fields(top_candidate_symbol, top_candidate_obj)
     avg_score = None
     avg_score_rules = None
@@ -1681,6 +1742,7 @@ def _auto_pick_from_scan(
             "selected_trend_score_1d": None,
             "selected_trend_score_4h": None,
             "selected_trend_score_1h": None,
+            "selected_micro_trend_15m": None,
             "selected_market_regime": None,
             "top_candidate_symbol": None,
             "top_candidate_score": None,
@@ -1690,15 +1752,12 @@ def _auto_pick_from_scan(
             "top_candidate_trend_score_1d": None,
             "top_candidate_trend_score_4h": None,
             "top_candidate_trend_score_1h": None,
+            "top_candidate_micro_trend_15m": None,
             "avg_score": None,
             "avg_score_rules": None,
             "avg_score_market": None,
             "decision": "no_universe_symbols_configured",
-            "top_failed_checks": (
-                ["short_not_supported_for_exchange"]
-                if (exchange or "").upper() == "BINANCE" and str(payload.direction).upper() == "SHORT"
-                else ["allowlist_empty"]
-            ),
+            "top_failed_checks": ["allowlist_empty"],
             "execution": None,
             "scan": scan,
         })
@@ -1731,6 +1790,7 @@ def _auto_pick_from_scan(
             "selected_trend_score_1d": None,
             "selected_trend_score_4h": None,
             "selected_trend_score_1h": None,
+            "selected_micro_trend_15m": None,
             "selected_market_regime": None,
             "top_candidate_symbol": top_candidate_symbol,
             "top_candidate_score": (top_candidate or {}).get("score"),
@@ -1740,6 +1800,7 @@ def _auto_pick_from_scan(
             "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
             "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
             "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1782,6 +1843,7 @@ def _auto_pick_from_scan(
             "selected_trend_score_1d": None,
             "selected_trend_score_4h": None,
             "selected_trend_score_1h": None,
+            "selected_micro_trend_15m": None,
             "selected_market_regime": None,
             "selected_liquidity_state": liquidity_state,
             "selected_size_multiplier": 0.0,
@@ -1793,6 +1855,7 @@ def _auto_pick_from_scan(
             "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
             "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
             "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1817,6 +1880,7 @@ def _auto_pick_from_scan(
             "selected_trend_score_1d": None,
             "selected_trend_score_4h": None,
             "selected_trend_score_1h": None,
+            "selected_micro_trend_15m": None,
             "selected_market_regime": None,
             "selected_liquidity_state": "red",
             "selected_size_multiplier": 0.0,
@@ -1828,6 +1892,7 @@ def _auto_pick_from_scan(
             "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
             "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
             "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1872,6 +1937,7 @@ def _auto_pick_from_scan(
         selected_trend_score_1d,
         selected_trend_score_4h,
         selected_trend_score_1h,
+        selected_micro_trend_15m,
     ) = _resolve_trend_fields(selected_symbol, candidate)
 
     return _finalize({
@@ -1889,6 +1955,7 @@ def _auto_pick_from_scan(
         "selected_trend_score_1d": selected_trend_score_1d,
         "selected_trend_score_4h": selected_trend_score_4h,
         "selected_trend_score_1h": selected_trend_score_1h,
+        "selected_micro_trend_15m": selected_micro_trend_15m,
         "selected_market_regime": selected["market_regime"],
         "selected_liquidity_state": liquidity_state,
         "selected_size_multiplier": round(float(size_multiplier), 4),
@@ -1900,6 +1967,7 @@ def _auto_pick_from_scan(
         "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
         "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
         "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+        "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
         "avg_score": avg_score,
         "avg_score_rules": avg_score_rules,
         "avg_score_market": avg_score_market,
@@ -1986,6 +2054,23 @@ def _build_strategy_checks(
                 "name": "short_mtf_1h_bear",
                 "passed": float(t1h) <= -0.25,
                 "detail": f"value={round(float(t1h),6)} required<=-0.25",
+            }
+        )
+        micro = payload.market_micro_trend_15m
+        checks.append(
+            {
+                "name": "short_micro_15m_confirm",
+                "passed": True if micro is None else float(micro) <= -0.12,
+                "detail": "no_data -> pass" if micro is None else f"value={round(float(micro),6)} required<=-0.12",
+            }
+        )
+    else:
+        micro = payload.market_micro_trend_15m
+        checks.append(
+            {
+                "name": "long_micro_15m_confirm",
+                "passed": True if micro is None else float(micro) >= 0.08,
+                "detail": "no_data -> pass" if micro is None else f"value={round(float(micro),6)} required>=0.08",
             }
         )
     checks.append(
@@ -2570,6 +2655,8 @@ def auto_pick_report(
             "short_mtf_1d_strong_bear": "SHORT: tendencia 1D no suficientemente bajista",
             "short_mtf_4h_strong_bear": "SHORT: tendencia 4H no suficientemente bajista",
             "short_mtf_1h_bear": "SHORT: tendencia 1H no bajista",
+            "short_micro_15m_confirm": "SHORT: micro tendencia 15m no confirma",
+            "long_micro_15m_confirm": "LONG: micro tendencia 15m no confirma",
             "short_requires_green_liquidity": "SHORT: liquidez no green",
             "strategy_rr_min": "RR por debajo del minimo",
             "score_below_min_threshold": "Score por debajo del minimo",
@@ -2654,10 +2741,12 @@ def auto_pick_report(
         selected_trend_score_1d = details.get("selected_trend_score_1d")
         selected_trend_score_4h = details.get("selected_trend_score_4h")
         selected_trend_score_1h = details.get("selected_trend_score_1h")
+        selected_micro_trend_15m = details.get("selected_micro_trend_15m")
         top_candidate_trend_score = details.get("top_candidate_trend_score")
         top_candidate_trend_score_1d = details.get("top_candidate_trend_score_1d")
         top_candidate_trend_score_4h = details.get("top_candidate_trend_score_4h")
         top_candidate_trend_score_1h = details.get("top_candidate_trend_score_1h")
+        top_candidate_micro_trend_15m = details.get("top_candidate_micro_trend_15m")
         out_rows.append(
             AutoPickReportItemOut(
                 timestamp=created_at.isoformat(),
@@ -2677,10 +2766,12 @@ def auto_pick_report(
                 trend_score_1d=(top_candidate_trend_score_1d if top_candidate_trend_score_1d is not None else selected_trend_score_1d),
                 trend_score_4h=(top_candidate_trend_score_4h if top_candidate_trend_score_4h is not None else selected_trend_score_4h),
                 trend_score_1h=(top_candidate_trend_score_1h if top_candidate_trend_score_1h is not None else selected_trend_score_1h),
+                micro_trend_15m=(top_candidate_micro_trend_15m if top_candidate_micro_trend_15m is not None else selected_micro_trend_15m),
                 top_candidate_trend_score=top_candidate_trend_score,
                 top_candidate_trend_score_1d=top_candidate_trend_score_1d,
                 top_candidate_trend_score_4h=top_candidate_trend_score_4h,
                 top_candidate_trend_score_1h=top_candidate_trend_score_1h,
+                top_candidate_micro_trend_15m=top_candidate_micro_trend_15m,
                 avg_score=details.get("avg_score"),
                 avg_score_rules=details.get("avg_score_rules"),
                 avg_score_market=details.get("avg_score_market"),
@@ -3231,6 +3322,7 @@ def pretrade_binance_auto_pick(
             "selected_trend_score_1d": out.get("selected_trend_score_1d"),
             "selected_trend_score_4h": out.get("selected_trend_score_4h"),
             "selected_trend_score_1h": out.get("selected_trend_score_1h"),
+            "selected_micro_trend_15m": out.get("selected_micro_trend_15m"),
             "selected_market_regime": out["selected_market_regime"],
             "selected_liquidity_state": out.get("selected_liquidity_state"),
             "selected_size_multiplier": out.get("selected_size_multiplier"),
@@ -3242,6 +3334,7 @@ def pretrade_binance_auto_pick(
             "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
             "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
             "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
+            "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
             "avg_score": out.get("avg_score"),
             "avg_score_rules": out.get("avg_score_rules"),
             "avg_score_market": out.get("avg_score_market"),
@@ -3292,6 +3385,7 @@ def pretrade_ibkr_auto_pick(
             "selected_trend_score_1d": out.get("selected_trend_score_1d"),
             "selected_trend_score_4h": out.get("selected_trend_score_4h"),
             "selected_trend_score_1h": out.get("selected_trend_score_1h"),
+            "selected_micro_trend_15m": out.get("selected_micro_trend_15m"),
             "selected_market_regime": out["selected_market_regime"],
             "selected_liquidity_state": out.get("selected_liquidity_state"),
             "selected_size_multiplier": out.get("selected_size_multiplier"),
@@ -3303,6 +3397,7 @@ def pretrade_ibkr_auto_pick(
             "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
             "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
             "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
+            "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
             "avg_score": out.get("avg_score"),
             "avg_score_rules": out.get("avg_score_rules"),
             "avg_score_market": out.get("avg_score_market"),
@@ -3393,6 +3488,7 @@ def run_auto_pick_tick_for_tenant(
                     "selected_trend_score_1d": out.get("selected_trend_score_1d"),
                     "selected_trend_score_4h": out.get("selected_trend_score_4h"),
                     "selected_trend_score_1h": out.get("selected_trend_score_1h"),
+                    "selected_micro_trend_15m": out.get("selected_micro_trend_15m"),
                     "selected_market_regime": out["selected_market_regime"],
                     "selected_liquidity_state": out.get("selected_liquidity_state"),
                     "selected_size_multiplier": out.get("selected_size_multiplier"),
@@ -3404,6 +3500,7 @@ def run_auto_pick_tick_for_tenant(
                     "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
                     "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
                     "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
+                    "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
                     "avg_score": out.get("avg_score"),
                     "avg_score_rules": out.get("avg_score_rules"),
                     "avg_score_market": out.get("avg_score_market"),
@@ -3426,6 +3523,7 @@ def run_auto_pick_tick_for_tenant(
                     "selected_trend_score_1d": out.get("selected_trend_score_1d"),
                     "selected_trend_score_4h": out.get("selected_trend_score_4h"),
                     "selected_trend_score_1h": out.get("selected_trend_score_1h"),
+                    "selected_micro_trend_15m": out.get("selected_micro_trend_15m"),
                     "selected_liquidity_state": out.get("selected_liquidity_state"),
                     "selected_size_multiplier": out.get("selected_size_multiplier"),
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
@@ -3436,6 +3534,7 @@ def run_auto_pick_tick_for_tenant(
                     "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
                     "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
                     "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
+                    "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
                     "avg_score": out.get("avg_score"),
                     "avg_score_rules": out.get("avg_score_rules"),
                     "avg_score_market": out.get("avg_score_market"),
@@ -5782,7 +5881,7 @@ def ops_console_page():
                 <th>Motivo</th>
                 <th>Score</th>
                 <th>Tendencia</th>
-                <th>MTF 1D/4H/1H</th>
+                <th>MTF 1D/4H/1H/15m</th>
                 <th>Score prom</th>
                 <th>Escaneados</th>
               </tr>
@@ -5803,7 +5902,7 @@ def ops_console_page():
                 <th>Motivo</th>
                 <th>Score</th>
                 <th>Tendencia</th>
-                <th>MTF 1D/4H/1H</th>
+                <th>MTF 1D/4H/1H/15m</th>
                 <th>Score prom</th>
                 <th>Escaneados</th>
               </tr>
@@ -6060,11 +6159,12 @@ def ops_console_page():
         const n = Number(v);
         return n.toFixed(3).replace(/\.?0+$/, "");
       };
-      const fmtTrendMtfCell = (t1d, t4h, t1h) => {
+      const fmtTrendMtfCell = (t1d, t4h, t1h, t15m) => {
         const a = fmtTrendVal(t1d);
         const b = fmtTrendVal(t4h);
         const c = fmtTrendVal(t1h);
-        return `${a} / ${b} / ${c}`;
+        const d = fmtTrendVal(t15m);
+        return `${a} / ${b} / ${c} / ${d}`;
       };
       const directionOf = (row) => {
         const side = String(row.side || "").toUpperCase();
@@ -6087,7 +6187,7 @@ def ops_console_page():
           <td>${esc(r.reason || "-")}</td>
           <td>${esc(fmtScoreCell(r.score, r.score_rules, r.score_market))}</td>
           <td>${esc(fmtTrendVal(r.top_candidate_trend_score ?? r.trend_score))}</td>
-          <td>${esc(fmtTrendMtfCell(r.top_candidate_trend_score_1d, r.top_candidate_trend_score_4h, r.top_candidate_trend_score_1h))}</td>
+          <td>${esc(fmtTrendMtfCell(r.top_candidate_trend_score_1d, r.top_candidate_trend_score_4h, r.top_candidate_trend_score_1h, r.top_candidate_micro_trend_15m ?? r.micro_trend_15m))}</td>
           <td>${esc(fmtScoreCell(r.avg_score, r.avg_score_rules, r.avg_score_market))}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>

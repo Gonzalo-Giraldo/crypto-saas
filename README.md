@@ -151,7 +151,9 @@ pytest -q tests/integration
   - optional bridge mode via `IBKR_BRIDGE_BASE_URL`.
 - Binance gateway service (`apps/binance_gateway`) supports:
   - `BINANCE_GATEWAY_TOKEN` (required shared secret, header `X-Internal-Token`)
-  - `BINANCE_BASE_URL` (default `https://testnet.binance.vision`)
+  - `BINANCE_SPOT_BASE_URL` (default `https://testnet.binance.vision`)
+  - `BINANCE_FUTURES_BASE_URL` (default `https://testnet.binancefuture.com`)
+  - legacy fallback: `BINANCE_BASE_URL` (treated as SPOT base)
   - `BINANCE_GATEWAY_TIMEOUT_SECONDS` (default `12`)
   - `BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE=true|false` (default `false`)
   - `BINANCE_GATEWAY_RATE_LIMIT_PER_MIN` (default `60`)
@@ -190,11 +192,11 @@ pytest -q tests/integration
   - `top_candidate_trend_score`, `top_candidate_trend_score_1d`, `top_candidate_trend_score_4h`, `top_candidate_trend_score_1h`
 - Auto-pick direction control:
   - request supports `direction=LONG|SHORT|BOTH` (default `LONG`).
-  - `SHORT` is enabled for `IBKR`.
-  - for `BINANCE`, `SHORT` returns no universe (`short_not_supported_for_exchange`) in current spot/test-order setup.
+  - `SHORT` is enabled for `IBKR` and `BINANCE`.
+  - for `BINANCE`, `SELL` test-order is routed to Futures (`/fapi/v1/order/test`), while `BUY` remains on Spot test-order.
 - `/ops/console` auto-pick report table includes trend columns:
   - `Tendencia`
-  - `MTF 1D/4H/1H`
+  - `MTF 1D/4H/1H/15m` (el `15m` es micro-confirmacion de las ultimas 6 velas de 15 minutos)
 - Learning pipeline (decision snapshots + outcomes + rollups):
   - captures auto-pick decisions continuously,
   - labels outcomes by horizon (`horizon_minutes`),

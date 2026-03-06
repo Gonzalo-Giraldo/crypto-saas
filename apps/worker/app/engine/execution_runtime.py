@@ -101,10 +101,12 @@ def execute_binance_test_order_for_user(
                 detail="Missing credentials for BINANCE",
             )
 
+        market = "FUTURES" if str(side or "").upper() == "SELL" else "SPOT"
         try:
             qty_meta = prepare_binance_market_order_quantity(
                 symbol=symbol,
                 requested_qty=qty,
+                market=market,
             )
             client_order_id = _build_binance_client_order_id(
                 user_id=user_id,
@@ -119,6 +121,7 @@ def execute_binance_test_order_for_user(
                 side=side,
                 qty=float(qty_meta["normalized_qty"]),
                 client_order_id=client_order_id,
+                market=market,
             )
         except Exception as exc:
             log_audit_event(
@@ -132,6 +135,7 @@ def execute_binance_test_order_for_user(
                     "qty": qty,
                     "client_order_id": locals().get("client_order_id"),
                     "normalized_qty": (locals().get("qty_meta") or {}).get("normalized_qty"),
+                    "market": market,
                     "error": str(exc),
                 },
             )
@@ -152,14 +156,15 @@ def execute_binance_test_order_for_user(
                 "qty_requested": qty,
                 "qty_normalized": qty_meta["normalized_qty"],
                 "client_order_id": client_order_id,
-                "mode": "testnet_order_test",
+                "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+                "market": market,
             },
         )
         db.commit()
 
         return {
             "exchange": "BINANCE",
-            "mode": "testnet_order_test",
+            "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
             "symbol": symbol.upper(),
             "side": side.upper(),
             "qty": float(qty_meta["normalized_qty"]),
@@ -208,6 +213,7 @@ def _send_binance_test_order_with_retry(
     side: str,
     qty: float,
     client_order_id: str,
+    market: str = "SPOT",
 ) -> None:
     attempts = max(1, int(settings.BINANCE_ORDER_RETRY_MAX_ATTEMPTS or 2))
     backoff_base = max(0.05, float(settings.BINANCE_ORDER_RETRY_BACKOFF_SECONDS or 0.7))
@@ -221,6 +227,7 @@ def _send_binance_test_order_with_retry(
                 side=side,
                 qty=qty,
                 client_order_id=client_order_id,
+                market=market,
             )
             return
         except Exception as exc:
@@ -240,6 +247,7 @@ def _send_binance_test_order(
     side: str,
     qty: float,
     client_order_id: str | None = None,
+    market: str = "SPOT",
 ) -> None:
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if not gateway_enabled:
@@ -250,6 +258,7 @@ def _send_binance_test_order(
             side=side,
             quantity=qty,
             client_order_id=client_order_id,
+            market=market,
         )
         return
 
@@ -261,6 +270,7 @@ def _send_binance_test_order(
             side=side,
             qty=qty,
             client_order_id=client_order_id,
+            market=market,
         )
     except Exception:
         if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
@@ -272,6 +282,7 @@ def _send_binance_test_order(
             side=side,
             quantity=qty,
             client_order_id=client_order_id,
+            market=market,
         )
 
 
@@ -282,6 +293,7 @@ def _send_binance_test_order_via_gateway(
     side: str,
     qty: float,
     client_order_id: str | None = None,
+    market: str = "SPOT",
 ) -> None:
     base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
     url = f"{base}/binance/test-order"
@@ -296,6 +308,7 @@ def _send_binance_test_order_via_gateway(
         "side": side.upper(),
         "qty": qty,
         "client_order_id": client_order_id,
+        "market": str(market or "SPOT").upper(),
     }
 
     response = requests.post(
