@@ -1562,6 +1562,49 @@ def _auto_pick_from_scan(
         if top_candidate_symbol
         else None
     )
+    def _resolve_trend_fields(symbol: Optional[str], candidate_obj: Optional[PretradeCheckRequest]) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+        trend = float(candidate_obj.market_trend_score) if candidate_obj else None
+        trend_1d = (
+            float(candidate_obj.market_trend_score_1d)
+            if candidate_obj and candidate_obj.market_trend_score_1d is not None
+            else None
+        )
+        trend_4h = (
+            float(candidate_obj.market_trend_score_4h)
+            if candidate_obj and candidate_obj.market_trend_score_4h is not None
+            else None
+        )
+        trend_1h = (
+            float(candidate_obj.market_trend_score_1h)
+            if candidate_obj and candidate_obj.market_trend_score_1h is not None
+            else None
+        )
+        # For BINANCE, fill missing MTF fields directly from klines signal when snapshots
+        # only provided aggregate trend_score.
+        if (exchange or "").upper() == "BINANCE" and symbol and (
+            trend is None or trend_1d is None or trend_4h is None or trend_1h is None
+        ):
+            try:
+                mtf = _compute_binance_mtf_signal(str(symbol).upper())
+            except Exception:
+                mtf = None
+            if mtf:
+                if trend is None:
+                    trend = float(mtf.get("trend_score") or 0.0)
+                if trend_1d is None and mtf.get("trend_1d") is not None:
+                    trend_1d = float(mtf.get("trend_1d"))
+                if trend_4h is None and mtf.get("trend_4h") is not None:
+                    trend_4h = float(mtf.get("trend_4h"))
+                if trend_1h is None and mtf.get("trend_1h") is not None:
+                    trend_1h = float(mtf.get("trend_1h"))
+        return trend, trend_1d, trend_4h, trend_1h
+
+    (
+        top_candidate_trend_score,
+        top_candidate_trend_score_1d,
+        top_candidate_trend_score_4h,
+        top_candidate_trend_score_1h,
+    ) = _resolve_trend_fields(top_candidate_symbol, top_candidate_obj)
     avg_score = None
     avg_score_rules = None
     avg_score_market = None
@@ -1656,22 +1699,10 @@ def _auto_pick_from_scan(
             "top_candidate_score": (top_candidate or {}).get("score"),
             "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
             "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-            "top_candidate_trend_score": (float(top_candidate_obj.market_trend_score) if top_candidate_obj else None),
-            "top_candidate_trend_score_1d": (
-                float(top_candidate_obj.market_trend_score_1d)
-                if top_candidate_obj and top_candidate_obj.market_trend_score_1d is not None
-                else None
-            ),
-            "top_candidate_trend_score_4h": (
-                float(top_candidate_obj.market_trend_score_4h)
-                if top_candidate_obj and top_candidate_obj.market_trend_score_4h is not None
-                else None
-            ),
-            "top_candidate_trend_score_1h": (
-                float(top_candidate_obj.market_trend_score_1h)
-                if top_candidate_obj and top_candidate_obj.market_trend_score_1h is not None
-                else None
-            ),
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1719,22 +1750,10 @@ def _auto_pick_from_scan(
             "top_candidate_score": (top_candidate or {}).get("score"),
             "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
             "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-            "top_candidate_trend_score": (float(top_candidate_obj.market_trend_score) if top_candidate_obj else None),
-            "top_candidate_trend_score_1d": (
-                float(top_candidate_obj.market_trend_score_1d)
-                if top_candidate_obj and top_candidate_obj.market_trend_score_1d is not None
-                else None
-            ),
-            "top_candidate_trend_score_4h": (
-                float(top_candidate_obj.market_trend_score_4h)
-                if top_candidate_obj and top_candidate_obj.market_trend_score_4h is not None
-                else None
-            ),
-            "top_candidate_trend_score_1h": (
-                float(top_candidate_obj.market_trend_score_1h)
-                if top_candidate_obj and top_candidate_obj.market_trend_score_1h is not None
-                else None
-            ),
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1770,20 +1789,28 @@ def _auto_pick_from_scan(
             decision = "insufficient_resources_or_execution_error"
             execution = {"error": str(exc.detail)}
 
+    selected_symbol = selected["symbol"]
+    (
+        selected_trend_score,
+        selected_trend_score_1d,
+        selected_trend_score_4h,
+        selected_trend_score_1h,
+    ) = _resolve_trend_fields(selected_symbol, candidate)
+
     return _finalize({
         "exchange": exchange,
         "dry_run": bool(payload.dry_run),
         "selected": True,
-        "selected_symbol": selected["symbol"],
+        "selected_symbol": selected_symbol,
         "selected_side": selected["side"],
         "selected_qty": round(selected_qty, 8),
         "selected_score": selected["score"],
         "selected_score_rules": selected["score_rules"],
         "selected_score_market": selected["score_market"],
-        "selected_trend_score": float(candidate.market_trend_score) if candidate else None,
-        "selected_trend_score_1d": (float(candidate.market_trend_score_1d) if candidate and candidate.market_trend_score_1d is not None else None),
-        "selected_trend_score_4h": (float(candidate.market_trend_score_4h) if candidate and candidate.market_trend_score_4h is not None else None),
-        "selected_trend_score_1h": (float(candidate.market_trend_score_1h) if candidate and candidate.market_trend_score_1h is not None else None),
+        "selected_trend_score": selected_trend_score,
+        "selected_trend_score_1d": selected_trend_score_1d,
+        "selected_trend_score_4h": selected_trend_score_4h,
+        "selected_trend_score_1h": selected_trend_score_1h,
         "selected_market_regime": selected["market_regime"],
         "selected_liquidity_state": liquidity_state,
         "selected_size_multiplier": round(float(size_multiplier), 4),
@@ -1791,22 +1818,10 @@ def _auto_pick_from_scan(
         "top_candidate_score": (top_candidate or {}).get("score"),
         "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
         "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-        "top_candidate_trend_score": (float(top_candidate_obj.market_trend_score) if top_candidate_obj else None),
-        "top_candidate_trend_score_1d": (
-            float(top_candidate_obj.market_trend_score_1d)
-            if top_candidate_obj and top_candidate_obj.market_trend_score_1d is not None
-            else None
-        ),
-        "top_candidate_trend_score_4h": (
-            float(top_candidate_obj.market_trend_score_4h)
-            if top_candidate_obj and top_candidate_obj.market_trend_score_4h is not None
-            else None
-        ),
-        "top_candidate_trend_score_1h": (
-            float(top_candidate_obj.market_trend_score_1h)
-            if top_candidate_obj and top_candidate_obj.market_trend_score_1h is not None
-            else None
-        ),
+        "top_candidate_trend_score": top_candidate_trend_score,
+        "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+        "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+        "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
         "avg_score": avg_score,
         "avg_score_rules": avg_score_rules,
         "avg_score_market": avg_score_market,
