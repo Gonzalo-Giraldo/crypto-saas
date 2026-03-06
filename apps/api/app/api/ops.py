@@ -2563,6 +2563,27 @@ def auto_pick_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    def _friendly_check_name(raw: str) -> str:
+        key = str(raw or "").strip()
+        mapping = {
+            "short_mtf_1d_strong_bear": "SHORT: tendencia 1D no suficientemente bajista",
+            "short_mtf_4h_strong_bear": "SHORT: tendencia 4H no suficientemente bajista",
+            "short_mtf_1h_bear": "SHORT: tendencia 1H no bajista",
+            "short_requires_green_liquidity": "SHORT: liquidez no green",
+            "strategy_rr_min": "RR por debajo del minimo",
+            "score_below_min_threshold": "Score por debajo del minimo",
+            "liq_volume_24h": "Liquidez: volumen 24h insuficiente",
+            "liq_spread_bps": "Liquidez: spread alto",
+            "liq_slippage_bps": "Liquidez: slippage alto",
+            "effective_liquidity_failed": "Liquidez efectiva no apta",
+            "market_regime_allowed": "Regimen de mercado no permitido",
+            "max_leverage": "Leverage supera el maximo",
+            "ibkr_in_rth": "IBKR fuera de horario RTH",
+            "ibkr_no_macro_block": "Bloqueo por evento macro",
+            "ibkr_no_earnings_24h": "Bloqueo por earnings <24h",
+        }
+        return mapping.get(key, key)
+
     hours = max(1, min(hours, 48))
     limit = max(1, min(limit, 2000))
     interval_minutes = max(1, min(interval_minutes, 60))
@@ -2616,7 +2637,9 @@ def auto_pick_report(
         if not selected:
             top_failed = details.get("top_failed_checks") or []
             if isinstance(top_failed, list) and top_failed:
-                reason = f"no_compra: {', '.join(str(x) for x in top_failed[:3])}"
+                first = _friendly_check_name(str(top_failed[0]))
+                rest = max(0, len(top_failed) - 1)
+                reason = f"no_compra: {first}" + (f" (+{rest})" if rest else "")
             else:
                 reason = "no_compra: sin candidato aprobado"
         top_symbol = details.get("top_candidate_symbol")
