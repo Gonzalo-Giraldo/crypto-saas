@@ -176,6 +176,10 @@ class PretradeAutoPickOut(BaseModel):
     top_candidate_score: Optional[float] = None
     top_candidate_score_rules: Optional[float] = None
     top_candidate_score_market: Optional[float] = None
+    top_candidate_trend_score: Optional[float] = None
+    top_candidate_trend_score_1d: Optional[float] = None
+    top_candidate_trend_score_4h: Optional[float] = None
+    top_candidate_trend_score_1h: Optional[float] = None
     avg_score: Optional[float] = None
     avg_score_rules: Optional[float] = None
     avg_score_market: Optional[float] = None

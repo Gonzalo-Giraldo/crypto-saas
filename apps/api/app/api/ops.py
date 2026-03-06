@@ -1556,6 +1556,12 @@ def _auto_pick_from_scan(
     candidate_by_symbol = {c.symbol.upper(): c for c in universe}
     assets = scan.get("assets", [])
     top_candidate = assets[0] if assets else None
+    top_candidate_symbol = (top_candidate or {}).get("symbol")
+    top_candidate_obj = (
+        candidate_by_symbol.get(str(top_candidate_symbol).upper())
+        if top_candidate_symbol
+        else None
+    )
     avg_score = None
     avg_score_rules = None
     avg_score_market = None
@@ -1610,6 +1616,10 @@ def _auto_pick_from_scan(
             "top_candidate_score": None,
             "top_candidate_score_rules": None,
             "top_candidate_score_market": None,
+            "top_candidate_trend_score": None,
+            "top_candidate_trend_score_1d": None,
+            "top_candidate_trend_score_4h": None,
+            "top_candidate_trend_score_1h": None,
             "avg_score": None,
             "avg_score_rules": None,
             "avg_score_market": None,
@@ -1642,10 +1652,26 @@ def _auto_pick_from_scan(
             "selected_trend_score_4h": None,
             "selected_trend_score_1h": None,
             "selected_market_regime": None,
-            "top_candidate_symbol": (top_candidate or {}).get("symbol"),
+            "top_candidate_symbol": top_candidate_symbol,
             "top_candidate_score": (top_candidate or {}).get("score"),
             "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
             "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+            "top_candidate_trend_score": (float(top_candidate_obj.market_trend_score) if top_candidate_obj else None),
+            "top_candidate_trend_score_1d": (
+                float(top_candidate_obj.market_trend_score_1d)
+                if top_candidate_obj and top_candidate_obj.market_trend_score_1d is not None
+                else None
+            ),
+            "top_candidate_trend_score_4h": (
+                float(top_candidate_obj.market_trend_score_4h)
+                if top_candidate_obj and top_candidate_obj.market_trend_score_4h is not None
+                else None
+            ),
+            "top_candidate_trend_score_1h": (
+                float(top_candidate_obj.market_trend_score_1h)
+                if top_candidate_obj and top_candidate_obj.market_trend_score_1h is not None
+                else None
+            ),
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1689,10 +1715,26 @@ def _auto_pick_from_scan(
             "selected_market_regime": None,
             "selected_liquidity_state": "red",
             "selected_size_multiplier": 0.0,
-            "top_candidate_symbol": (top_candidate or {}).get("symbol"),
+            "top_candidate_symbol": top_candidate_symbol,
             "top_candidate_score": (top_candidate or {}).get("score"),
             "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
             "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+            "top_candidate_trend_score": (float(top_candidate_obj.market_trend_score) if top_candidate_obj else None),
+            "top_candidate_trend_score_1d": (
+                float(top_candidate_obj.market_trend_score_1d)
+                if top_candidate_obj and top_candidate_obj.market_trend_score_1d is not None
+                else None
+            ),
+            "top_candidate_trend_score_4h": (
+                float(top_candidate_obj.market_trend_score_4h)
+                if top_candidate_obj and top_candidate_obj.market_trend_score_4h is not None
+                else None
+            ),
+            "top_candidate_trend_score_1h": (
+                float(top_candidate_obj.market_trend_score_1h)
+                if top_candidate_obj and top_candidate_obj.market_trend_score_1h is not None
+                else None
+            ),
             "avg_score": avg_score,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
@@ -1745,10 +1787,26 @@ def _auto_pick_from_scan(
         "selected_market_regime": selected["market_regime"],
         "selected_liquidity_state": liquidity_state,
         "selected_size_multiplier": round(float(size_multiplier), 4),
-        "top_candidate_symbol": (top_candidate or {}).get("symbol"),
+        "top_candidate_symbol": top_candidate_symbol,
         "top_candidate_score": (top_candidate or {}).get("score"),
         "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
         "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+        "top_candidate_trend_score": (float(top_candidate_obj.market_trend_score) if top_candidate_obj else None),
+        "top_candidate_trend_score_1d": (
+            float(top_candidate_obj.market_trend_score_1d)
+            if top_candidate_obj and top_candidate_obj.market_trend_score_1d is not None
+            else None
+        ),
+        "top_candidate_trend_score_4h": (
+            float(top_candidate_obj.market_trend_score_4h)
+            if top_candidate_obj and top_candidate_obj.market_trend_score_4h is not None
+            else None
+        ),
+        "top_candidate_trend_score_1h": (
+            float(top_candidate_obj.market_trend_score_1h)
+            if top_candidate_obj and top_candidate_obj.market_trend_score_1h is not None
+            else None
+        ),
         "avg_score": avg_score,
         "avg_score_rules": avg_score_rules,
         "avg_score_market": avg_score_market,
@@ -2444,6 +2502,10 @@ def auto_pick_report(
         selected_trend_score_1d = details.get("selected_trend_score_1d")
         selected_trend_score_4h = details.get("selected_trend_score_4h")
         selected_trend_score_1h = details.get("selected_trend_score_1h")
+        top_candidate_trend_score = details.get("top_candidate_trend_score")
+        top_candidate_trend_score_1d = details.get("top_candidate_trend_score_1d")
+        top_candidate_trend_score_4h = details.get("top_candidate_trend_score_4h")
+        top_candidate_trend_score_1h = details.get("top_candidate_trend_score_1h")
         out_rows.append(
             AutoPickReportItemOut(
                 timestamp=created_at.isoformat(),
@@ -2459,10 +2521,14 @@ def auto_pick_report(
                 score=top_score if top_score is not None else selected_score,
                 score_rules=top_score_rules if top_score_rules is not None else selected_score_rules,
                 score_market=top_score_market if top_score_market is not None else selected_score_market,
-                trend_score=selected_trend_score,
-                trend_score_1d=selected_trend_score_1d,
-                trend_score_4h=selected_trend_score_4h,
-                trend_score_1h=selected_trend_score_1h,
+                trend_score=(top_candidate_trend_score if top_candidate_trend_score is not None else selected_trend_score),
+                trend_score_1d=(top_candidate_trend_score_1d if top_candidate_trend_score_1d is not None else selected_trend_score_1d),
+                trend_score_4h=(top_candidate_trend_score_4h if top_candidate_trend_score_4h is not None else selected_trend_score_4h),
+                trend_score_1h=(top_candidate_trend_score_1h if top_candidate_trend_score_1h is not None else selected_trend_score_1h),
+                top_candidate_trend_score=top_candidate_trend_score,
+                top_candidate_trend_score_1d=top_candidate_trend_score_1d,
+                top_candidate_trend_score_4h=top_candidate_trend_score_4h,
+                top_candidate_trend_score_1h=top_candidate_trend_score_1h,
                 avg_score=details.get("avg_score"),
                 avg_score_rules=details.get("avg_score_rules"),
                 avg_score_market=details.get("avg_score_market"),
@@ -3019,6 +3085,10 @@ def pretrade_binance_auto_pick(
             "top_candidate_score": out.get("top_candidate_score"),
             "top_candidate_score_rules": out.get("top_candidate_score_rules"),
             "top_candidate_score_market": out.get("top_candidate_score_market"),
+            "top_candidate_trend_score": out.get("top_candidate_trend_score"),
+            "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
+            "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
+            "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
             "avg_score": out.get("avg_score"),
             "avg_score_rules": out.get("avg_score_rules"),
             "avg_score_market": out.get("avg_score_market"),
@@ -3075,6 +3145,10 @@ def pretrade_ibkr_auto_pick(
             "top_candidate_score": out.get("top_candidate_score"),
             "top_candidate_score_rules": out.get("top_candidate_score_rules"),
             "top_candidate_score_market": out.get("top_candidate_score_market"),
+            "top_candidate_trend_score": out.get("top_candidate_trend_score"),
+            "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
+            "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
+            "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
             "avg_score": out.get("avg_score"),
             "avg_score_rules": out.get("avg_score_rules"),
             "avg_score_market": out.get("avg_score_market"),
@@ -3165,6 +3239,10 @@ def run_auto_pick_tick_for_tenant(
                     "top_candidate_score": out.get("top_candidate_score"),
                     "top_candidate_score_rules": out.get("top_candidate_score_rules"),
                     "top_candidate_score_market": out.get("top_candidate_score_market"),
+                    "top_candidate_trend_score": out.get("top_candidate_trend_score"),
+                    "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
+                    "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
+                    "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
                     "avg_score": out.get("avg_score"),
                     "avg_score_rules": out.get("avg_score_rules"),
                     "avg_score_market": out.get("avg_score_market"),
@@ -3192,6 +3270,10 @@ def run_auto_pick_tick_for_tenant(
                     "top_candidate_score": out.get("top_candidate_score"),
                     "top_candidate_score_rules": out.get("top_candidate_score_rules"),
                     "top_candidate_score_market": out.get("top_candidate_score_market"),
+                    "top_candidate_trend_score": out.get("top_candidate_trend_score"),
+                    "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
+                    "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
+                    "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
                     "avg_score": out.get("avg_score"),
                     "avg_score_rules": out.get("avg_score_rules"),
                     "avg_score_market": out.get("avg_score_market"),
