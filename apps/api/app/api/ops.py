@@ -2566,6 +2566,7 @@ def auto_pick_report(
     def _friendly_check_name(raw: str) -> str:
         key = str(raw or "").strip()
         mapping = {
+            "short_not_supported_for_exchange": "SHORT no soportado para este exchange",
             "short_mtf_1d_strong_bear": "SHORT: tendencia 1D no suficientemente bajista",
             "short_mtf_4h_strong_bear": "SHORT: tendencia 4H no suficientemente bajista",
             "short_mtf_1h_bear": "SHORT: tendencia 1H no bajista",
