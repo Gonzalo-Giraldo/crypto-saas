@@ -136,6 +136,8 @@ router = APIRouter(prefix="/ops", tags=["ops"])
 _binance_ticker_cache_lock = threading.Lock()
 _binance_ticker_cache_rows: list[dict] = []
 _binance_ticker_cache_expiry: float = 0.0
+_binance_klines_cache_lock = threading.Lock()
+_binance_klines_cache: dict[str, tuple[float, list[list]]] = {}
 
 
 def _is_real_user_email(email: str) -> bool:
@@ -295,6 +297,101 @@ def _fetch_binance_ticker_rows() -> list[dict]:
         return list(_binance_ticker_cache_rows)
 
 
+def _fetch_binance_1h_klines(symbol: str, limit: int | None = None) -> list[list]:
+    sym = str(symbol or "").upper().strip()
+    if not sym:
+        return []
+    lim = max(30, min(int(limit or settings.BINANCE_MTF_KLINES_LIMIT or 120), 500))
+    cache_ttl = max(5, int(settings.BINANCE_MTF_CACHE_SECONDS or 60))
+    now_ts = time.time()
+    with _binance_klines_cache_lock:
+        cached = _binance_klines_cache.get(sym)
+        if cached and now_ts < cached[0]:
+            return list(cached[1])
+
+    base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
+    url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': '1h', 'limit': lim})}"
+    try:
+        req = urllib_request.Request(url, method="GET")
+        with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib_error.URLError, urllib_error.HTTPError, TimeoutError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    rows = [row for row in payload if isinstance(row, list) and len(row) >= 6]
+    with _binance_klines_cache_lock:
+        _binance_klines_cache[sym] = (time.time() + cache_ttl, rows)
+    return rows
+
+
+def _clip(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, float(value)))
+
+
+def _norm_return(ret: float, scale: float) -> float:
+    if scale <= 0:
+        return 0.0
+    return _clip(ret / scale, -1.0, 1.0)
+
+
+def _compute_binance_mtf_signal(symbol: str) -> dict | None:
+    rows = _fetch_binance_1h_klines(symbol=symbol)
+    if len(rows) < 30:
+        return None
+    closes: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    for row in rows:
+        try:
+            highs.append(float(row[2]))
+            lows.append(float(row[3]))
+            closes.append(float(row[4]))
+        except (TypeError, ValueError):
+            return None
+    if len(closes) < 30 or closes[-1] <= 0:
+        return None
+
+    close_now = closes[-1]
+    r_1h = (close_now - closes[-2]) / closes[-2] if closes[-2] > 0 else 0.0
+    r_4h = (close_now - closes[-5]) / closes[-5] if closes[-5] > 0 else 0.0
+    r_1d = (close_now - closes[-25]) / closes[-25] if closes[-25] > 0 else 0.0
+    r_6h = (close_now - closes[-7]) / closes[-7] if closes[-7] > 0 else 0.0
+
+    trend_score = (
+        0.55 * _norm_return(r_1d, 0.03)
+        + 0.30 * _norm_return(r_4h, 0.02)
+        + 0.15 * _norm_return(r_1h, 0.01)
+    )
+    momentum_score = (
+        0.60 * _norm_return(r_1h, 0.01)
+        + 0.40 * _norm_return(r_6h, 0.015)
+    )
+
+    start_idx = max(1, len(closes) - 24)
+    trs: list[float] = []
+    for i in range(start_idx, len(closes)):
+        prev_close = closes[i - 1]
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - prev_close),
+            abs(lows[i] - prev_close),
+        )
+        trs.append(max(0.0, tr))
+    atr = sum(trs) / len(trs) if trs else 0.0
+    atr_pct = (atr / close_now) * 100.0 if close_now > 0 else 0.0
+
+    return {
+        "trend_score": round(_clip(trend_score, -1.0, 1.0), 4),
+        "momentum_score": round(_clip(momentum_score, -1.0, 1.0), 4),
+        "atr_pct": round(max(0.0, atr_pct), 4),
+        "trend_1d": round(r_1d, 6),
+        "trend_4h": round(r_4h, 6),
+        "trend_1h": round(r_1h, 6),
+        "source": "klines_1h_mtf",
+    }
+
+
 def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
     payload = _fetch_binance_ticker_rows()
     rows: list[tuple[str, float]] = []
@@ -434,25 +531,35 @@ def _build_auto_pick_universe(
                 continue
             if qv < _binance_monitor_volume_floor():
                 continue
-            volatility = ((high - low) / last) * 100.0 if high > 0 and low > 0 else 0.0
             ranked.append(({
                 "symbol": symbol,
                 "quote_volume": qv,
                 "pct": pct,
-                "volatility": max(0.0, volatility),
+                "high": high,
+                "low": low,
+                "last": last,
             }, qv))
         ranked.sort(key=lambda x: x[1], reverse=True)
         selected = [r[0] for r in ranked[:12]]
         out: list[PretradeCheckRequest] = []
         for row in selected:
             qv = float(row["quote_volume"])
-            pct = float(row["pct"])
-            vol = float(row["volatility"])
+            pct = float(row.get("pct") or 0.0)
+            mtf = _compute_binance_mtf_signal(str(row["symbol"]))
+            if mtf is not None:
+                trend = float(mtf.get("trend_score") or 0.0)
+                momentum = float(mtf.get("momentum_score") or 0.0)
+                vol = float(mtf.get("atr_pct") or 0.0)
+            else:
+                last = float(row.get("last") or 0.0)
+                high = float(row.get("high") or 0.0)
+                low = float(row.get("low") or 0.0)
+                vol = ((high - low) / last) * 100.0 if high > 0 and low > 0 and last > 0 else 0.0
+                trend = max(-1.0, min(1.0, pct / 8.0))
+                momentum = max(-1.0, min(1.0, pct / 6.0))
             liq = min(1.0, qv / 200_000_000.0)
             spread = max(3.0, 14.0 - (10.0 * liq))
             slippage = max(5.0, 18.0 - (12.0 * liq))
-            trend = max(-1.0, min(1.0, pct / 8.0))
-            momentum = max(-1.0, min(1.0, pct / 6.0))
             out.append(
                 PretradeCheckRequest(
                     symbol=str(row["symbol"]),
@@ -519,7 +626,7 @@ def _build_market_monitor_rows(exchange: str) -> list[dict]:
     if ex == "BINANCE":
         ticker_rows = _fetch_binance_ticker_rows()
         if ticker_rows:
-            ranked: list[tuple[dict, float]] = []
+            ranked_by_volume: list[tuple[dict, float]] = []
             for item in ticker_rows:
                 symbol = str(item.get("symbol") or "").upper().strip()
                 if not _is_binance_directional_symbol(symbol):
@@ -536,31 +643,53 @@ def _build_market_monitor_rows(exchange: str) -> list[dict]:
                     continue
                 if qv < _binance_monitor_volume_floor():
                     continue
-                volatility = ((high - low) / last) * 100.0 if high > 0 and low > 0 else 0.0
-                trend = max(-1.0, min(1.0, pct / 8.0))
-                momentum = max(-1.0, min(1.0, pct / 6.0))
-                regime, _ = infer_market_regime(
-                    trend_score=float(trend),
-                    atr_pct=float(volatility),
-                    momentum_score=float(momentum),
-                )
-                ranked.append(
+                ranked_by_volume.append(
                     (
                         {
-                            "exchange": "BINANCE",
                             "symbol": symbol,
-                            "trend_score": round(trend, 4),
-                            "momentum_score": round(momentum, 4),
-                            "atr_pct": round(max(0.0, volatility), 4),
+                            "pct": pct,
+                            "high": high,
+                            "low": low,
+                            "last": last,
                             "volume_24h_usdt": round(max(0.0, qv), 2),
-                            "regime": regime,
-                            "source": "ticker_24h",
                         },
                         qv,
                     )
                 )
-            ranked.sort(key=lambda x: x[1], reverse=True)
-            out = [r[0] for r in ranked[:12]]
+            ranked_by_volume.sort(key=lambda x: x[1], reverse=True)
+            out: list[dict] = []
+            # Compute MTF only on the most liquid symbols to keep calls bounded.
+            for base_row, qv in ranked_by_volume[:20]:
+                symbol = str(base_row["symbol"])
+                mtf = _compute_binance_mtf_signal(symbol)
+                if mtf is None:
+                    volatility = ((float(base_row["high"]) - float(base_row["low"])) / float(base_row["last"])) * 100.0 if float(base_row["last"]) > 0 else 0.0
+                    trend = max(-1.0, min(1.0, float(base_row["pct"]) / 8.0))
+                    momentum = max(-1.0, min(1.0, float(base_row["pct"]) / 6.0))
+                    mtf = {
+                        "trend_score": round(trend, 4),
+                        "momentum_score": round(momentum, 4),
+                        "atr_pct": round(max(0.0, volatility), 4),
+                        "source": "ticker_24h_fallback",
+                    }
+                regime, _ = infer_market_regime(
+                    trend_score=float(mtf.get("trend_score") or 0.0),
+                    atr_pct=float(mtf.get("atr_pct") or 0.0),
+                    momentum_score=float(mtf.get("momentum_score") or 0.0),
+                )
+                out.append(
+                    {
+                        "exchange": "BINANCE",
+                        "symbol": symbol,
+                        "trend_score": float(mtf.get("trend_score") or 0.0),
+                        "momentum_score": float(mtf.get("momentum_score") or 0.0),
+                        "atr_pct": float(mtf.get("atr_pct") or 0.0),
+                        "volume_24h_usdt": round(max(0.0, qv), 2),
+                        "regime": regime,
+                        "source": str(mtf.get("source") or "ticker_24h_fallback"),
+                    }
+                )
+            out = out[:12]
             if out:
                 return out
         return [
