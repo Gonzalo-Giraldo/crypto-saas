@@ -96,6 +96,17 @@ pytest -q tests/integration
 - `POST /ops/security/reencrypt-exchange-secrets` (admin, key rotation)
 - `GET /ops/security/posture` (admin, 2FA + secret age posture)
 - `POST /ops/admin/cleanup-smoke-users` (admin, cleanup smoke users with dry-run)
+- `POST /ops/admin/market-monitor/tick` (admin, captures market snapshot for BINANCE/IBKR)
+- `GET /ops/admin/market-monitor/report` (admin, market regime report)
+- `POST /ops/admin/auto-pick/tick` (admin, executes auto-pick for enabled users/exchanges)
+- `GET /ops/admin/auto-pick/report` (admin, interval report by broker)
+- `GET /ops/admin/auto-pick/liquidity-report` (admin, liquidity state distribution)
+- `GET /ops/admin/learning/status` (admin)
+- `GET /ops/admin/learning/dataset` (admin)
+- `POST /ops/admin/learning/label` (admin)
+- `POST /ops/admin/learning/retention/run` (admin)
+- `POST /ops/admin/learning/rollup/refresh` (admin)
+- `GET /ops/admin/learning/rollup` (admin)
 - `POST /signals`
 - `GET /signals`
 - `POST /signals/claim`
@@ -144,6 +155,12 @@ pytest -q tests/integration
   - `BINANCE_GATEWAY_TIMEOUT_SECONDS` (default `12`)
   - `BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE=true|false` (default `false`)
   - `BINANCE_GATEWAY_RATE_LIMIT_PER_MIN` (default `60`)
+  - proxy endpoints:
+    - `POST /binance/ticker-24hr`
+    - `POST /binance/test-order`
+    - `POST /binance/klines`
+    - `POST /binance/exchange-info`
+    - `POST /binance/ticker-price`
 - User risk profile assignment (email-based):
   - `RISK_PROFILE_MODEL2_EMAIL`
   - `RISK_PROFILE_LOOSE_EMAIL`
@@ -164,6 +181,20 @@ pytest -q tests/integration
   - leverage guard (`leverage <= max_leverage` from risk profile)
   - automatic market regime detection (`bull`, `bear`, `range`) from input scores (`market_trend_score`, `atr_pct`, `momentum_score`)
   - regime-aware policy gates (allowed regime, RR threshold, liquidity/cost thresholds)
+- BINANCE market trend pipeline:
+  - prefers MTF signal from klines (`source=klines_1h_mtf`) with 1D/4H/1H derived trend.
+  - fallback path uses ticker snapshot (`source=ticker_24h_fallback`) when klines are unavailable.
+  - market monitor snapshots feed auto-pick candidate trend variables.
+- Auto-pick output now includes selected and top-candidate trend fields:
+  - `selected_trend_score`, `selected_trend_score_1d`, `selected_trend_score_4h`, `selected_trend_score_1h`
+  - `top_candidate_trend_score`, `top_candidate_trend_score_1d`, `top_candidate_trend_score_4h`, `top_candidate_trend_score_1h`
+- `/ops/console` auto-pick report table includes trend columns:
+  - `Tendencia`
+  - `MTF 1D/4H/1H`
+- Learning pipeline (decision snapshots + outcomes + rollups):
+  - captures auto-pick decisions continuously,
+  - labels outcomes by horizon (`horizon_minutes`),
+  - supports retention and hourly rollups for model-ready datasets.
 - `exit` check now applies strategy-specific exit triggers:
   - stop loss / take profit hit
   - max holding time by strategy
@@ -178,6 +209,7 @@ pytest -q tests/integration
 ## Runbooks
 - Local/dev operations: `docs/runbook_operativo.md`
 - Staging/production operations: `docs/runbook_produccion.md`
+- Post-deploy validation (market monitor, auto-pick, learning): `docs/04_runbook_validacion.md`
 - Daily one-page checklist: `docs/checklist_operativa_1pagina.md`
 - NOC-lite decision table: `docs/noc_lite.md`
 - Backend Definition of Done: `docs/backend_definition_of_done.md`

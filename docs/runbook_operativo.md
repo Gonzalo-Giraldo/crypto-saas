@@ -120,7 +120,69 @@ curl -s -X POST "$BASE_URL/ops/execution/ibkr/test-order" \
   --data '{"symbol":"AAPL","side":"BUY","qty":1}'
 ```
 
-## 4) Auditoria operativa
+## 4) Market monitor + auto-pick (admin)
+
+Requiere token admin:
+
+```bash
+export ADMIN_TOKEN="$TOKEN"
+```
+
+Market monitor tick:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/market-monitor/tick" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Reporte de mercado:
+
+```bash
+curl -s "$BASE_URL/ops/admin/market-monitor/report?hours=1&limit=100&exchange=BINANCE" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Auto-pick tick:
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/auto-pick/tick?dry_run=true&top_n=10&real_only=true&include_service_users=false" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Auto-pick report:
+
+```bash
+curl -s "$BASE_URL/ops/admin/auto-pick/report?hours=2&limit=200&interval_minutes=5" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Validar presencia de tendencias:
+- `selected_trend_score*`
+- `top_candidate_trend_score*`
+
+## 5) Learning pipeline (admin)
+
+```bash
+curl -s "$BASE_URL/ops/admin/learning/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s "$BASE_URL/ops/admin/learning/dataset?hours=6&limit=200&outcome_status=ALL&exchange=ALL" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/learning/label?dry_run=false&horizon_minutes=60&limit=500" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/learning/rollup/refresh?hours=72&dry_run=false" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+## 6) Auditoria operativa
 
 Eventos del usuario actual:
 
@@ -136,7 +198,7 @@ curl -s "$BASE_URL/ops/audit/all?limit=100" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-## 5) Rotacion de clave de cifrado
+## 7) Rotacion de clave de cifrado
 
 Importante:
 - Primero ejecutar `dry_run=true`.
@@ -172,7 +234,7 @@ curl -s -X POST "$BASE_URL/ops/security/reencrypt-exchange-secrets" \
   - `security.key_rotation.reencrypt`
   - `execution.prepare`
 
-## 6) Respuesta a incidentes
+## 8) Respuesta a incidentes
 
 - Error `Missing credentials for BINANCE/IBKR`:
   - Cargar credenciales en `/users/exchange-secrets`.
@@ -184,8 +246,11 @@ curl -s -X POST "$BASE_URL/ops/security/reencrypt-exchange-secrets" \
 - Si endpoint falla:
   - Verificar `/healthz`.
   - Revisar auditoria `ops/audit/me`.
+- Si Binance responde `restricted location` / `451`:
+  - validar uso del `binance_gateway`,
+  - evitar llamadas directas desde ubicacion restringida.
 
-## 7) Cierre operativo
+## 9) Cierre operativo
 
 Checklist final:
 1. Credenciales cifradas configuradas.
@@ -194,3 +259,4 @@ Checklist final:
 4. IBKR test-order OK.
 5. Auditoria validada.
 6. Si hubo rotacion: post-rotacion validada.
+7. Market monitor + auto-pick + learning validados.

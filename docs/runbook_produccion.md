@@ -102,6 +102,60 @@ curl -s -X POST "$BASE_URL/ops/execution/ibkr/test-order" \
   --data '{"symbol":"AAPL","side":"BUY","qty":1}'
 ```
 
+### 4.7 Market monitor (BINANCE/IBKR)
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/market-monitor/tick" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s "$BASE_URL/ops/admin/market-monitor/report?hours=1&limit=100&exchange=BINANCE" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Esperado en BINANCE:
+- fuente preferente `klines_1h_mtf`,
+- fallback controlado `ticker_24h_fallback` si no hay klines.
+
+### 4.8 Auto-pick admin y reporte de tendencias
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/auto-pick/tick?dry_run=true&top_n=10&real_only=true&include_service_users=false" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s "$BASE_URL/ops/admin/auto-pick/report?hours=2&limit=200&interval_minutes=5" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Campos obligatorios de tendencia en respuesta:
+- `selected_trend_score`, `selected_trend_score_1d`, `selected_trend_score_4h`, `selected_trend_score_1h`
+- `top_candidate_trend_score`, `top_candidate_trend_score_1d`, `top_candidate_trend_score_4h`, `top_candidate_trend_score_1h`
+
+### 4.9 Learning pipeline
+
+```bash
+curl -s "$BASE_URL/ops/admin/learning/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s "$BASE_URL/ops/admin/learning/dataset?hours=6&limit=200&outcome_status=ALL&exchange=ALL" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/learning/label?dry_run=false&horizon_minutes=60&limit=500" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+```bash
+curl -s -X POST "$BASE_URL/ops/admin/learning/rollup/refresh?hours=72&dry_run=false" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
 ## 5) Auditoria obligatoria
 
 Revisar eventos del operador:
@@ -181,6 +235,9 @@ UI web:
   - READY/MISSING,
   - razon principal de bloqueo,
   - 2FA, asignaciones y secretos en una sola vista.
+- en `https://TU_BASE_URL/ops/console` el bloque `Auto-pick Report` debe mostrar:
+  - columna `Tendencia`,
+  - columna `MTF 1D/4H/1H`.
 
 RBAC operativo por tenant:
 - roles soportados: `admin`, `operator`, `viewer`, `trader`, `disabled`.
