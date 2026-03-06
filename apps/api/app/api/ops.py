@@ -5606,12 +5606,14 @@ def ops_console_page():
                 <th>Compro</th>
                 <th>Motivo</th>
                 <th>Score</th>
+                <th>Tendencia</th>
+                <th>MTF 1D/4H/1H</th>
                 <th>Score prom</th>
                 <th>Escaneados</th>
               </tr>
             </thead>
             <tbody id="autoPickReportBodyBinance">
-              <tr><td colspan="8" class="muted">No data</td></tr>
+              <tr><td colspan="10" class="muted">No data</td></tr>
             </tbody>
           </table>
           <div style="margin-top:10px"><strong>IBKR</strong></div>
@@ -5624,12 +5626,14 @@ def ops_console_page():
                 <th>Compro</th>
                 <th>Motivo</th>
                 <th>Score</th>
+                <th>Tendencia</th>
+                <th>MTF 1D/4H/1H</th>
                 <th>Score prom</th>
                 <th>Escaneados</th>
               </tr>
             </thead>
             <tbody id="autoPickReportBodyIbkr">
-              <tr><td colspan="8" class="muted">No data</td></tr>
+              <tr><td colspan="10" class="muted">No data</td></tr>
             </tbody>
           </table>
         </div>
@@ -5875,6 +5879,12 @@ def ops_console_page():
         const m = marketScore == null ? "-" : String(marketScore);
         return `${finalScore} (R ${r} | M ${m})`;
       };
+      const fmtTrendMtfCell = (t1d, t4h, t1h) => {
+        const a = t1d == null ? "-" : String(t1d);
+        const b = t4h == null ? "-" : String(t4h);
+        const c = t1h == null ? "-" : String(t1h);
+        return `${a} / ${b} / ${c}`;
+      };
       byId(tbodyId).innerHTML = rows.map((r) => `
         <tr>
           <td>${esc(fmtBogotaDateTime(r.timestamp))}</td>
@@ -5883,10 +5893,12 @@ def ops_console_page():
           <td><span class="badge ${r.bought ? "green" : "red"}">${r.bought ? "SI" : "NO"}</span></td>
           <td>${esc(r.reason || "-")}</td>
           <td>${esc(fmtScoreCell(r.score, r.score_rules, r.score_market))}</td>
+          <td>${esc(String(r.top_candidate_trend_score ?? r.trend_score ?? "-"))}</td>
+          <td>${esc(fmtTrendMtfCell(r.top_candidate_trend_score_1d, r.top_candidate_trend_score_4h, r.top_candidate_trend_score_1h))}</td>
           <td>${esc(fmtScoreCell(r.avg_score, r.avg_score_rules, r.avg_score_market))}</td>
           <td>${esc(String(r.scanned_assets || 0))}</td>
         </tr>
-      `).join("") || '<tr><td colspan="8" class="muted">Sin eventos en esta ventana</td></tr>';
+      `).join("") || '<tr><td colspan="10" class="muted">Sin eventos en esta ventana</td></tr>';
     }
 
     function renderAutoPickRows() {
@@ -6008,8 +6020,8 @@ def ops_console_page():
       if (canUse) {
         setAutoPickReportMsg("Ready");
       } else {
-        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
-        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="8" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyBinance").innerHTML = '<tr><td colspan="10" class="muted">No data</td></tr>';
+        byId("autoPickReportBodyIbkr").innerHTML = '<tr><td colspan="10" class="muted">No data</td></tr>';
       }
     }
 
@@ -6045,6 +6057,10 @@ def ops_console_page():
             score: null,
             score_rules: null,
             score_market: null,
+            top_candidate_trend_score: null,
+            top_candidate_trend_score_1d: null,
+            top_candidate_trend_score_4h: null,
+            top_candidate_trend_score_1h: null,
             avg_score: null,
             avg_score_rules: null,
             avg_score_market: null,
@@ -6063,6 +6079,14 @@ def ops_console_page():
           score: best.score,
           score_rules: best.score_rules,
           score_market: best.score_market,
+          trend_score: best.trend_score,
+          trend_score_1d: best.trend_score_1d,
+          trend_score_4h: best.trend_score_4h,
+          trend_score_1h: best.trend_score_1h,
+          top_candidate_trend_score: best.top_candidate_trend_score,
+          top_candidate_trend_score_1d: best.top_candidate_trend_score_1d,
+          top_candidate_trend_score_4h: best.top_candidate_trend_score_4h,
+          top_candidate_trend_score_1h: best.top_candidate_trend_score_1h,
           avg_score: best.avg_score,
           avg_score_rules: best.avg_score_rules,
           avg_score_market: best.avg_score_market,
