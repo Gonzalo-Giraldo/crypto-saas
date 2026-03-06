@@ -6114,6 +6114,11 @@ def ops_console_page():
       return { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" };
     }
 
+    function isAuthError(err) {
+      const msg = String((err && err.message) || err || "").toLowerCase();
+      return msg.includes("invalid authentication credentials") || msg.includes("401");
+    }
+
     async function api(path, opts={}) {
       const res = await fetch(path, opts);
       const contentType = res.headers.get("content-type") || "";
@@ -7329,7 +7334,13 @@ def ops_console_page():
     });
     byId("autoPickLoadBtn").addEventListener("click", async () => {
       try {
-        await loadAutoPickReport();
+        try {
+          await loadAutoPickReport();
+        } catch (e) {
+          if (!isAuthError(e)) throw e;
+          await refreshSession();
+          await loadAutoPickReport();
+        }
       } catch (e) {
         setAutoPickReportMsg(String(e.message || e), true);
       }
@@ -7379,7 +7390,13 @@ def ops_console_page():
     async function autoPickRefreshTick() {
       if (!state.token || !state.me || state.me.role !== "admin") return;
       try {
-        await loadAutoPickReport();
+        try {
+          await loadAutoPickReport();
+        } catch (e) {
+          if (!isAuthError(e)) throw e;
+          await refreshSession();
+          await loadAutoPickReport();
+        }
       } catch (e) {
         setAutoPickReportMsg(`Auto-refresh fallo: ${String(e.message || e)}`, true);
       }
