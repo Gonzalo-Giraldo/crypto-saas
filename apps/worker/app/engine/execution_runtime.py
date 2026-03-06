@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import time
+import uuid
 import requests
 
 from fastapi import HTTPException, status
@@ -8,7 +10,11 @@ from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
-from apps.worker.app.engine.binance_client import send_test_order, get_account_status
+from apps.worker.app.engine.binance_client import (
+    send_test_order,
+    get_account_status,
+    prepare_binance_market_order_quantity,
+)
 from apps.worker.app.engine.ibkr_client import send_ibkr_test_order, get_ibkr_account_status
 
 
@@ -96,12 +102,23 @@ def execute_binance_test_order_for_user(
             )
 
         try:
-            _send_binance_test_order(
+            qty_meta = prepare_binance_market_order_quantity(
+                symbol=symbol,
+                requested_qty=qty,
+            )
+            client_order_id = _build_binance_client_order_id(
+                user_id=user_id,
+                symbol=symbol,
+                side=side,
+                qty=float(qty_meta["normalized_qty"]),
+            )
+            _send_binance_test_order_with_retry(
                 api_key=creds["api_key"],
                 api_secret=creds["api_secret"],
                 symbol=symbol,
                 side=side,
-                qty=qty,
+                qty=float(qty_meta["normalized_qty"]),
+                client_order_id=client_order_id,
             )
         except Exception as exc:
             log_audit_event(
@@ -113,6 +130,8 @@ def execute_binance_test_order_for_user(
                     "symbol": symbol,
                     "side": side,
                     "qty": qty,
+                    "client_order_id": locals().get("client_order_id"),
+                    "normalized_qty": (locals().get("qty_meta") or {}).get("normalized_qty"),
                     "error": str(exc),
                 },
             )
@@ -127,7 +146,14 @@ def execute_binance_test_order_for_user(
             action="execution.binance.test_order.success",
             user_id=user_id,
             entity_type="execution",
-            details={"symbol": symbol, "side": side, "qty": qty},
+            details={
+                "symbol": symbol,
+                "side": side,
+                "qty_requested": qty,
+                "qty_normalized": qty_meta["normalized_qty"],
+                "client_order_id": client_order_id,
+                "mode": "testnet_order_test",
+            },
         )
         db.commit()
 
@@ -136,11 +162,75 @@ def execute_binance_test_order_for_user(
             "mode": "testnet_order_test",
             "symbol": symbol.upper(),
             "side": side.upper(),
-            "qty": qty,
+            "qty": float(qty_meta["normalized_qty"]),
+            "qty_requested": float(qty),
+            "client_order_id": client_order_id,
+            "validation": qty_meta,
             "sent": True,
         }
     finally:
         db.close()
+
+
+def _build_binance_client_order_id(
+    user_id: str,
+    symbol: str,
+    side: str,
+    qty: float,
+) -> str:
+    # Prefix + stable components keeps retries idempotent for the same function call.
+    seed = f"{user_id}|{symbol.upper()}|{side.upper()}|{qty}|{uuid.uuid4().hex[:10]}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+    return f"cs{digest}"
+
+
+def _is_retryable_binance_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    retry_markers = [
+        "429",
+        "status=429",
+        "status 429",
+        "502",
+        "503",
+        "504",
+        "timeout",
+        "temporarily unavailable",
+        "connection reset",
+    ]
+    return any(m in msg for m in retry_markers)
+
+
+def _send_binance_test_order_with_retry(
+    *,
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    side: str,
+    qty: float,
+    client_order_id: str,
+) -> None:
+    attempts = max(1, int(settings.BINANCE_ORDER_RETRY_MAX_ATTEMPTS or 2))
+    backoff_base = max(0.05, float(settings.BINANCE_ORDER_RETRY_BACKOFF_SECONDS or 0.7))
+    last_exc = None
+    for i in range(attempts):
+        try:
+            _send_binance_test_order(
+                api_key=api_key,
+                api_secret=api_secret,
+                symbol=symbol,
+                side=side,
+                qty=qty,
+                client_order_id=client_order_id,
+            )
+            return
+        except Exception as exc:
+            last_exc = exc
+            is_last = i >= attempts - 1
+            if is_last or not _is_retryable_binance_error(exc):
+                break
+            time.sleep(backoff_base * (2 ** i))
+    if last_exc:
+        raise last_exc
 
 
 def _send_binance_test_order(
@@ -149,6 +239,7 @@ def _send_binance_test_order(
     symbol: str,
     side: str,
     qty: float,
+    client_order_id: str | None = None,
 ) -> None:
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if not gateway_enabled:
@@ -158,6 +249,7 @@ def _send_binance_test_order(
             symbol=symbol,
             side=side,
             quantity=qty,
+            client_order_id=client_order_id,
         )
         return
 
@@ -168,6 +260,7 @@ def _send_binance_test_order(
             symbol=symbol,
             side=side,
             qty=qty,
+            client_order_id=client_order_id,
         )
     except Exception:
         if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
@@ -178,6 +271,7 @@ def _send_binance_test_order(
             symbol=symbol,
             side=side,
             quantity=qty,
+            client_order_id=client_order_id,
         )
 
 
@@ -187,6 +281,7 @@ def _send_binance_test_order_via_gateway(
     symbol: str,
     side: str,
     qty: float,
+    client_order_id: str | None = None,
 ) -> None:
     base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
     url = f"{base}/binance/test-order"
@@ -200,6 +295,7 @@ def _send_binance_test_order_via_gateway(
         "symbol": symbol.upper(),
         "side": side.upper(),
         "qty": qty,
+        "client_order_id": client_order_id,
     }
 
     response = requests.post(

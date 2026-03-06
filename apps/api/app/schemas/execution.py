@@ -59,6 +59,9 @@ class BinanceTestOrderOut(BaseModel):
     symbol: str
     side: str
     qty: float
+    qty_requested: float | None = None
+    client_order_id: str | None = None
+    validation: dict[str, Any] | None = None
     sent: bool
 
 

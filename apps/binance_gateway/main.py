@@ -27,6 +27,7 @@ class BinanceTestOrderIn(BaseModel):
     symbol: str
     side: str
     qty: float
+    client_order_id: str | None = None
 
 
 class BinanceAccountStatusIn(BaseModel):
@@ -65,6 +66,8 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
         "quantity": payload.qty,
         "timestamp": int(time.time() * 1000),
     }
+    if payload.client_order_id:
+        params["newClientOrderId"] = str(payload.client_order_id)[:36]
     query = urlencode(params)
     signature = hmac.new(
         payload.api_secret.encode("utf-8"),
