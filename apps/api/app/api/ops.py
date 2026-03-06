@@ -177,7 +177,7 @@ def _is_binance_directional_symbol(symbol: str) -> bool:
 
 
 def _binance_monitor_volume_floor() -> float:
-    return 5_000_000.0
+    return 10_000_000.0
 
 
 def _is_binance_monitor_row_allowed(symbol: str, volume_24h_usdt: float) -> bool:
@@ -262,7 +262,12 @@ def _fetch_binance_auto_universe(limit: int = 12) -> list[str]:
     return out
 
 
-def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
+def _build_auto_pick_universe(
+    exchange: str,
+    *,
+    db: Session | None = None,
+    tenant_id: str | None = None,
+) -> list[PretradeCheckRequest]:
     ex = (exchange or "").upper()
     if ex == "IBKR":
         symbols = _ibkr_fallback_symbols()
@@ -298,6 +303,58 @@ def _build_auto_pick_universe(exchange: str) -> list[PretradeCheckRequest]:
             )
             for s in symbols
         ]
+    # Prefer the latest market-monitor bucket so auto-pick uses the same filtered universe.
+    if db is not None and tenant_id:
+        latest_bucket = db.execute(
+            select(func.max(MarketTrendSnapshot.bucket_5m)).where(
+                MarketTrendSnapshot.tenant_id == tenant_id,
+                MarketTrendSnapshot.exchange == "BINANCE",
+            )
+        ).scalar_one_or_none()
+        if latest_bucket is not None:
+            snap_rows = db.execute(
+                select(MarketTrendSnapshot).where(
+                    MarketTrendSnapshot.tenant_id == tenant_id,
+                    MarketTrendSnapshot.exchange == "BINANCE",
+                    MarketTrendSnapshot.bucket_5m == latest_bucket,
+                )
+            ).scalars().all()
+            ranked_snapshots = sorted(
+                [
+                    r for r in snap_rows
+                    if _is_binance_monitor_row_allowed(str(r.symbol or ""), float(r.volume_24h_usdt or 0.0))
+                ],
+                key=lambda r: float(r.volume_24h_usdt or 0.0),
+                reverse=True,
+            )[:12]
+            if ranked_snapshots:
+                out: list[PretradeCheckRequest] = []
+                for r in ranked_snapshots:
+                    qv = float(r.volume_24h_usdt or 0.0)
+                    liq = min(1.0, qv / 200_000_000.0)
+                    spread = max(3.0, 14.0 - (10.0 * liq))
+                    slippage = max(5.0, 18.0 - (12.0 * liq))
+                    out.append(
+                        PretradeCheckRequest(
+                            symbol=str(r.symbol),
+                            side="BUY",
+                            qty=0.01,
+                            rr_estimate=1.7,
+                            trend_tf="4H",
+                            signal_tf="1H",
+                            timing_tf="15M",
+                            spread_bps=round(spread, 2),
+                            slippage_bps=round(slippage, 2),
+                            volume_24h_usdt=qv,
+                            market_trend_score=round(float(r.trend_score or 0.0), 3),
+                            atr_pct=round(float(r.atr_pct or 0.0), 3),
+                            momentum_score=round(float(r.momentum_score or 0.0), 3),
+                            funding_rate_bps=0.0,
+                            crypto_event_block=False,
+                        )
+                    )
+                return out
+
     ticker_rows = _fetch_binance_ticker_rows()
     if ticker_rows:
         ranked: list[tuple[dict, float]] = []
@@ -535,7 +592,14 @@ def run_market_monitor_tick_for_tenant(
                 )
             )
             inserted += 1
-        detail.append({"exchange": ex, "symbols": len(rows)})
+        detail_row = {"exchange": ex, "symbols": len(rows)}
+        if ex == "BINANCE" and len(rows) < 3:
+            detail_row["warning"] = "low_universe_count_below_3"
+            print(  # noqa: T201
+                "[market-monitor] alert",
+                {"tenant_id": tenant_id, "exchange": ex, "symbols": len(rows), "bucket_5m": bucket.isoformat()},
+            )
+        detail.append(detail_row)
     db.commit()
     return {
         "tenant_id": tenant_id,
@@ -1081,7 +1145,11 @@ def _auto_pick_from_scan(
     min_score_pct = float(runtime_policy.get("min_score_pct", 78.0))
     score_weight_rules = float(runtime_policy.get("score_weight_rules", 0.4))
     score_weight_market = float(runtime_policy.get("score_weight_market", 0.6))
-    universe = _build_auto_pick_universe(exchange)
+    universe = _build_auto_pick_universe(
+        exchange,
+        db=db,
+        tenant_id=_tenant_id(current_user),
+    )
     scan_payload = PretradeScanRequest(
         candidates=universe,
         # Auto-pick evaluates the full broker universe each tick.
