@@ -102,6 +102,7 @@ pytest -q tests/integration
 - `GET /ops/admin/auto-pick/report` (admin, interval report by broker)
 - `GET /ops/admin/auto-pick/liquidity-report` (admin, liquidity state distribution)
 - `POST /ops/admin/exit/tick` (admin, evaluates open positions and auto-closes when exit rules trigger)
+- Both admin tick endpoints accept optional `user_email` query param to scope execution to a single user during controlled tests.
 - `GET /ops/admin/learning/status` (admin)
 - `GET /ops/admin/learning/dataset` (admin)
 - `POST /ops/admin/learning/label` (admin)

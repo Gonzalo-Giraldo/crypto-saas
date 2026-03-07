@@ -3722,6 +3722,7 @@ def admin_auto_pick_tick(
     direction: str = "LONG",
     real_only: bool = True,
     include_service_users: bool = False,
+    user_email: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
@@ -3733,6 +3734,7 @@ def admin_auto_pick_tick(
         direction=direction,
         real_only=real_only,
         include_service_users=include_service_users,
+        user_email=user_email,
     )
     db.commit()
     return out
@@ -3746,6 +3748,7 @@ def run_auto_pick_tick_for_tenant(
     direction: str = "LONG",
     real_only: bool = True,
     include_service_users: bool = False,
+    user_email: Optional[str] = None,
 ):
     top_n = max(1, min(int(top_n), 100))
     direction = str(direction or "LONG").upper().strip()
@@ -3756,8 +3759,11 @@ def run_auto_pick_tick_for_tenant(
         .scalars()
         .all()
     )
+    target_email = (user_email or "").strip().lower()
     executed = []
     for u in users:
+        if target_email and (u.email or "").strip().lower() != target_email:
+            continue
         if u.role not in {"admin", "trader"}:
             continue
         if real_only and not _is_real_user_email(u.email):
@@ -3863,6 +3869,7 @@ def admin_exit_tick(
     real_only: bool = True,
     include_service_users: bool = False,
     max_positions: int = 500,
+    user_email: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
@@ -3873,6 +3880,7 @@ def admin_exit_tick(
         real_only=real_only,
         include_service_users=include_service_users,
         max_positions=max_positions,
+        user_email=user_email,
     )
     db.commit()
     return out
@@ -3886,6 +3894,7 @@ def run_exit_tick_for_tenant(
     real_only: bool = True,
     include_service_users: bool = False,
     max_positions: int = 500,
+    user_email: Optional[str] = None,
 ) -> dict:
     now = datetime.now(timezone.utc)
     max_positions = max(1, min(int(max_positions), 5000))
@@ -3906,8 +3915,11 @@ def run_exit_tick_for_tenant(
         .scalars()
         .all()
     )
+    target_email = (user_email or "").strip().lower()
     eligible_users = []
     for u in users:
+        if target_email and (u.email or "").strip().lower() != target_email:
+            continue
         if u.role not in {"admin", "trader"}:
             continue
         if real_only and not _is_real_user_email(u.email):
