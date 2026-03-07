@@ -419,3 +419,28 @@ class LearningStatusOut(BaseModel):
     no_price: int
     snapshots_total: int
     outcomes_total: int
+
+
+class AutoExitTickItemOut(BaseModel):
+    user_email: str
+    exchange: str
+    position_id: str
+    symbol: str
+    side: str
+    opened_minutes: int
+    should_exit: bool
+    closed: bool
+    reason: str
+    dry_run: bool
+    entry_price: float
+    current_price: Optional[float] = None
+    realized_pnl: Optional[float] = None
+
+
+class AutoExitTickOut(BaseModel):
+    dry_run: bool
+    scanned_positions: int
+    exit_candidates: int
+    closed_positions: int
+    skipped_no_price: int
+    results: list[AutoExitTickItemOut]

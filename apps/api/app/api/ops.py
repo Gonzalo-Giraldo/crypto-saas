@@ -88,6 +88,8 @@ from apps.api.app.schemas.security import (
     LearningRollupOut,
     LearningRollupRowOut,
     LearningStatusOut,
+    AutoExitTickItemOut,
+    AutoExitTickOut,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -96,6 +98,7 @@ from apps.api.app.core.time import today_colombia
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.key_rotation import reencrypt_exchange_secrets
 from apps.api.app.services.risk_profiles import (
+    apply_profile_daily_limits,
     list_risk_profiles,
     resolve_risk_profile,
     upsert_risk_profile_config,
@@ -109,6 +112,7 @@ from apps.api.app.services.trading_controls import (
     assert_exposure_limits,
     assert_trading_enabled,
     get_trading_enabled,
+    infer_exchange_from_symbol,
     set_trading_enabled,
 )
 from apps.api.app.services.strategy_assignments import (
@@ -1494,6 +1498,100 @@ def _fetch_binance_price_map(symbols: list[str]) -> dict[str, float]:
         if px > 0:
             out[symbol] = px
     return out
+
+
+def _position_direction_to_exit_check_side(position_side: str) -> str:
+    s = str(position_side or "").upper().strip()
+    if s in {"SHORT", "SELL"}:
+        return "SELL"
+    return "BUY"
+
+
+def _position_realized_pnl(side: str, entry_price: float, exit_price: float, qty: float, fees: float = 0.0) -> float:
+    side_u = _position_direction_to_exit_check_side(side)
+    sign = -1.0 if side_u == "SELL" else 1.0
+    return (sign * (float(exit_price) - float(entry_price)) * float(qty)) - float(fees)
+
+
+def _latest_market_snapshot_for_symbol(
+    *,
+    db: Session,
+    tenant_id: str,
+    exchange: str,
+    symbol: str,
+) -> Optional[MarketTrendSnapshot]:
+    return db.execute(
+        select(MarketTrendSnapshot)
+        .where(
+            MarketTrendSnapshot.tenant_id == tenant_id,
+            MarketTrendSnapshot.exchange == str(exchange).upper(),
+            MarketTrendSnapshot.symbol == str(symbol).upper(),
+        )
+        .order_by(MarketTrendSnapshot.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _close_position_internal(
+    *,
+    db: Session,
+    user: User,
+    position: Position,
+    exit_price: float,
+    fees: float,
+    reason: str,
+    checks: list[dict],
+) -> float:
+    realized_pnl = _position_realized_pnl(
+        side=str(position.side),
+        entry_price=float(position.entry_price),
+        exit_price=float(exit_price),
+        qty=float(position.qty),
+        fees=float(fees),
+    )
+    position.fees = float(fees)
+    position.realized_pnl = float(realized_pnl)
+    position.status = "CLOSED"
+    position.closed_at = datetime.now(timezone.utc)
+
+    sig = db.execute(select(Signal).where(Signal.id == position.signal_id)).scalar_one_or_none()
+    if sig:
+        sig.status = "COMPLETED"
+
+    today = today_colombia()
+    dr = (
+        db.execute(
+            select(DailyRiskState).where(
+                DailyRiskState.user_id == user.id,
+                DailyRiskState.day == today,
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if not dr:
+        dr = DailyRiskState(user_id=user.id, day=today)
+        db.add(dr)
+        db.flush()
+    profile = resolve_risk_profile(db, user.id, user.email)
+    apply_profile_daily_limits(dr, profile)
+    dr.trades_today += 1
+    dr.realized_pnl_today += float(realized_pnl)
+
+    log_audit_event(
+        db,
+        action="position.auto_close",
+        user_id=user.id,
+        entity_type="position",
+        entity_id=position.id,
+        details={
+            "reason": reason,
+            "exit_price": float(exit_price),
+            "fees": float(fees),
+            "realized_pnl": float(realized_pnl),
+            "checks": checks,
+        },
+    )
+    return float(realized_pnl)
 
 
 def _record_learning_decision_snapshot(
@@ -3756,6 +3854,249 @@ def run_auto_pick_tick_for_tenant(
         "direction": direction,
         "executed_count": len(executed),
         "results": executed,
+    }
+
+
+@router.post("/admin/exit/tick", response_model=AutoExitTickOut)
+def admin_exit_tick(
+    dry_run: bool = True,
+    real_only: bool = True,
+    include_service_users: bool = False,
+    max_positions: int = 500,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    out = run_exit_tick_for_tenant(
+        db=db,
+        tenant_id=_tenant_id(current_user),
+        dry_run=dry_run,
+        real_only=real_only,
+        include_service_users=include_service_users,
+        max_positions=max_positions,
+    )
+    db.commit()
+    return out
+
+
+def run_exit_tick_for_tenant(
+    *,
+    db: Session,
+    tenant_id: str,
+    dry_run: bool = True,
+    real_only: bool = True,
+    include_service_users: bool = False,
+    max_positions: int = 500,
+) -> dict:
+    now = datetime.now(timezone.utc)
+    max_positions = max(1, min(int(max_positions), 5000))
+    users = (
+        db.execute(select(User).where(User.tenant_id == tenant_id).order_by(User.email.asc()))
+        .scalars()
+        .all()
+    )
+    eligible_users = []
+    for u in users:
+        if u.role not in {"admin", "trader"}:
+            continue
+        if real_only and not _is_real_user_email(u.email):
+            continue
+        if (not include_service_users) and _is_service_user_email(u.email):
+            continue
+        eligible_users.append(u)
+    if not eligible_users:
+        return {
+            "dry_run": bool(dry_run),
+            "scanned_positions": 0,
+            "exit_candidates": 0,
+            "closed_positions": 0,
+            "skipped_no_price": 0,
+            "results": [],
+        }
+
+    user_by_id = {u.id: u for u in eligible_users}
+    open_positions = (
+        db.execute(
+            select(Position)
+            .where(
+                Position.user_id.in_(list(user_by_id.keys())),
+                Position.status == "OPEN",
+            )
+            .order_by(Position.opened_at.asc())
+            .limit(max_positions)
+        )
+        .scalars()
+        .all()
+    )
+    binance_symbols = sorted(
+        {
+            str(p.symbol or "").upper()
+            for p in open_positions
+            if infer_exchange_from_symbol(str(p.symbol or "")) == "BINANCE"
+        }
+    )
+    binance_prices = _fetch_binance_price_map(binance_symbols) if binance_symbols else {}
+
+    scanned_positions = len(open_positions)
+    exit_candidates = 0
+    closed_positions = 0
+    skipped_no_price = 0
+    results: list[dict] = []
+
+    for p in open_positions:
+        user = user_by_id.get(p.user_id)
+        if user is None:
+            continue
+        symbol = str(p.symbol or "").upper()
+        exchange = infer_exchange_from_symbol(symbol)
+        side_for_exit = _position_direction_to_exit_check_side(str(p.side))
+        opened_at = p.opened_at if p.opened_at and p.opened_at.tzinfo else (p.opened_at.replace(tzinfo=timezone.utc) if p.opened_at else now)
+        opened_minutes = int(max(0.0, (now - opened_at.astimezone(timezone.utc)).total_seconds() / 60.0))
+        current_price = None
+        if exchange == "BINANCE":
+            current_price = binance_prices.get(symbol)
+        if not current_price or float(current_price) <= 0:
+            skipped_no_price += 1
+            reason = "no_price"
+            log_audit_event(
+                db,
+                action="exit.auto_close.skipped_no_price",
+                user_id=user.id,
+                entity_type="position",
+                entity_id=p.id,
+                details={"exchange": exchange, "symbol": symbol, "opened_minutes": opened_minutes},
+            )
+            results.append(
+                {
+                    "user_email": user.email,
+                    "exchange": exchange,
+                    "position_id": p.id,
+                    "symbol": symbol,
+                    "side": side_for_exit,
+                    "opened_minutes": opened_minutes,
+                    "should_exit": False,
+                    "closed": False,
+                    "reason": reason,
+                    "dry_run": bool(dry_run),
+                    "entry_price": float(p.entry_price),
+                    "current_price": None,
+                    "realized_pnl": None,
+                }
+            )
+            continue
+
+        snapshot = _latest_market_snapshot_for_symbol(
+            db=db,
+            tenant_id=tenant_id,
+            exchange=exchange,
+            symbol=symbol,
+        )
+        trend_score = float(snapshot.trend_score) if snapshot else 0.0
+        atr_pct = float(snapshot.atr_pct) if snapshot else 0.0
+        momentum_score = float(snapshot.momentum_score) if snapshot else 0.0
+        market_regime, regime_source = infer_market_regime(
+            trend_score=trend_score,
+            atr_pct=atr_pct,
+            momentum_score=momentum_score,
+        )
+        strategy = resolve_strategy_for_user_exchange(
+            db=db,
+            user_id=user.id,
+            exchange=exchange,
+        )
+        runtime_policy = resolve_runtime_policy(
+            db=db,
+            strategy_id=strategy["strategy_id"],
+            exchange=exchange,
+        )
+        exit_payload = ExitCheckRequest(
+            symbol=symbol,
+            side=side_for_exit,
+            entry_price=float(p.entry_price),
+            current_price=float(current_price),
+            stop_loss=float(p.stop_loss if p.stop_loss is not None else p.entry_price),
+            take_profit=float(p.take_profit if p.take_profit is not None else p.entry_price),
+            opened_minutes=opened_minutes,
+            trend_break=False,
+            signal_reverse=False,
+            macro_event_block=False,
+            earnings_within_24h=False,
+            market_trend_score=trend_score,
+            atr_pct=atr_pct,
+            momentum_score=momentum_score,
+        )
+        checks, reasons = _build_exit_checks(
+            exchange=exchange,
+            strategy_id=strategy["strategy_id"],
+            payload=exit_payload,
+            market_regime=market_regime,
+            runtime_policy=runtime_policy,
+        )
+        should_exit = len(reasons) > 0
+        if should_exit:
+            exit_candidates += 1
+        reason = ",".join(reasons) if reasons else "hold"
+        closed = False
+        realized_pnl = None
+        if should_exit and not dry_run:
+            realized_pnl = _close_position_internal(
+                db=db,
+                user=user,
+                position=p,
+                exit_price=float(current_price),
+                fees=0.0,
+                reason=reason,
+                checks=checks,
+            )
+            closed = True
+            closed_positions += 1
+
+        log_audit_event(
+            db,
+            action="exit.auto_close.triggered" if should_exit else "exit.auto_close.hold",
+            user_id=user.id,
+            entity_type="position",
+            entity_id=p.id,
+            details={
+                "exchange": exchange,
+                "strategy_id": strategy["strategy_id"],
+                "strategy_source": strategy["source"],
+                "market_regime": market_regime,
+                "regime_source": regime_source,
+                "opened_minutes": opened_minutes,
+                "dry_run": bool(dry_run),
+                "should_exit": should_exit,
+                "closed": closed,
+                "reasons": reasons,
+                "checks": checks,
+                "current_price": float(current_price),
+                "realized_pnl": realized_pnl,
+            },
+        )
+        results.append(
+            {
+                "user_email": user.email,
+                "exchange": exchange,
+                "position_id": p.id,
+                "symbol": symbol,
+                "side": side_for_exit,
+                "opened_minutes": opened_minutes,
+                "should_exit": should_exit,
+                "closed": closed,
+                "reason": reason,
+                "dry_run": bool(dry_run),
+                "entry_price": float(p.entry_price),
+                "current_price": float(current_price),
+                "realized_pnl": realized_pnl,
+            }
+        )
+    db.commit()
+    return {
+        "dry_run": bool(dry_run),
+        "scanned_positions": scanned_positions,
+        "exit_candidates": exit_candidates,
+        "closed_positions": closed_positions,
+        "skipped_no_price": skipped_no_price,
+        "results": results,
     }
 
 

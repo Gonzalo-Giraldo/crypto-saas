@@ -29,6 +29,7 @@ import time
 from apps.api.app.api.ops import (
     router as ops_router,
     run_auto_pick_tick_for_tenant,
+    run_exit_tick_for_tenant,
     run_market_monitor_tick_for_tenant,
     run_learning_pipeline_tick,
 )
@@ -99,6 +100,21 @@ _AUTO_PICK_LOCK_KEY = 887731
 def _auto_pick_tick_once() -> None:
     db = SessionLocal()
     try:
+        exit_out = {
+            "scanned_positions": 0,
+            "exit_candidates": 0,
+            "closed_positions": 0,
+            "dry_run": True,
+        }
+        if bool(settings.AUTO_EXIT_INTERNAL_ENABLED):
+            exit_out = run_exit_tick_for_tenant(
+                db=db,
+                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+                dry_run=bool(settings.AUTO_EXIT_INTERNAL_DRY_RUN),
+                real_only=bool(settings.AUTO_EXIT_INTERNAL_REAL_ONLY),
+                include_service_users=bool(settings.AUTO_EXIT_INTERNAL_INCLUDE_SERVICE_USERS),
+                max_positions=int(settings.AUTO_EXIT_INTERNAL_MAX_POSITIONS or 500),
+            )
         monitor = run_market_monitor_tick_for_tenant(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
@@ -122,6 +138,10 @@ def _auto_pick_tick_once() -> None:
                 "executed_count": out.get("executed_count", 0),
                 "dry_run": out.get("dry_run", True),
                 "top_n": out.get("top_n", 10),
+                "exit_scanned_positions": exit_out.get("scanned_positions", 0),
+                "exit_candidates": exit_out.get("exit_candidates", 0),
+                "exit_closed_positions": exit_out.get("closed_positions", 0),
+                "exit_dry_run": exit_out.get("dry_run", True),
             },
             flush=True,
         )

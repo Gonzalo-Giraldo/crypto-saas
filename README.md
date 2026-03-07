@@ -101,6 +101,7 @@ pytest -q tests/integration
 - `POST /ops/admin/auto-pick/tick` (admin, executes auto-pick for enabled users/exchanges)
 - `GET /ops/admin/auto-pick/report` (admin, interval report by broker)
 - `GET /ops/admin/auto-pick/liquidity-report` (admin, liquidity state distribution)
+- `POST /ops/admin/exit/tick` (admin, evaluates open positions and auto-closes when exit rules trigger)
 - `GET /ops/admin/learning/status` (admin)
 - `GET /ops/admin/learning/dataset` (admin)
 - `POST /ops/admin/learning/label` (admin)
@@ -138,6 +139,12 @@ pytest -q tests/integration
     - `AUTO_PICK_INTERNAL_REAL_ONLY=true|false`
     - `AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS=false`
     - `AUTO_PICK_INTERNAL_TENANT_ID=default`
+  - Internal auto-exit scheduler (optional, same interval loop):
+    - `AUTO_EXIT_INTERNAL_ENABLED=true|false` (default `false`)
+    - `AUTO_EXIT_INTERNAL_DRY_RUN=true|false`
+    - `AUTO_EXIT_INTERNAL_REAL_ONLY=true|false`
+    - `AUTO_EXIT_INTERNAL_INCLUDE_SERVICE_USERS=false`
+    - `AUTO_EXIT_INTERNAL_MAX_POSITIONS=500`
   - Real auto-pick execution guardrails:
     - `AUTO_PICK_REAL_GUARD_ENABLED=true|false` (default `false`)
     - `AUTO_PICK_REAL_ALLOWED_EMAILS=email1@dominio.com,email2@dominio.com`
