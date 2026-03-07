@@ -164,6 +164,101 @@ def _parse_symbol_allowlist(value: str) -> set[str]:
     return {item.strip().upper() for item in raw.split(",") if item.strip()}
 
 
+def _parse_csv_allowlist(value: str, *, upper: bool = False) -> set[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return set()
+    out = set()
+    for item in raw.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        out.add(token.upper() if upper else token.lower())
+    return out
+
+
+def _auto_pick_real_guard_reason(
+    *,
+    current_user: User,
+    exchange: str,
+    symbol: str,
+) -> Optional[str]:
+    if not bool(settings.AUTO_PICK_REAL_GUARD_ENABLED):
+        return None
+
+    user_email = (current_user.email or "").strip().lower()
+    ex = (exchange or "").strip().upper()
+    sym = (symbol or "").strip().upper()
+
+    allowed_emails = _parse_csv_allowlist(settings.AUTO_PICK_REAL_ALLOWED_EMAILS, upper=False)
+    if allowed_emails and user_email not in allowed_emails:
+        return "real_guard_email_allowlist"
+
+    allowed_exchanges = _parse_csv_allowlist(settings.AUTO_PICK_REAL_ALLOWED_EXCHANGES, upper=True)
+    if allowed_exchanges and ex not in allowed_exchanges:
+        return "real_guard_exchange_allowlist"
+
+    allowed_symbols = _parse_symbol_allowlist(settings.AUTO_PICK_REAL_ALLOWED_SYMBOLS)
+    if allowed_symbols and sym not in allowed_symbols:
+        return "real_guard_symbol_allowlist"
+
+    quote = str(settings.AUTO_PICK_REAL_BINANCE_QUOTE or "").strip().upper()
+    if ex == "BINANCE" and quote and not sym.endswith(quote):
+        return "real_guard_binance_quote"
+
+    return None
+
+
+def _build_auto_pick_exit_plan(
+    *,
+    exchange: str,
+    symbol: str,
+    side: str,
+    rr_estimate: Optional[float],
+    atr_pct: Optional[float],
+) -> tuple[Optional[dict], Optional[str]]:
+    rr = float(rr_estimate or 0.0)
+    min_rr = max(0.5, float(settings.AUTO_PICK_REAL_EXIT_PLAN_MIN_RR or 1.2))
+    if rr < min_rr:
+        return None, "real_guard_exit_plan_rr_below_minimum"
+
+    entry_price: Optional[float] = None
+    if (exchange or "").upper() == "BINANCE":
+        entry_price = _fetch_binance_price_map([symbol]).get(str(symbol).upper())
+    if not entry_price or entry_price <= 0:
+        return None, "real_guard_exit_plan_price_unavailable"
+
+    atr = max(0.0, float(atr_pct or 0.0))
+    risk_from_atr_pct = atr * float(settings.AUTO_PICK_REAL_EXIT_PLAN_ATR_MULTIPLIER or 0.8)
+    min_risk_pct = max(0.05, float(settings.AUTO_PICK_REAL_EXIT_PLAN_MIN_RISK_PCT or 0.35))
+    max_risk_pct = max(min_risk_pct, float(settings.AUTO_PICK_REAL_EXIT_PLAN_MAX_RISK_PCT or 3.0))
+    risk_pct = max(min_risk_pct, min(max_risk_pct, risk_from_atr_pct))
+    risk_frac = risk_pct / 100.0
+    if risk_frac <= 0:
+        return None, "real_guard_exit_plan_invalid_risk"
+
+    side_u = str(side or "BUY").upper()
+    risk_abs = float(entry_price) * risk_frac
+    if side_u == "SELL":
+        stop_loss = float(entry_price) + risk_abs
+        take_profit = float(entry_price) - (risk_abs * rr)
+    else:
+        stop_loss = float(entry_price) - risk_abs
+        take_profit = float(entry_price) + (risk_abs * rr)
+
+    plan = {
+        "active": True,
+        "entry_price": round(float(entry_price), 8),
+        "stop_loss": round(float(stop_loss), 8),
+        "take_profit": round(float(take_profit), 8),
+        "rr_estimate": round(rr, 4),
+        "risk_pct": round(risk_pct, 4),
+        "max_hold_minutes": int(max(5, settings.AUTO_PICK_REAL_EXIT_PLAN_MAX_HOLD_MINUTES or 240)),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return plan, None
+
+
 def _binance_fallback_symbols() -> list[str]:
     return [
         "BTCUSDT",
@@ -1908,9 +2003,100 @@ def _auto_pick_from_scan(
     if selected_side == "SELL":
         selected_qty = selected_qty * 0.35
         size_multiplier = float(size_multiplier) * 0.35
+    selected_symbol = str(selected["symbol"])
     execution = None
     decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
     if not payload.dry_run:
+        real_guard_reason = _auto_pick_real_guard_reason(
+            current_user=current_user,
+            exchange=exchange,
+            symbol=selected_symbol,
+        )
+        if real_guard_reason:
+            return _finalize({
+                "exchange": exchange,
+                "dry_run": bool(payload.dry_run),
+                "requested_direction": payload.direction,
+                "selected": False,
+                "selected_symbol": None,
+                "selected_side": None,
+                "selected_qty": None,
+                "selected_score": None,
+                "selected_score_rules": None,
+                "selected_score_market": None,
+                "selected_trend_score": None,
+                "selected_trend_score_1d": None,
+                "selected_trend_score_4h": None,
+                "selected_trend_score_1h": None,
+                "selected_micro_trend_15m": None,
+                "selected_market_regime": None,
+                "selected_liquidity_state": liquidity_state,
+                "selected_size_multiplier": round(float(size_multiplier), 4),
+                "top_candidate_symbol": top_candidate_symbol,
+                "top_candidate_score": (top_candidate or {}).get("score"),
+                "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                "top_candidate_trend_score": top_candidate_trend_score,
+                "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                "avg_score": avg_score,
+                "avg_score_rules": avg_score_rules,
+                "avg_score_market": avg_score_market,
+                "decision": "blocked_real_execution_guard",
+                "top_failed_checks": [real_guard_reason],
+                "execution": None,
+                "scan": scan,
+            }, max_spread=max_spread, max_slippage=max_slippage)
+        exit_plan = None
+        if bool(settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN):
+            rr_estimate = float(candidate.rr_estimate) if candidate else None
+            atr_pct = float(candidate.atr_pct) if candidate else None
+            exit_plan, plan_reason = _build_auto_pick_exit_plan(
+                exchange=exchange,
+                symbol=selected_symbol,
+                side=selected_side,
+                rr_estimate=rr_estimate,
+                atr_pct=atr_pct,
+            )
+            if plan_reason:
+                return _finalize({
+                    "exchange": exchange,
+                    "dry_run": bool(payload.dry_run),
+                    "requested_direction": payload.direction,
+                    "selected": False,
+                    "selected_symbol": None,
+                    "selected_side": None,
+                    "selected_qty": None,
+                    "selected_score": None,
+                    "selected_score_rules": None,
+                    "selected_score_market": None,
+                    "selected_trend_score": None,
+                    "selected_trend_score_1d": None,
+                    "selected_trend_score_4h": None,
+                    "selected_trend_score_1h": None,
+                    "selected_micro_trend_15m": None,
+                    "selected_market_regime": None,
+                    "selected_liquidity_state": liquidity_state,
+                    "selected_size_multiplier": round(float(size_multiplier), 4),
+                    "top_candidate_symbol": top_candidate_symbol,
+                    "top_candidate_score": (top_candidate or {}).get("score"),
+                    "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                    "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                    "top_candidate_trend_score": top_candidate_trend_score,
+                    "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                    "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                    "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                    "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                    "avg_score": avg_score,
+                    "avg_score_rules": avg_score_rules,
+                    "avg_score_market": avg_score_market,
+                    "decision": "blocked_real_execution_guard",
+                    "top_failed_checks": [plan_reason],
+                    "execution": {"exit_plan": None},
+                    "scan": scan,
+                }, max_spread=max_spread, max_slippage=max_slippage)
         try:
             if exchange == "BINANCE":
                 execution = execute_binance_test_order_for_user(
@@ -1927,11 +2113,12 @@ def _auto_pick_from_scan(
                     qty=selected_qty,
                 )
             decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
+            if bool(settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN):
+                execution = {**(execution or {}), "exit_plan": exit_plan}
         except HTTPException as exc:
             decision = "insufficient_resources_or_execution_error"
             execution = {"error": str(exc.detail)}
 
-    selected_symbol = selected["symbol"]
     (
         selected_trend_score,
         selected_trend_score_1d,
@@ -2242,6 +2429,11 @@ def _build_exit_checks(
     else:
         fallback_hold = 480
     max_hold_minutes = int(float(runtime_policy.get(f"max_hold_minutes_{market_regime}", fallback_hold)))
+    min_progress_r = max(0.0, float(settings.EXIT_TIME_MIN_PROGRESS_R or 0.5))
+
+    risk_distance = abs(entry - stop)
+    favorable_move = (current - entry) if side == "BUY" else (entry - current)
+    progress_r = (favorable_move / risk_distance) if risk_distance > 0 else 0.0
 
     timeout = opened_minutes >= max_hold_minutes
     checks.append(
@@ -2251,8 +2443,16 @@ def _build_exit_checks(
             "detail": f"opened_minutes={opened_minutes} limit={max_hold_minutes}",
         }
     )
-    if timeout:
-        reasons.append("time_limit_reached")
+    progress_ok = progress_r >= min_progress_r
+    checks.append(
+        {
+            "name": "exit_time_min_progress_r",
+            "passed": progress_ok,
+            "detail": f"progress_r={round(progress_r,4)} required>={round(min_progress_r,4)}",
+        }
+    )
+    if timeout and not progress_ok:
+        reasons.append("time_limit_no_progress")
 
     trend_break = bool(payload.trend_break)
     signal_reverse = bool(payload.signal_reverse)
@@ -2664,6 +2864,14 @@ def auto_pick_report(
             "liq_spread_bps": "Liquidez: spread alto",
             "liq_slippage_bps": "Liquidez: slippage alto",
             "effective_liquidity_failed": "Liquidez efectiva no apta",
+            "real_guard_email_allowlist": "Ejecucion real bloqueada: usuario fuera de allowlist",
+            "real_guard_exchange_allowlist": "Ejecucion real bloqueada: exchange fuera de allowlist",
+            "real_guard_symbol_allowlist": "Ejecucion real bloqueada: simbolo fuera de allowlist",
+            "real_guard_binance_quote": "Ejecucion real bloqueada: quote distinta a USDT",
+            "real_guard_exit_plan_required": "Ejecucion real bloqueada: plan de salida requerido",
+            "real_guard_exit_plan_rr_below_minimum": "Ejecucion real bloqueada: RR de salida por debajo del minimo",
+            "real_guard_exit_plan_price_unavailable": "Ejecucion real bloqueada: no hay precio para construir plan de salida",
+            "real_guard_exit_plan_invalid_risk": "Ejecucion real bloqueada: riesgo invalido para plan de salida",
             "market_regime_allowed": "Regimen de mercado no permitido",
             "max_leverage": "Leverage supera el maximo",
             "ibkr_in_rth": "IBKR fuera de horario RTH",

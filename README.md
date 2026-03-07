@@ -138,6 +138,18 @@ pytest -q tests/integration
     - `AUTO_PICK_INTERNAL_REAL_ONLY=true|false`
     - `AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS=false`
     - `AUTO_PICK_INTERNAL_TENANT_ID=default`
+  - Real auto-pick execution guardrails:
+    - `AUTO_PICK_REAL_GUARD_ENABLED=true|false` (default `false`)
+    - `AUTO_PICK_REAL_ALLOWED_EMAILS=email1@dominio.com,email2@dominio.com`
+    - `AUTO_PICK_REAL_ALLOWED_EXCHANGES=BINANCE,IBKR`
+    - `AUTO_PICK_REAL_ALLOWED_SYMBOLS=BTCUSDT,ETHUSDT`
+    - `AUTO_PICK_REAL_BINANCE_QUOTE=USDT` (forces quote for BINANCE real flow)
+    - `AUTO_PICK_REAL_REQUIRE_EXIT_PLAN=true|false` (default `true`)
+    - `AUTO_PICK_REAL_EXIT_PLAN_MIN_RR=1.2`
+    - `AUTO_PICK_REAL_EXIT_PLAN_MAX_HOLD_MINUTES=240`
+    - `AUTO_PICK_REAL_EXIT_PLAN_MIN_RISK_PCT=0.35`
+    - `AUTO_PICK_REAL_EXIT_PLAN_MAX_RISK_PCT=3.0`
+    - `AUTO_PICK_REAL_EXIT_PLAN_ATR_MULTIPLIER=0.8`
   - Binance gateway route in API:
     - `BINANCE_GATEWAY_ENABLED=true|false`
     - `BINANCE_GATEWAY_BASE_URL=https://...`
@@ -194,6 +206,12 @@ pytest -q tests/integration
   - request supports `direction=LONG|SHORT|BOTH` (default `LONG`).
   - `SHORT` is enabled for `IBKR` and `BINANCE`.
   - for `BINANCE`, `SELL` test-order is routed to Futures (`/fapi/v1/order/test`), while `BUY` remains on Spot test-order.
+  - Real auto-pick (`dry_run=false`) can enforce pre-execution guards:
+  - allowlist by user/exchange/symbol,
+  - BINANCE quote enforcement (for example, only `USDT` pairs),
+  - mandatory active exit plan (entry/SL/TP/RR/max-hold generated before send).
+  - Exit time-stop model (configurable):
+  - `EXIT_TIME_MIN_PROGRESS_R=0.5` => at time limit, exits only if progress is below `+0.5R`.
 - `/ops/console` auto-pick report table includes trend columns:
   - `Tendencia`
   - `MTF 1D/4H/1H/15m` (el `15m` es micro-confirmacion de las ultimas 6 velas de 15 minutos)
