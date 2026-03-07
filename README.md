@@ -145,6 +145,10 @@ pytest -q tests/integration
     - `AUTO_EXIT_INTERNAL_REAL_ONLY=true|false`
     - `AUTO_EXIT_INTERNAL_INCLUDE_SERVICE_USERS=false`
     - `AUTO_EXIT_INTERNAL_MAX_POSITIONS=500`
+    - `AUTO_EXIT_INTERNAL_PAUSE=true|false` (default `false`, emergency brake for real closes)
+    - `AUTO_EXIT_INTERNAL_MAX_CLOSES_PER_TICK=2` (max real closures per scheduler tick)
+    - `AUTO_EXIT_INTERNAL_SYMBOL_COOLDOWN_SECONDS=300` (cooldown per `user+symbol` between real exits)
+    - `AUTO_EXIT_INTERNAL_MAX_ERRORS_PER_TICK=3` (aborts close loop after too many per-tick errors)
   - Real auto-pick execution guardrails:
     - `AUTO_PICK_REAL_GUARD_ENABLED=true|false` (default `false`)
     - `AUTO_PICK_REAL_ALLOWED_EMAILS=email1@dominio.com,email2@dominio.com`

@@ -104,6 +104,10 @@ def _auto_pick_tick_once() -> None:
             "scanned_positions": 0,
             "exit_candidates": 0,
             "closed_positions": 0,
+            "skipped_no_price": 0,
+            "skipped_by_policy": 0,
+            "errors": 0,
+            "paused": False,
             "dry_run": True,
         }
         if bool(settings.AUTO_EXIT_INTERNAL_ENABLED):
@@ -141,6 +145,10 @@ def _auto_pick_tick_once() -> None:
                 "exit_scanned_positions": exit_out.get("scanned_positions", 0),
                 "exit_candidates": exit_out.get("exit_candidates", 0),
                 "exit_closed_positions": exit_out.get("closed_positions", 0),
+                "exit_skipped_no_price": exit_out.get("skipped_no_price", 0),
+                "exit_skipped_by_policy": exit_out.get("skipped_by_policy", 0),
+                "exit_errors": exit_out.get("errors", 0),
+                "exit_paused": exit_out.get("paused", False),
                 "exit_dry_run": exit_out.get("dry_run", True),
             },
             flush=True,

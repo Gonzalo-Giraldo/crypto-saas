@@ -439,8 +439,11 @@ class AutoExitTickItemOut(BaseModel):
 
 class AutoExitTickOut(BaseModel):
     dry_run: bool
+    paused: bool = False
     scanned_positions: int
     exit_candidates: int
     closed_positions: int
     skipped_no_price: int
+    skipped_by_policy: int = 0
+    errors: int = 0
     results: list[AutoExitTickItemOut]

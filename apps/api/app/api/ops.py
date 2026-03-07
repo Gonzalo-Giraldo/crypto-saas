@@ -3889,6 +3889,18 @@ def run_exit_tick_for_tenant(
 ) -> dict:
     now = datetime.now(timezone.utc)
     max_positions = max(1, min(int(max_positions), 5000))
+    paused = bool(settings.AUTO_EXIT_INTERNAL_PAUSE)
+    max_closes_per_tick = max(0, int(settings.AUTO_EXIT_INTERNAL_MAX_CLOSES_PER_TICK or 0))
+    symbol_cooldown_seconds = max(0, int(settings.AUTO_EXIT_INTERNAL_SYMBOL_COOLDOWN_SECONDS or 0))
+    max_errors_per_tick = max(1, int(settings.AUTO_EXIT_INTERNAL_MAX_ERRORS_PER_TICK or 1))
+    reason_priority = {
+        "stop_loss_hit": 0,
+        "event_risk_exit": 1,
+        "time_limit_no_progress": 2,
+        "trend_break": 3,
+        "signal_reverse": 4,
+        "take_profit_hit": 5,
+    }
     users = (
         db.execute(select(User).where(User.tenant_id == tenant_id).order_by(User.email.asc()))
         .scalars()
@@ -3906,10 +3918,13 @@ def run_exit_tick_for_tenant(
     if not eligible_users:
         return {
             "dry_run": bool(dry_run),
+            "paused": paused,
             "scanned_positions": 0,
             "exit_candidates": 0,
             "closed_positions": 0,
             "skipped_no_price": 0,
+            "skipped_by_policy": 0,
+            "errors": 0,
             "results": [],
         }
 
@@ -3940,7 +3955,11 @@ def run_exit_tick_for_tenant(
     exit_candidates = 0
     closed_positions = 0
     skipped_no_price = 0
-    results: list[dict] = []
+    skipped_by_policy = 0
+    errors = 0
+    results_by_position_id: dict[str, dict] = {}
+    exit_candidates_pending: list[dict] = []
+    closed_in_tick: set[tuple[str, str]] = set()
 
     for p in open_positions:
         user = user_by_id.get(p.user_id)
@@ -3965,23 +3984,21 @@ def run_exit_tick_for_tenant(
                 entity_id=p.id,
                 details={"exchange": exchange, "symbol": symbol, "opened_minutes": opened_minutes},
             )
-            results.append(
-                {
-                    "user_email": user.email,
-                    "exchange": exchange,
-                    "position_id": p.id,
-                    "symbol": symbol,
-                    "side": side_for_exit,
-                    "opened_minutes": opened_minutes,
-                    "should_exit": False,
-                    "closed": False,
-                    "reason": reason,
-                    "dry_run": bool(dry_run),
-                    "entry_price": float(p.entry_price),
-                    "current_price": None,
-                    "realized_pnl": None,
-                }
-            )
+            results_by_position_id[p.id] = {
+                "user_email": user.email,
+                "exchange": exchange,
+                "position_id": p.id,
+                "symbol": symbol,
+                "side": side_for_exit,
+                "opened_minutes": opened_minutes,
+                "should_exit": False,
+                "closed": False,
+                "reason": reason,
+                "dry_run": bool(dry_run),
+                "entry_price": float(p.entry_price),
+                "current_price": None,
+                "realized_pnl": None,
+            }
             continue
 
         snapshot = _latest_market_snapshot_for_symbol(
@@ -4035,67 +4052,215 @@ def run_exit_tick_for_tenant(
         if should_exit:
             exit_candidates += 1
         reason = ",".join(reasons) if reasons else "hold"
-        closed = False
-        realized_pnl = None
-        if should_exit and not dry_run:
-            realized_pnl = _close_position_internal(
-                db=db,
-                user=user,
-                position=p,
-                exit_price=float(current_price),
-                fees=0.0,
-                reason=reason,
-                checks=checks,
-            )
-            closed = True
-            closed_positions += 1
+        top_priority = min(reason_priority.get(r, 99) for r in reasons) if reasons else 99
+        base_result = {
+            "user_email": user.email,
+            "exchange": exchange,
+            "position_id": p.id,
+            "symbol": symbol,
+            "side": side_for_exit,
+            "opened_minutes": opened_minutes,
+            "should_exit": should_exit,
+            "closed": False,
+            "reason": reason,
+            "dry_run": bool(dry_run),
+            "entry_price": float(p.entry_price),
+            "current_price": float(current_price),
+            "realized_pnl": None,
+        }
+        results_by_position_id[p.id] = base_result
 
+        if should_exit:
+            exit_candidates_pending.append(
+                {
+                    "priority": top_priority,
+                    "opened_minutes": opened_minutes,
+                    "position": p,
+                    "user": user,
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "side_for_exit": side_for_exit,
+                    "current_price": float(current_price),
+                    "checks": checks,
+                    "reasons": reasons,
+                    "reason_text": reason,
+                    "strategy_id": strategy["strategy_id"],
+                    "strategy_source": strategy["source"],
+                    "market_regime": market_regime,
+                    "regime_source": regime_source,
+                }
+            )
+        else:
+            log_audit_event(
+                db,
+                action="exit.auto_close.hold",
+                user_id=user.id,
+                entity_type="position",
+                entity_id=p.id,
+                details={
+                    "exchange": exchange,
+                    "strategy_id": strategy["strategy_id"],
+                    "strategy_source": strategy["source"],
+                    "market_regime": market_regime,
+                    "regime_source": regime_source,
+                    "opened_minutes": opened_minutes,
+                    "dry_run": bool(dry_run),
+                    "should_exit": False,
+                    "closed": False,
+                    "reasons": reasons,
+                    "checks": checks,
+                    "current_price": float(current_price),
+                    "realized_pnl": None,
+                },
+            )
+
+    if exit_candidates_pending:
+        exit_candidates_pending.sort(key=lambda item: (item["priority"], -item["opened_minutes"]))
+
+    for item in exit_candidates_pending:
+        p = item["position"]
+        user = item["user"]
+        key = (str(user.id), str(item["symbol"]))
+        out_row = results_by_position_id.get(p.id)
+        if out_row is None:
+            continue
+        policy_skip_reason: Optional[str] = None
+
+        if errors >= max_errors_per_tick:
+            policy_skip_reason = "max_errors_reached"
+        elif paused and not dry_run:
+            policy_skip_reason = "paused"
+        elif (not dry_run) and max_closes_per_tick > 0 and closed_positions >= max_closes_per_tick:
+            policy_skip_reason = "max_closes_reached"
+        elif (not dry_run) and key in closed_in_tick:
+            policy_skip_reason = "symbol_cooldown_tick"
+        elif (not dry_run) and symbol_cooldown_seconds > 0:
+            recent_cutoff = now - timedelta(seconds=symbol_cooldown_seconds)
+            recent_closed = db.execute(
+                select(Position.id).where(
+                    Position.user_id == user.id,
+                    Position.symbol == item["symbol"],
+                    Position.status == "CLOSED",
+                    Position.closed_at.is_not(None),
+                    Position.closed_at >= recent_cutoff,
+                    Position.id != p.id,
+                ).limit(1)
+            ).scalar_one_or_none()
+            if recent_closed:
+                policy_skip_reason = "symbol_cooldown_window"
+
+        if policy_skip_reason:
+            skipped_by_policy += 1
+            out_row["reason"] = f"policy_skipped:{policy_skip_reason}|{item['reason_text']}"
+            log_audit_event(
+                db,
+                action="exit.auto_close.policy_skipped",
+                user_id=user.id,
+                entity_type="position",
+                entity_id=p.id,
+                details={
+                    "policy_skip_reason": policy_skip_reason,
+                    "exchange": item["exchange"],
+                    "opened_minutes": item["opened_minutes"],
+                    "dry_run": bool(dry_run),
+                    "reasons": item["reasons"],
+                },
+            )
+            continue
+
+        realized_pnl = None
+        closed = False
+        if not dry_run:
+            try:
+                realized_pnl = _close_position_internal(
+                    db=db,
+                    user=user,
+                    position=p,
+                    exit_price=item["current_price"],
+                    fees=0.0,
+                    reason=item["reason_text"],
+                    checks=item["checks"],
+                )
+                closed = True
+                closed_positions += 1
+                closed_in_tick.add(key)
+            except Exception as exc:
+                errors += 1
+                skipped_by_policy += 1
+                out_row["reason"] = f"policy_skipped:close_error|{item['reason_text']}"
+                log_audit_event(
+                    db,
+                    action="exit.auto_close.error",
+                    user_id=user.id,
+                    entity_type="position",
+                    entity_id=p.id,
+                    details={
+                        "exchange": item["exchange"],
+                        "error": str(exc),
+                        "dry_run": bool(dry_run),
+                        "reasons": item["reasons"],
+                    },
+                )
+                continue
+
+        out_row["closed"] = closed
+        out_row["realized_pnl"] = realized_pnl
         log_audit_event(
             db,
-            action="exit.auto_close.triggered" if should_exit else "exit.auto_close.hold",
+            action="exit.auto_close.triggered",
             user_id=user.id,
             entity_type="position",
             entity_id=p.id,
             details={
-                "exchange": exchange,
-                "strategy_id": strategy["strategy_id"],
-                "strategy_source": strategy["source"],
-                "market_regime": market_regime,
-                "regime_source": regime_source,
-                "opened_minutes": opened_minutes,
+                "exchange": item["exchange"],
+                "strategy_id": item["strategy_id"],
+                "strategy_source": item["strategy_source"],
+                "market_regime": item["market_regime"],
+                "regime_source": item["regime_source"],
+                "opened_minutes": item["opened_minutes"],
                 "dry_run": bool(dry_run),
-                "should_exit": should_exit,
+                "should_exit": True,
                 "closed": closed,
-                "reasons": reasons,
-                "checks": checks,
-                "current_price": float(current_price),
+                "reasons": item["reasons"],
+                "checks": item["checks"],
+                "current_price": item["current_price"],
                 "realized_pnl": realized_pnl,
             },
         )
-        results.append(
-            {
-                "user_email": user.email,
-                "exchange": exchange,
-                "position_id": p.id,
-                "symbol": symbol,
-                "side": side_for_exit,
-                "opened_minutes": opened_minutes,
-                "should_exit": should_exit,
-                "closed": closed,
-                "reason": reason,
-                "dry_run": bool(dry_run),
-                "entry_price": float(p.entry_price),
-                "current_price": float(current_price),
-                "realized_pnl": realized_pnl,
-            }
-        )
+
+    results: list[dict] = []
+    for p in open_positions:
+        row = results_by_position_id.get(p.id)
+        if row:
+            results.append(row)
+
+    log_audit_event(
+        db,
+        action="exit.auto_close.tick.summary",
+        user_id=None,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        details={
+            "dry_run": bool(dry_run),
+            "paused": paused,
+            "scanned_positions": scanned_positions,
+            "exit_candidates": exit_candidates,
+            "closed_positions": closed_positions,
+            "skipped_no_price": skipped_no_price,
+            "skipped_by_policy": skipped_by_policy,
+            "errors": errors,
+        },
+    )
     db.commit()
     return {
         "dry_run": bool(dry_run),
+        "paused": paused,
         "scanned_positions": scanned_positions,
         "exit_candidates": exit_candidates,
         "closed_positions": closed_positions,
         "skipped_no_price": skipped_no_price,
+        "skipped_by_policy": skipped_by_policy,
+        "errors": errors,
         "results": results,
     }
 
