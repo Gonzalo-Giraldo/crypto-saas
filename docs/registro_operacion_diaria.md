@@ -9,6 +9,7 @@ Uso:
 
 | Fecha | Hora | Operador | Healthz | Smoke Prod | Auditoria | Incidente | Accion aplicada | Estado final | Link run |
 |---|---|---|---|---|---|---|---|---|---|
+| 2026-03-08 | 19:30 | Gonzalo | OK | Verde | OK | No | Cierre release M1..M11 + validacion Integration/Smoke + ajuste TOTP admin fallback | Cerrado OK | Integration: <RUN_ID> / Smoke: <RUN_ID> |
 | 2026-02-26 | 07:00 | Gonzalo | OK | Verde | OK | No | N/A | Cerrado OK | https://github.com/Gonzalo-Giraldo/crypto-saas/actions/runs/XXXX |
 
 ## Criterios rapidos
@@ -30,4 +31,3 @@ Uso:
 - `Cerrado con observacion`: operacion estable con nota de seguimiento.
 - `Abierto`: incidente en curso.
 | 2026-02-26 | 12:15 | Gonzalo | OK | Verde | OK | No | Limpieza usuarios smoke y validación RBAC | Cerrado OK | https://github.com/Gonzalo-Giraldo/crypto-saas/actions/runs/ID_DEL_RUN |
-

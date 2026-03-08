@@ -3,6 +3,18 @@
 Fecha inicio: 2026-03-08
 Base de referencia: docs/05_documento_tecnico_modular.md
 
+## Cierre de release
+- Fecha cierre: 2026-03-08
+- Estado final: M1..M11 cerrados (analizado/decidido/implementado = SI).
+- Validacion final:
+  - Integration Tests: verde.
+  - Smoke Prod: verde.
+- Commits de consolidacion (main):
+  - `2364e56` (M10/M11 base)
+  - `9bc4248` (M1..M9 + docs tecnicas)
+  - `a9ce107` (fix integration + smoke fallback)
+  - `58aa0d1` (fix TOTP smoke)
+
 ## Estado general
 - Modulos definidos: M1..M11
 - Frontend separado: NO (UI embebida en backend via `ops.py`)

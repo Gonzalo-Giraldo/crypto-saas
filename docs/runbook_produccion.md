@@ -259,6 +259,35 @@ curl -s "$BASE_URL/ops/backoffice/users?real_only=true" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## 13) Respuesta a incidente critico (SLA interno)
+
+### 13.1 Roles y canal
+- Incident Commander: responsable de coordinar decision tecnica.
+- Operador de plataforma: ejecuta deploy/rollback/restart.
+- Responsable de seguridad: valida secretos, 2FA y auditoria.
+- Canal unico: bridge de incidente (chat/meet) + issue de seguimiento.
+
+### 13.2 Objetivos temporales
+- Deteccion: <= 5 minutos desde alerta roja.
+- Contencion: <= 15 minutos (pausa de ejecucion real, kill-switch si aplica).
+- Recuperacion inicial: <= 60 minutos (servicio estable + smoke verde).
+
+### 13.3 Secuencia estandar
+1. Confirmar incidente con `healthz`, logs y workflow fallido.
+2. Contener:
+   - pausar cierres/aperturas reales si aplica,
+   - restringir operaciones admin sensibles.
+3. Recuperar:
+   - rollback de deploy si el fallo viene de release,
+   - o recovery DB segun `docs/runbook_disaster_recovery.md` si el fallo es de datos.
+4. Validar:
+   - `Smoke Prod` verde,
+   - `Integration Tests` verde,
+   - endpoints criticos (`auth`, `users`, `ops/execution`, `ops/audit`) OK.
+5. Cerrar:
+   - registrar RCA preliminar,
+   - acciones preventivas y owner con fecha compromiso.
+
 Artifact diario de snapshot:
 - Workflow: `Security Posture Daily`
 - Artifact: `security-posture-daily-<run_id>`

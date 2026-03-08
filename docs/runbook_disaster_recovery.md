@@ -87,3 +87,27 @@ BASE_URL='https://...onrender.com' scripts/smoke_prod.sh
 - Ejecutar backup diario y antes de cambios sensibles (rotaciones, migraciones).
 - Conservar al menos 14 backups (`KEEP_LAST=14`).
 - Guardar passphrase en gestor de secretos, nunca en texto plano del repo.
+
+## 8) Registro de simulacro DR (obligatorio)
+- Frecuencia minima: mensual (dry-run) y trimestral (restore controlado).
+- Registrar:
+  - fecha/hora,
+  - operador,
+  - entorno,
+  - backup usado,
+  - resultado (`OK`/`FAIL`),
+  - tiempo total de recuperacion observado (RTO),
+  - punto de datos recuperado observado (RPO).
+
+Plantilla rapida:
+```text
+Fecha:
+Operador:
+Entorno:
+Backup file:
+Checksum verificado: SI/NO
+Restore resultado: OK/FAIL
+RTO observado:
+RPO observado:
+Notas:
+```

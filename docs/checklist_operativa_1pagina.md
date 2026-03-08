@@ -60,3 +60,17 @@ curl -s "$BASE_URL/ops/audit/me?limit=100" \
 - [ ] Auditoria validada.
 - [ ] Sin secretos expuestos en logs/tickets/chat.
 - [ ] Registro de cierre (fecha/hora, operador, resultado).
+
+## G) Cierre de release (pre/post deploy)
+
+- [ ] Pre-deploy:
+  - branch/tag correcto,
+  - changelog/documentacion actualizada,
+  - backup DB ejecutado o verificado vigente.
+- [ ] Post-deploy:
+  - `Integration Tests` en verde,
+  - `Smoke Prod` en verde,
+  - evidencia registrada en `docs/registro_operacion_diaria.md`.
+- [ ] DR:
+  - dry-run backup/restore ejecutado en ventana de control,
+  - RTO/RPO registrados en `docs/runbook_disaster_recovery.md`.

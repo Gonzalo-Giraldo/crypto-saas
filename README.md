@@ -6,6 +6,17 @@ Backend SaaS (FastAPI + PostgreSQL) for conservative crypto trading operations w
 - position open/close flow,
 - daily risk tracking.
 
+## Release Status (M1-M11)
+- Fecha cierre tecnico: 2026-03-08
+- Estado: M1..M11 implementados y validados.
+- Evidencia operativa:
+  - `Integration Tests`: verde
+  - `Smoke Prod`: verde
+- Documentos de cierre:
+  - `docs/06_revision_modular_iterativa.md`
+  - `docs/runbook_disaster_recovery.md`
+  - `docs/registro_operacion_diaria.md`
+
 ## Stack
 - FastAPI
 - SQLAlchemy
