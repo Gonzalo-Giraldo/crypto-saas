@@ -421,6 +421,38 @@ class LearningStatusOut(BaseModel):
     outcomes_total: int
 
 
+class LearningSuggestionReportRowOut(BaseModel):
+    decision_id: str
+    timestamp: str
+    user_email: str
+    exchange: str
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    selected: bool
+    decision: str
+    score_base: Optional[float] = None
+    score_final: Optional[float] = None
+    learning_prob_hit_pct: Optional[float] = None
+    learning_samples: Optional[int] = None
+    learning_score: Optional[float] = None
+    learning_delta_points: Optional[float] = None
+    outcome_status: Optional[str] = None
+    hit: Optional[bool] = None
+    return_pct: Optional[float] = None
+    pnl_quote: Optional[float] = None
+    suggestion_success: Optional[bool] = None
+
+
+class LearningSuggestionReportOut(BaseModel):
+    generated_at: str
+    hours: int
+    window_from: str
+    window_to: str
+    total_rows: int
+    success_rate_pct: Optional[float] = None
+    rows: list[LearningSuggestionReportRowOut]
+
+
 class AutoExitTickItemOut(BaseModel):
     user_email: str
     exchange: str

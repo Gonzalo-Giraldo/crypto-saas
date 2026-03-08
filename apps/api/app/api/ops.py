@@ -88,6 +88,8 @@ from apps.api.app.schemas.security import (
     LearningRollupOut,
     LearningRollupRowOut,
     LearningStatusOut,
+    LearningSuggestionReportOut,
+    LearningSuggestionReportRowOut,
     AutoExitTickItemOut,
     AutoExitTickOut,
 )
@@ -1431,6 +1433,74 @@ def _pretrade_scores(
     return round(score_rules, 2), round(score_market, 2), round(score_final, 2)
 
 
+def _learning_advice_for_asset(
+    *,
+    db: Session,
+    tenant_id: str,
+    exchange: str,
+    symbol: str,
+    horizon_minutes: int,
+) -> dict:
+    lookback_hours = max(1, int(settings.LEARNING_DECISION_LOOKBACK_HOURS or 720))
+    min_samples = max(1, int(settings.LEARNING_DECISION_MIN_SAMPLES or 30))
+    from_dt = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    rows = db.execute(
+        select(LearningRollupHourly)
+        .where(
+            LearningRollupHourly.tenant_id == tenant_id,
+            LearningRollupHourly.exchange == str(exchange or "").upper(),
+            LearningRollupHourly.symbol == str(symbol or "").upper(),
+            LearningRollupHourly.horizon_minutes == int(horizon_minutes),
+            LearningRollupHourly.bucket_hour >= from_dt,
+        )
+        .order_by(LearningRollupHourly.bucket_hour.desc())
+        .limit(200)
+    ).scalars().all()
+    if not rows:
+        return {
+            "prob_hit_pct": None,
+            "samples": 0,
+            "learning_score": None,
+            "enabled": False,
+            "reason": "no_history",
+        }
+    samples = int(sum(int(r.samples or 0) for r in rows))
+    if samples < min_samples:
+        return {
+            "prob_hit_pct": None,
+            "samples": samples,
+            "learning_score": None,
+            "enabled": False,
+            "reason": "insufficient_samples",
+        }
+    weighted_hit = sum(float(r.hit_rate_pct or 0.0) * int(r.samples or 0) for r in rows) / max(1, samples)
+    weighted_ret = sum(float(r.avg_return_pct or 0.0) * int(r.samples or 0) for r in rows) / max(1, samples)
+    ret_component = max(0.0, min(100.0, 50.0 + (weighted_ret * 10.0)))
+    learning_score = (0.75 * weighted_hit) + (0.25 * ret_component)
+    return {
+        "prob_hit_pct": round(float(weighted_hit), 2),
+        "samples": samples,
+        "learning_score": round(float(learning_score), 2),
+        "enabled": True,
+        "reason": "ok",
+    }
+
+
+def _blend_learning_score(score_base: float, learning_score: Optional[float]) -> tuple[float, float]:
+    base = max(0.0, min(100.0, float(score_base)))
+    if learning_score is None:
+        return round(base, 2), 0.0
+    rules_w = max(0.0, float(settings.LEARNING_DECISION_RULES_WEIGHT or 0.9))
+    model_w = max(0.0, float(settings.LEARNING_DECISION_MODEL_WEIGHT or 0.1))
+    denom = max(0.0001, rules_w + model_w)
+    raw_blend = ((rules_w * base) + (model_w * float(learning_score))) / denom
+    raw_delta = raw_blend - base
+    max_delta = max(0.0, float(settings.LEARNING_DECISION_MAX_DELTA_POINTS or 6.0))
+    delta = max(-max_delta, min(max_delta, raw_delta))
+    final = max(0.0, min(100.0, base + delta))
+    return round(final, 2), round(delta, 2)
+
+
 def _classify_liquidity_state(
     *,
     spread_bps: float,
@@ -1607,9 +1677,9 @@ def _record_learning_decision_snapshot(
     score_weight_market: float,
     max_spread: Optional[float],
     max_slippage: Optional[float],
-) -> None:
+) -> Optional[str]:
     if not settings.LEARNING_PIPELINE_ENABLED:
-        return
+        return None
     now = datetime.now(timezone.utc)
     horizon = max(5, int(settings.LEARNING_LABEL_HORIZON_MINUTES))
     decision_id = str(uuid.uuid4())
@@ -1688,6 +1758,7 @@ def _record_learning_decision_snapshot(
         label_rule="ret_pct_gt_0",
     )
     db.add(outcome)
+    return decision_id
 
 
 def _scan_pretrade_candidates(
@@ -1745,15 +1816,32 @@ def _scan_pretrade_candidates(
             score_weight_rules=score_weight_rules,
             score_weight_market=score_weight_market,
         )
+        learning = _learning_advice_for_asset(
+            db=db,
+            tenant_id=_tenant_id(current_user),
+            exchange=exchange,
+            symbol=candidate.symbol,
+            horizon_minutes=max(5, int(settings.LEARNING_LABEL_HORIZON_MINUTES or 60)),
+        )
+        score_blended, learning_delta = _blend_learning_score(
+            score_base=score_final,
+            learning_score=learning.get("learning_score"),
+        )
         rows.append(
             {
                 "symbol": candidate.symbol,
                 "side": candidate.side,
                 "qty": candidate.qty,
                 "passed": passed,
-                "score": score_final,
+                "score": score_blended,
+                "score_base": score_final,
                 "score_rules": score_rules,
                 "score_market": score_market,
+                "learning_prob_hit_pct": learning.get("prob_hit_pct"),
+                "learning_samples": learning.get("samples"),
+                "learning_score": learning.get("learning_score"),
+                "learning_delta_points": learning_delta,
+                "learning_enabled": bool(learning.get("enabled", False)),
                 "market_regime": result.get("market_regime", "range"),
                 "regime_source": result.get("regime_source", "legacy"),
                 "passed_checks": len(checks) - len(failed_checks),
@@ -1886,10 +1974,12 @@ def _auto_pick_from_scan(
         top_candidate_micro_trend_15m,
     ) = _resolve_trend_fields(top_candidate_symbol, top_candidate_obj)
     avg_score = None
+    avg_score_base = None
     avg_score_rules = None
     avg_score_market = None
     if assets:
         avg_score = round(sum(float(a.get("score") or 0.0) for a in assets) / len(assets), 2)
+        avg_score_base = round(sum(float(a.get("score_base") or a.get("score") or 0.0) for a in assets) / len(assets), 2)
         avg_score_rules = round(sum(float(a.get("score_rules") or 0.0) for a in assets) / len(assets), 2)
         avg_score_market = round(sum(float(a.get("score_market") or 0.0) for a in assets) / len(assets), 2)
 
@@ -1901,7 +1991,7 @@ def _auto_pick_from_scan(
                 if selected_symbol
                 else None
             )
-            _record_learning_decision_snapshot(
+            decision_id = _record_learning_decision_snapshot(
                 db=db,
                 current_user=current_user,
                 exchange=exchange,
@@ -1914,6 +2004,7 @@ def _auto_pick_from_scan(
                 max_spread=max_spread,
                 max_slippage=max_slippage,
             )
+            response["learning_decision_id"] = decision_id
         except Exception:
             # Learning must never block trading decisions.
             pass
@@ -1987,14 +2078,20 @@ def _auto_pick_from_scan(
             "selected_market_regime": None,
             "top_candidate_symbol": top_candidate_symbol,
             "top_candidate_score": (top_candidate or {}).get("score"),
+            "top_candidate_score_base": (top_candidate or {}).get("score_base"),
             "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
             "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+            "top_candidate_learning_prob_hit_pct": (top_candidate or {}).get("learning_prob_hit_pct"),
+            "top_candidate_learning_samples": (top_candidate or {}).get("learning_samples"),
+            "top_candidate_learning_score": (top_candidate or {}).get("learning_score"),
+            "top_candidate_learning_delta_points": (top_candidate or {}).get("learning_delta_points"),
             "top_candidate_trend_score": top_candidate_trend_score,
             "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
             "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
             "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
             "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
             "avg_score": avg_score,
+            "avg_score_base": avg_score_base,
             "avg_score_rules": avg_score_rules,
             "avg_score_market": avg_score_market,
             "decision": "no_candidate_passed",
@@ -2234,8 +2331,13 @@ def _auto_pick_from_scan(
         "selected_side": selected["side"],
         "selected_qty": round(selected_qty, 8),
         "selected_score": selected["score"],
+        "selected_score_base": selected.get("score_base"),
         "selected_score_rules": selected["score_rules"],
         "selected_score_market": selected["score_market"],
+        "selected_learning_prob_hit_pct": selected.get("learning_prob_hit_pct"),
+        "selected_learning_samples": selected.get("learning_samples"),
+        "selected_learning_score": selected.get("learning_score"),
+        "selected_learning_delta_points": selected.get("learning_delta_points"),
         "selected_trend_score": selected_trend_score,
         "selected_trend_score_1d": selected_trend_score_1d,
         "selected_trend_score_4h": selected_trend_score_4h,
@@ -2246,14 +2348,20 @@ def _auto_pick_from_scan(
         "selected_size_multiplier": round(float(size_multiplier), 4),
         "top_candidate_symbol": top_candidate_symbol,
         "top_candidate_score": (top_candidate or {}).get("score"),
+        "top_candidate_score_base": (top_candidate or {}).get("score_base"),
         "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
         "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+        "top_candidate_learning_prob_hit_pct": (top_candidate or {}).get("learning_prob_hit_pct"),
+        "top_candidate_learning_samples": (top_candidate or {}).get("learning_samples"),
+        "top_candidate_learning_score": (top_candidate or {}).get("learning_score"),
+        "top_candidate_learning_delta_points": (top_candidate or {}).get("learning_delta_points"),
         "top_candidate_trend_score": top_candidate_trend_score,
         "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
         "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
         "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
         "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
         "avg_score": avg_score,
+        "avg_score_base": avg_score_base,
         "avg_score_rules": avg_score_rules,
         "avg_score_market": avg_score_market,
         "decision": decision,
@@ -3622,8 +3730,13 @@ def pretrade_binance_auto_pick(
             "selected_side": out["selected_side"],
             "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
+            "selected_score_base": out.get("selected_score_base"),
             "selected_score_rules": out.get("selected_score_rules"),
             "selected_score_market": out.get("selected_score_market"),
+            "selected_learning_prob_hit_pct": out.get("selected_learning_prob_hit_pct"),
+            "selected_learning_samples": out.get("selected_learning_samples"),
+            "selected_learning_score": out.get("selected_learning_score"),
+            "selected_learning_delta_points": out.get("selected_learning_delta_points"),
             "selected_trend_score": out.get("selected_trend_score"),
             "selected_trend_score_1d": out.get("selected_trend_score_1d"),
             "selected_trend_score_4h": out.get("selected_trend_score_4h"),
@@ -3634,16 +3747,23 @@ def pretrade_binance_auto_pick(
             "selected_size_multiplier": out.get("selected_size_multiplier"),
             "top_candidate_symbol": out.get("top_candidate_symbol"),
             "top_candidate_score": out.get("top_candidate_score"),
+            "top_candidate_score_base": out.get("top_candidate_score_base"),
             "top_candidate_score_rules": out.get("top_candidate_score_rules"),
             "top_candidate_score_market": out.get("top_candidate_score_market"),
+            "top_candidate_learning_prob_hit_pct": out.get("top_candidate_learning_prob_hit_pct"),
+            "top_candidate_learning_samples": out.get("top_candidate_learning_samples"),
+            "top_candidate_learning_score": out.get("top_candidate_learning_score"),
+            "top_candidate_learning_delta_points": out.get("top_candidate_learning_delta_points"),
             "top_candidate_trend_score": out.get("top_candidate_trend_score"),
             "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
             "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
             "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
             "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
             "avg_score": out.get("avg_score"),
+            "avg_score_base": out.get("avg_score_base"),
             "avg_score_rules": out.get("avg_score_rules"),
             "avg_score_market": out.get("avg_score_market"),
+            "learning_decision_id": out.get("learning_decision_id"),
             "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
@@ -3685,8 +3805,13 @@ def pretrade_ibkr_auto_pick(
             "selected_side": out["selected_side"],
             "selected_qty": out["selected_qty"],
             "selected_score": out["selected_score"],
+            "selected_score_base": out.get("selected_score_base"),
             "selected_score_rules": out.get("selected_score_rules"),
             "selected_score_market": out.get("selected_score_market"),
+            "selected_learning_prob_hit_pct": out.get("selected_learning_prob_hit_pct"),
+            "selected_learning_samples": out.get("selected_learning_samples"),
+            "selected_learning_score": out.get("selected_learning_score"),
+            "selected_learning_delta_points": out.get("selected_learning_delta_points"),
             "selected_trend_score": out.get("selected_trend_score"),
             "selected_trend_score_1d": out.get("selected_trend_score_1d"),
             "selected_trend_score_4h": out.get("selected_trend_score_4h"),
@@ -3697,16 +3822,23 @@ def pretrade_ibkr_auto_pick(
             "selected_size_multiplier": out.get("selected_size_multiplier"),
             "top_candidate_symbol": out.get("top_candidate_symbol"),
             "top_candidate_score": out.get("top_candidate_score"),
+            "top_candidate_score_base": out.get("top_candidate_score_base"),
             "top_candidate_score_rules": out.get("top_candidate_score_rules"),
             "top_candidate_score_market": out.get("top_candidate_score_market"),
+            "top_candidate_learning_prob_hit_pct": out.get("top_candidate_learning_prob_hit_pct"),
+            "top_candidate_learning_samples": out.get("top_candidate_learning_samples"),
+            "top_candidate_learning_score": out.get("top_candidate_learning_score"),
+            "top_candidate_learning_delta_points": out.get("top_candidate_learning_delta_points"),
             "top_candidate_trend_score": out.get("top_candidate_trend_score"),
             "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
             "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
             "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
             "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
             "avg_score": out.get("avg_score"),
+            "avg_score_base": out.get("avg_score_base"),
             "avg_score_rules": out.get("avg_score_rules"),
             "avg_score_market": out.get("avg_score_market"),
+            "learning_decision_id": out.get("learning_decision_id"),
             "top_failed_checks": out.get("top_failed_checks", []),
             "scanned_assets": out["scan"]["scanned_assets"],
         },
@@ -3794,8 +3926,13 @@ def run_auto_pick_tick_for_tenant(
                     "selected_side": out["selected_side"],
                     "selected_qty": out["selected_qty"],
                     "selected_score": out["selected_score"],
+                    "selected_score_base": out.get("selected_score_base"),
                     "selected_score_rules": out.get("selected_score_rules"),
                     "selected_score_market": out.get("selected_score_market"),
+                    "selected_learning_prob_hit_pct": out.get("selected_learning_prob_hit_pct"),
+                    "selected_learning_samples": out.get("selected_learning_samples"),
+                    "selected_learning_score": out.get("selected_learning_score"),
+                    "selected_learning_delta_points": out.get("selected_learning_delta_points"),
                     "selected_trend_score": out.get("selected_trend_score"),
                     "selected_trend_score_1d": out.get("selected_trend_score_1d"),
                     "selected_trend_score_4h": out.get("selected_trend_score_4h"),
@@ -3806,16 +3943,23 @@ def run_auto_pick_tick_for_tenant(
                     "selected_size_multiplier": out.get("selected_size_multiplier"),
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
                     "top_candidate_score": out.get("top_candidate_score"),
+                    "top_candidate_score_base": out.get("top_candidate_score_base"),
                     "top_candidate_score_rules": out.get("top_candidate_score_rules"),
                     "top_candidate_score_market": out.get("top_candidate_score_market"),
+                    "top_candidate_learning_prob_hit_pct": out.get("top_candidate_learning_prob_hit_pct"),
+                    "top_candidate_learning_samples": out.get("top_candidate_learning_samples"),
+                    "top_candidate_learning_score": out.get("top_candidate_learning_score"),
+                    "top_candidate_learning_delta_points": out.get("top_candidate_learning_delta_points"),
                     "top_candidate_trend_score": out.get("top_candidate_trend_score"),
                     "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
                     "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
                     "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
                     "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
                     "avg_score": out.get("avg_score"),
+                    "avg_score_base": out.get("avg_score_base"),
                     "avg_score_rules": out.get("avg_score_rules"),
                     "avg_score_market": out.get("avg_score_market"),
+                    "learning_decision_id": out.get("learning_decision_id"),
                     "top_failed_checks": out.get("top_failed_checks", []),
                     "scanned_assets": out["scan"]["scanned_assets"],
                 },
@@ -3829,8 +3973,13 @@ def run_auto_pick_tick_for_tenant(
                     "selected": out["selected"],
                     "selected_symbol": out["selected_symbol"],
                     "selected_score": out["selected_score"],
+                    "selected_score_base": out.get("selected_score_base"),
                     "selected_score_rules": out.get("selected_score_rules"),
                     "selected_score_market": out.get("selected_score_market"),
+                    "selected_learning_prob_hit_pct": out.get("selected_learning_prob_hit_pct"),
+                    "selected_learning_samples": out.get("selected_learning_samples"),
+                    "selected_learning_score": out.get("selected_learning_score"),
+                    "selected_learning_delta_points": out.get("selected_learning_delta_points"),
                     "selected_trend_score": out.get("selected_trend_score"),
                     "selected_trend_score_1d": out.get("selected_trend_score_1d"),
                     "selected_trend_score_4h": out.get("selected_trend_score_4h"),
@@ -3840,16 +3989,23 @@ def run_auto_pick_tick_for_tenant(
                     "selected_size_multiplier": out.get("selected_size_multiplier"),
                     "top_candidate_symbol": out.get("top_candidate_symbol"),
                     "top_candidate_score": out.get("top_candidate_score"),
+                    "top_candidate_score_base": out.get("top_candidate_score_base"),
                     "top_candidate_score_rules": out.get("top_candidate_score_rules"),
                     "top_candidate_score_market": out.get("top_candidate_score_market"),
+                    "top_candidate_learning_prob_hit_pct": out.get("top_candidate_learning_prob_hit_pct"),
+                    "top_candidate_learning_samples": out.get("top_candidate_learning_samples"),
+                    "top_candidate_learning_score": out.get("top_candidate_learning_score"),
+                    "top_candidate_learning_delta_points": out.get("top_candidate_learning_delta_points"),
                     "top_candidate_trend_score": out.get("top_candidate_trend_score"),
                     "top_candidate_trend_score_1d": out.get("top_candidate_trend_score_1d"),
                     "top_candidate_trend_score_4h": out.get("top_candidate_trend_score_4h"),
                     "top_candidate_trend_score_1h": out.get("top_candidate_trend_score_1h"),
                     "top_candidate_micro_trend_15m": out.get("top_candidate_micro_trend_15m"),
                     "avg_score": out.get("avg_score"),
+                    "avg_score_base": out.get("avg_score_base"),
                     "avg_score_rules": out.get("avg_score_rules"),
                     "avg_score_market": out.get("avg_score_market"),
+                    "learning_decision_id": out.get("learning_decision_id"),
                     "scanned_assets": out["scan"]["scanned_assets"],
                 }
             )
@@ -4739,6 +4895,130 @@ def admin_learning_dataset(
         hours=hours,
         window_from=from_dt.isoformat(),
         window_to=now.isoformat(),
+        rows=out_rows,
+    )
+
+
+@router.get("/admin/learning/suggestion-report", response_model=LearningSuggestionReportOut)
+def admin_learning_suggestion_report(
+    hours: int = 24,
+    limit: int = 500,
+    exchange: str = "ALL",
+    outcome_status: str = "ALL",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    hours = max(1, min(hours, 24 * 30))
+    limit = max(1, min(limit, 5000))
+    now = datetime.now(timezone.utc)
+    tenant = _tenant_id(current_user)
+    from_dt = now - timedelta(hours=hours)
+    exchange_norm = (exchange or "ALL").upper().strip()
+    status_norm = (outcome_status or "ALL").upper().strip()
+
+    q = (
+        select(LearningDecisionSnapshot, LearningDecisionOutcome)
+        .join(
+            LearningDecisionOutcome,
+            and_(
+                LearningDecisionOutcome.decision_id == LearningDecisionSnapshot.decision_id,
+                LearningDecisionOutcome.horizon_minutes == LearningDecisionSnapshot.target_horizon_minutes,
+            ),
+        )
+        .where(
+            LearningDecisionSnapshot.tenant_id == tenant,
+            LearningDecisionSnapshot.decision_ts >= from_dt,
+        )
+        .order_by(LearningDecisionSnapshot.decision_ts.desc())
+        .limit(limit)
+    )
+    if exchange_norm in {"BINANCE", "IBKR"}:
+        q = q.where(LearningDecisionSnapshot.exchange == exchange_norm)
+    else:
+        exchange_norm = "ALL"
+    if status_norm in {"PENDING", "LABELED", "EXPIRED", "NO_PRICE"}:
+        q = q.where(LearningDecisionOutcome.outcome_status == status_norm.lower())
+    else:
+        status_norm = "ALL"
+
+    rows = db.execute(q).all()
+    out_rows: list[LearningSuggestionReportRowOut] = []
+    success_eval_count = 0
+    success_eval_hits = 0
+    for snap, outcome in rows:
+        learning_prob_hit_pct = None
+        learning_samples = None
+        learning_score = None
+        learning_delta_points = None
+        score_base = None
+
+        try:
+            checks_rows = json.loads(snap.checks_json) if snap.checks_json else []
+        except Exception:
+            checks_rows = []
+        if isinstance(checks_rows, list):
+            selected_row = None
+            for row in checks_rows:
+                if str(row.get("symbol") or "").upper() != str(snap.selected_symbol or "").upper():
+                    continue
+                if str(row.get("side") or "").upper() != str(snap.selected_side or "").upper():
+                    continue
+                selected_row = row
+                break
+            if selected_row:
+                learning_prob_hit_pct = selected_row.get("learning_prob_hit_pct")
+                learning_samples = selected_row.get("learning_samples")
+                learning_score = selected_row.get("learning_score")
+                learning_delta_points = selected_row.get("learning_delta_points")
+                score_base = selected_row.get("score_base")
+
+        if score_base is None:
+            score_base = snap.selected_score
+        score_final = snap.selected_score
+
+        suggestion_success = None
+        if outcome.outcome_status == "labeled" and outcome.hit is not None:
+            if learning_prob_hit_pct is not None:
+                predicted_positive = float(learning_prob_hit_pct) >= 50.0
+                actual_positive = bool(outcome.hit)
+                suggestion_success = predicted_positive == actual_positive
+                success_eval_count += 1
+                success_eval_hits += 1 if suggestion_success else 0
+
+        out_rows.append(
+            LearningSuggestionReportRowOut(
+                decision_id=snap.decision_id,
+                timestamp=_to_utc_iso(snap.decision_ts) or now.isoformat(),
+                user_email=snap.user_email,
+                exchange=snap.exchange,
+                symbol=snap.selected_symbol,
+                side=snap.selected_side,
+                selected=bool(snap.selected),
+                decision=snap.decision,
+                score_base=score_base,
+                score_final=score_final,
+                learning_prob_hit_pct=learning_prob_hit_pct,
+                learning_samples=learning_samples,
+                learning_score=learning_score,
+                learning_delta_points=learning_delta_points,
+                outcome_status=outcome.outcome_status,
+                hit=outcome.hit,
+                return_pct=outcome.return_pct,
+                pnl_quote=outcome.pnl_quote,
+                suggestion_success=suggestion_success,
+            )
+        )
+
+    success_rate_pct = None
+    if success_eval_count > 0:
+        success_rate_pct = round((success_eval_hits / success_eval_count) * 100.0, 2)
+    return LearningSuggestionReportOut(
+        generated_at=now.isoformat(),
+        hours=hours,
+        window_from=from_dt.isoformat(),
+        window_to=now.isoformat(),
+        total_rows=len(out_rows),
+        success_rate_pct=success_rate_pct,
         rows=out_rows,
     )
 

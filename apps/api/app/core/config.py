@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     LEARNING_ROLLUP_INTERVAL_MINUTES: int = 60
     LEARNING_RAW_TTL_DAYS: int = 180
     LEARNING_ROLLUP_TTL_DAYS: int = 730
+    LEARNING_DECISION_RULES_WEIGHT: float = 0.9
+    LEARNING_DECISION_MODEL_WEIGHT: float = 0.1
+    LEARNING_DECISION_MIN_SAMPLES: int = 30
+    LEARNING_DECISION_LOOKBACK_HOURS: int = 720
+    LEARNING_DECISION_MAX_DELTA_POINTS: float = 6.0
 
     model_config = ConfigDict(
         env_file=".env",

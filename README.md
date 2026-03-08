@@ -105,6 +105,7 @@ pytest -q tests/integration
 - Both admin tick endpoints accept optional `user_email` query param to scope execution to a single user during controlled tests.
 - `GET /ops/admin/learning/status` (admin)
 - `GET /ops/admin/learning/dataset` (admin)
+- `GET /ops/admin/learning/suggestion-report` (admin, sugerencia ML vs resultado real)
 - `POST /ops/admin/learning/label` (admin)
 - `POST /ops/admin/learning/retention/run` (admin)
 - `POST /ops/admin/learning/rollup/refresh` (admin)
@@ -150,6 +151,12 @@ pytest -q tests/integration
     - `AUTO_EXIT_INTERNAL_MAX_CLOSES_PER_TICK=2` (max real closures per scheduler tick)
     - `AUTO_EXIT_INTERNAL_SYMBOL_COOLDOWN_SECONDS=300` (cooldown per `user+symbol` between real exits)
     - `AUTO_EXIT_INTERNAL_MAX_ERRORS_PER_TICK=3` (aborts close loop after too many per-tick errors)
+  - Learning decision blend (conservative by default):
+    - `LEARNING_DECISION_RULES_WEIGHT=0.9`
+    - `LEARNING_DECISION_MODEL_WEIGHT=0.1`
+    - `LEARNING_DECISION_MIN_SAMPLES=30`
+    - `LEARNING_DECISION_LOOKBACK_HOURS=720`
+    - `LEARNING_DECISION_MAX_DELTA_POINTS=6.0`
   - Real auto-pick execution guardrails:
     - `AUTO_PICK_REAL_GUARD_ENABLED=true|false` (default `false`)
     - `AUTO_PICK_REAL_ALLOWED_EMAILS=email1@dominio.com,email2@dominio.com`
@@ -231,6 +238,7 @@ pytest -q tests/integration
   - captures auto-pick decisions continuously,
   - labels outcomes by horizon (`horizon_minutes`),
   - supports retention and hourly rollups for model-ready datasets.
+  - conservative decision blend: `rules/math 90%` + `learning 10%` (configurable).
 - `exit` check now applies strategy-specific exit triggers:
   - stop loss / take profit hit
   - max holding time by strategy
