@@ -197,7 +197,13 @@ pytest -q tests/integration
   - `BINANCE_FUTURES_BASE_URL` (default `https://testnet.binancefuture.com`)
   - legacy fallback: `BINANCE_BASE_URL` (treated as SPOT base)
   - `BINANCE_GATEWAY_TIMEOUT_SECONDS` (default `12`)
-  - `BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE=true|false` (default `false`)
+    - `BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE=true|false` (default `false`)
+  - CI status proxy in Ops panel (optional token for higher rate limits/private access):
+    - `GITHUB_API_BASE_URL=https://api.github.com`
+    - `GITHUB_ACTIONS_OWNER=Gonzalo-Giraldo`
+    - `GITHUB_ACTIONS_REPO=crypto-saas`
+    - `GITHUB_ACTIONS_DEFAULT_BRANCH=main`
+    - `GITHUB_ACTIONS_READ_TOKEN=...`
   - `BINANCE_GATEWAY_RATE_LIMIT_PER_MIN` (default `60`)
   - proxy endpoints:
     - `POST /binance/ticker-24hr`

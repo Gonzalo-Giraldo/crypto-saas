@@ -93,6 +93,9 @@ from apps.api.app.schemas.security import (
     LearningSuggestionReportRowOut,
     AutoExitTickItemOut,
     AutoExitTickOut,
+    CIWorkflowStatusOut,
+    CIStatusOut,
+    CILogHintOut,
 )
 from apps.api.app.core.config import settings
 from apps.api.app.models.user import User
@@ -159,6 +162,130 @@ def _render_ops_template(filename: str) -> HTMLResponse:
     path = _TEMPLATES_DIR / filename
     html = path.read_text(encoding="utf-8")
     return HTMLResponse(html)
+
+
+_CI_WORKFLOW_DEFS = [
+    ("integration", "Integration Tests", "integration-tests.yml"),
+    ("smoke", "Smoke Prod", "smoke-prod.yml"),
+    ("dr_drill", "DR Drill Monthly", "dr-drill-monthly.yml"),
+]
+
+
+def _ci_state(status: str, conclusion: Optional[str]) -> str:
+    if status == "completed":
+        return "green" if conclusion == "success" else "red"
+    if status in {"queued", "in_progress", "requested", "waiting"}:
+        return "yellow"
+    return "yellow"
+
+
+def _github_api_json(path: str) -> dict:
+    base = str(settings.GITHUB_API_BASE_URL or "https://api.github.com").rstrip("/")
+    url = f"{base}{path}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = str(settings.GITHUB_ACTIONS_READ_TOKEN or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib_request.Request(url=url, headers=headers, method="GET")
+    try:
+        with urllib_request.urlopen(req, timeout=8) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        detail = "github_api_http_error"
+        if exc.code == 401:
+            detail = "github_api_unauthorized"
+        elif exc.code == 403:
+            detail = "github_api_forbidden_or_rate_limited"
+        elif exc.code == 404:
+            detail = "github_repo_or_workflow_not_found"
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="github_api_unreachable") from exc
+    try:
+        return json.loads(body)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="github_api_invalid_json") from exc
+
+
+def _fetch_latest_workflow_run(*, owner: str, repo: str, branch: str, workflow_file: str) -> Optional[dict]:
+    wf = urllib_parse.quote(workflow_file, safe="")
+    b = urllib_parse.quote(branch, safe="")
+    path = f"/repos/{owner}/{repo}/actions/workflows/{wf}/runs?per_page=1&branch={b}"
+    data = _github_api_json(path)
+    runs = data.get("workflow_runs") or []
+    if not runs:
+        return None
+    return runs[0]
+
+
+def _build_ci_status_snapshot() -> CIStatusOut:
+    owner = str(settings.GITHUB_ACTIONS_OWNER or "").strip()
+    repo = str(settings.GITHUB_ACTIONS_REPO or "").strip()
+    branch = str(settings.GITHUB_ACTIONS_DEFAULT_BRANCH or "main").strip() or "main"
+    now = datetime.now(timezone.utc).isoformat()
+    workflows: list[CIWorkflowStatusOut] = []
+    if not owner or not repo:
+        for key, label, workflow_file in _CI_WORKFLOW_DEFS:
+            workflows.append(
+                CIWorkflowStatusOut(
+                    key=key,
+                    label=label,
+                    workflow_file=workflow_file,
+                    note="github_repo_not_configured",
+                )
+            )
+        return CIStatusOut(generated_at=now, owner=owner, repo=repo, branch=branch, workflows=workflows)
+
+    for key, label, workflow_file in _CI_WORKFLOW_DEFS:
+        try:
+            run = _fetch_latest_workflow_run(
+                owner=owner,
+                repo=repo,
+                branch=branch,
+                workflow_file=workflow_file,
+            )
+            if not run:
+                workflows.append(
+                    CIWorkflowStatusOut(
+                        key=key,
+                        label=label,
+                        workflow_file=workflow_file,
+                        note="no_runs_found",
+                    )
+                )
+                continue
+            status_v = str(run.get("status") or "unknown")
+            conc = run.get("conclusion")
+            workflows.append(
+                CIWorkflowStatusOut(
+                    key=key,
+                    label=label,
+                    workflow_file=workflow_file,
+                    run_id=run.get("id"),
+                    run_number=run.get("run_number"),
+                    status=status_v,
+                    conclusion=conc,
+                    state=_ci_state(status_v, conc),
+                    html_url=run.get("html_url"),
+                    updated_at=run.get("updated_at"),
+                    event=run.get("event"),
+                    branch=run.get("head_branch"),
+                )
+            )
+        except HTTPException as exc:
+            workflows.append(
+                CIWorkflowStatusOut(
+                    key=key,
+                    label=label,
+                    workflow_file=workflow_file,
+                    state="yellow",
+                    note=str(exc.detail),
+                )
+            )
+    return CIStatusOut(generated_at=now, owner=owner, repo=repo, branch=branch, workflows=workflows)
 
 
 _binance_ticker_cache_lock = threading.Lock()
@@ -6204,6 +6331,37 @@ def admin_readiness_daily_gate(
         },
         "readiness_summary": readiness["summary"],
     }
+
+
+@router.get("/admin/ci/status", response_model=CIStatusOut)
+def admin_ci_status(
+    current_user: User = Depends(require_any_role("admin", "operator")),
+):
+    _ = current_user
+    return _build_ci_status_snapshot()
+
+
+@router.get("/admin/ci/log-hint", response_model=CILogHintOut)
+def admin_ci_log_hint(
+    current_user: User = Depends(require_any_role("admin", "operator")),
+):
+    _ = current_user
+    snap = _build_ci_status_snapshot()
+    run_map = {
+        w.key: w.html_url
+        for w in snap.workflows
+        if w.html_url
+    }
+    line = (
+        f"Integration: {run_map.get('integration', '<sin_run>')} / "
+        f"Smoke: {run_map.get('smoke', '<sin_run>')} / "
+        f"DR: {run_map.get('dr_drill', '<sin_run>')}"
+    )
+    return CILogHintOut(
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        line_for_registro_operacion_diaria=line,
+        runs=run_map,
+    )
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     LEARNING_DECISION_MIN_SAMPLES: int = 30
     LEARNING_DECISION_LOOKBACK_HOURS: int = 720
     LEARNING_DECISION_MAX_DELTA_POINTS: float = 6.0
+    GITHUB_API_BASE_URL: str = "https://api.github.com"
+    GITHUB_ACTIONS_OWNER: str = "Gonzalo-Giraldo"
+    GITHUB_ACTIONS_REPO: str = "crypto-saas"
+    GITHUB_ACTIONS_DEFAULT_BRANCH: str = "main"
+    GITHUB_ACTIONS_READ_TOKEN: str = ""
 
     model_config = ConfigDict(
         env_file=".env",

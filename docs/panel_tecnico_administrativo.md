@@ -48,14 +48,13 @@ Frontend: vista de ultimo simulacro, RTO/RPO, checklist de cierre.
   - resumen de seguridad (scope, missing 2FA, stale secrets),
   - recordatorio de evidencia RTO/RPO.
 - Agregado bloque `CI/Release`:
-  - enlaces directos a workflows:
-    - Integration Tests,
-    - Smoke Prod,
-    - DR Drill Monthly.
+  - semaforo en vivo de workflows via backend proxy:
+    - `GET /ops/admin/ci/status`
+  - accion guiada para registro operativo:
+    - `GET /ops/admin/ci/log-hint` (linea lista para `docs/registro_operacion_diaria.md`).
 
 Pendiente para fase 2 completa:
-- consumir estado del ultimo run de workflows via integracion GitHub API (backend proxy interno),
-- mostrar ultimo `RUN_ID` y semaforo verde/rojo en vivo.
+- incluir persistencia de evidencia desde UI (actualmente la accion es guiada/copy-paste, no escritura directa en repositorio).
 
 ## 4) Criterio de aceptacion
 - El panel permite a un admin tomar decision operativa sin salir de consola:

@@ -21,6 +21,10 @@
     button { border:0; cursor:pointer; font-weight:700; background:var(--brand); color:#fff; }
     .ghost { background:#eef4ff; color:#1a57aa; border:1px solid #bfd1f3; }
     a.ghost { padding:10px 12px; border-radius:10px; font-size:14px; }
+    .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .pill.green { background:#e8f7ee; color:#147a46; border:1px solid #b9e7cb; }
+    .pill.yellow { background:#fff7e6; color:#9a5a00; border:1px solid #f2d3a0; }
+    .pill.red { background:#fdecec; color:#b42318; border:1px solid #f3b8b3; }
     .bad { color:var(--bad); }
     .ok { color:var(--ok); }
     .menu-item { text-align:left; }
@@ -183,7 +187,17 @@
           const posture = await api("/ops/security/posture?real_only=true&max_secret_age_days=30");
           const idem = await api("/ops/admin/idempotency/stats");
           const snap = await api("/ops/admin/snapshot/daily?real_only=true&max_secret_age_days=30&recent_hours=24");
-          const repoBase = "https://github.com/Gonzalo-Giraldo/crypto-saas";
+          const ci = await api("/ops/admin/ci/status");
+          const logHint = await api("/ops/admin/ci/log-hint");
+          const ciRows = (ci.workflows || []).map((w) => `
+            <tr>
+              <td>${esc(w.label)}</td>
+              <td><span class="pill ${esc(w.state || "yellow")}">${esc(w.state || "unknown")}</span></td>
+              <td>${esc(w.status || "-")}${w.conclusion ? ` / ${esc(w.conclusion)}` : ""}</td>
+              <td>${w.html_url ? `<a target="_blank" href="${esc(w.html_url)}">run</a>` : '<span class="muted">n/a</span>'}</td>
+              <td class="mono">${esc(w.updated_at || "-")}</td>
+            </tr>
+          `).join("");
           byId("moduleBody").innerHTML = `
             <div class="grid">
               <div class="card"><div class="muted">Health API</div><div><strong>${esc(health.status || "unknown")}</strong></div></div>
@@ -219,14 +233,29 @@
                 <strong>CI / Release</strong>
                 <span class="muted">Fase 2</span>
               </div>
-              <div class="row" style="margin-top:8px">
-                <a class="ghost" style="text-decoration:none;display:inline-block" target="_blank" href="${repoBase}/actions/workflows/integration-tests.yml">Integration Tests</a>
-                <a class="ghost" style="text-decoration:none;display:inline-block" target="_blank" href="${repoBase}/actions/workflows/smoke-prod.yml">Smoke Prod</a>
-                <a class="ghost" style="text-decoration:none;display:inline-block" target="_blank" href="${repoBase}/actions/workflows/dr-drill-monthly.yml">DR Drill Monthly</a>
-              </div>
+              <table style="margin-top:8px">
+                <thead><tr><th>Workflow</th><th>Semaforo</th><th>Estado</th><th>Run</th><th>Updated</th></tr></thead>
+                <tbody>${ciRows || '<tr><td colspan="5" class="muted">No data</td></tr>'}</tbody>
+              </table>
               <div class="muted" style="margin-top:8px">Validar ultimo run verde y evidenciar link en docs/registro_operacion_diaria.md.</div>
+              <div class="row" style="margin-top:8px">
+                <button id="copyLogHintBtn" class="ghost" type="button">Copiar linea para registro</button>
+              </div>
+              <textarea id="logHintText" class="mono" style="width:100%;min-height:70px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px">${esc(logHint.line_for_registro_operacion_diaria || "")}</textarea>
             </div>
           `;
+          const copyBtn = byId("copyLogHintBtn");
+          if (copyBtn) {
+            copyBtn.addEventListener("click", async () => {
+              const txt = byId("logHintText")?.value || "";
+              try {
+                await navigator.clipboard.writeText(txt);
+                setModuleMessage("Linea copiada al portapapeles.");
+              } catch (_) {
+                setModuleMessage("No se pudo copiar automaticamente. Copia manual desde el cuadro.", true);
+              }
+            });
+          }
           setModuleMessage("Control tecnico cargado.");
           return;
         }

@@ -494,3 +494,33 @@ class AutoExitTickOut(BaseModel):
     skipped_by_policy: int = 0
     errors: int = 0
     results: list[AutoExitTickItemOut]
+
+
+class CIWorkflowStatusOut(BaseModel):
+    key: str
+    label: str
+    workflow_file: str
+    run_id: Optional[int] = None
+    run_number: Optional[int] = None
+    status: str = "unknown"
+    conclusion: Optional[str] = None
+    state: str = "yellow"  # green|yellow|red
+    html_url: Optional[str] = None
+    updated_at: Optional[str] = None
+    event: Optional[str] = None
+    branch: Optional[str] = None
+    note: Optional[str] = None
+
+
+class CIStatusOut(BaseModel):
+    generated_at: str
+    owner: str
+    repo: str
+    branch: str
+    workflows: list[CIWorkflowStatusOut]
+
+
+class CILogHintOut(BaseModel):
+    generated_at: str
+    line_for_registro_operacion_diaria: str
+    runs: dict
