@@ -1,6 +1,7 @@
 from apps.api.app.api.signals import router as signals_router
 from apps.api.app.api.positions import router as positions_router
 from apps.api.app.routes.auth import router as auth_router
+from contextlib import asynccontextmanager
 
 import apps.api.app.models.signal
 import apps.api.app.models.position
@@ -39,7 +40,17 @@ from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
 from apps.api.app.core.config import settings
 
-app = FastAPI(title="crypto-saas API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    _start_auto_pick_scheduler()
+    try:
+        yield
+    finally:
+        _stop_auto_pick_scheduler()
+
+
+app = FastAPI(title="crypto-saas API", lifespan=lifespan)
 
 # OJO: users_router ya importa el modelo User, así que el modelo ya queda registrado.
 Base.metadata.create_all(bind=engine)
@@ -206,8 +217,7 @@ def _scheduler_loop() -> None:
         _auto_pick_tick_once_with_lock()
 
 
-@app.on_event("startup")
-def startup_auto_pick_scheduler() -> None:
+def _start_auto_pick_scheduler() -> None:
     global _scheduler_thread
     if not settings.AUTO_PICK_INTERNAL_SCHEDULER_ENABLED:
         return
@@ -219,6 +229,5 @@ def startup_auto_pick_scheduler() -> None:
     print("[auto-pick-scheduler] started", flush=True)
 
 
-@app.on_event("shutdown")
-def shutdown_auto_pick_scheduler() -> None:
+def _stop_auto_pick_scheduler() -> None:
     _scheduler_stop_event.set()
