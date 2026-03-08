@@ -1,7 +1,7 @@
 # Panel Tecnico/Administrativo - Propuesta de Implementacion
 
 Fecha: 2026-03-08
-Estado: fase inicial implementada en `ops_console_v2.html` (modulo `Control Tecnico`).
+Estado: fase 2 inicial implementada en `ops_console_v2.html` (modulo `Control Tecnico`).
 
 ## 1) Mapa modular (ownership)
 
@@ -42,15 +42,20 @@ Frontend: vista de ultimo simulacro, RTO/RPO, checklist de cierre.
   - usuarios en alcance / missing 2FA / stale secrets,
   - volumen de registros idempotentes.
 
-## 3) Fase 2 recomendada (siguiente sprint)
-- Agregar bloque `Continuidad DR` en panel:
-  - ultimo run `DR Drill Monthly`,
-  - ultimo backup registrado,
-  - RTO/RPO mas recientes.
-- Agregar bloque `CI/Release`:
-  - ultimo `Smoke Prod`,
-  - ultimo `Integration Tests`,
-  - enlace a artefactos/issue de incidente.
+## 3) Fase 2 (implementada parcialmente)
+- Agregado bloque `Continuidad DR`:
+  - snapshot operativo diario,
+  - resumen de seguridad (scope, missing 2FA, stale secrets),
+  - recordatorio de evidencia RTO/RPO.
+- Agregado bloque `CI/Release`:
+  - enlaces directos a workflows:
+    - Integration Tests,
+    - Smoke Prod,
+    - DR Drill Monthly.
+
+Pendiente para fase 2 completa:
+- consumir estado del ultimo run de workflows via integracion GitHub API (backend proxy interno),
+- mostrar ultimo `RUN_ID` y semaforo verde/rojo en vivo.
 
 ## 4) Criterio de aceptacion
 - El panel permite a un admin tomar decision operativa sin salir de consola:

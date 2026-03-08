@@ -20,6 +20,7 @@
     input, select { border:1px solid var(--line); background:#fff; min-width:220px; }
     button { border:0; cursor:pointer; font-weight:700; background:var(--brand); color:#fff; }
     .ghost { background:#eef4ff; color:#1a57aa; border:1px solid #bfd1f3; }
+    a.ghost { padding:10px 12px; border-radius:10px; font-size:14px; }
     .bad { color:var(--bad); }
     .ok { color:var(--ok); }
     .menu-item { text-align:left; }
@@ -181,6 +182,8 @@
           const gate = await api("/ops/admin/readiness/daily-gate");
           const posture = await api("/ops/security/posture?real_only=true&max_secret_age_days=30");
           const idem = await api("/ops/admin/idempotency/stats");
+          const snap = await api("/ops/admin/snapshot/daily?real_only=true&max_secret_age_days=30&recent_hours=24");
+          const repoBase = "https://github.com/Gonzalo-Giraldo/crypto-saas";
           byId("moduleBody").innerHTML = `
             <div class="grid">
               <div class="card"><div class="muted">Health API</div><div><strong>${esc(health.status || "unknown")}</strong></div></div>
@@ -197,6 +200,31 @@
                 <li>Runbook DR: <span class="mono">docs/runbook_disaster_recovery.md</span></li>
                 <li>Checklist operativa: <span class="mono">docs/checklist_operativa_1pagina.md</span></li>
               </ul>
+            </div>
+            <div class="card">
+              <div class="row" style="justify-content:space-between">
+                <strong>Continuidad DR</strong>
+                <span class="muted">Fase 2</span>
+              </div>
+              <div class="grid" style="margin-top:8px">
+                <div><div class="muted">Snapshot generado</div><div><strong class="mono">${esc(snap.generated_at || "-")}</strong></div></div>
+                <div><div class="muted">Security users</div><div><strong>${esc((snap.security_posture && snap.security_posture.total_users) || "-")}</strong></div></div>
+                <div><div class="muted">Missing 2FA</div><div><strong>${esc((snap.security_posture && snap.security_posture.users_missing_2fa) || "-")}</strong></div></div>
+                <div><div class="muted">Stale secrets</div><div><strong>${esc((snap.security_posture && snap.security_posture.users_with_stale_secrets) || "-")}</strong></div></div>
+              </div>
+              <div class="muted" style="margin-top:8px">Registrar RTO/RPO en docs/registro_operacion_diaria.md despues de simulacro DR.</div>
+            </div>
+            <div class="card">
+              <div class="row" style="justify-content:space-between">
+                <strong>CI / Release</strong>
+                <span class="muted">Fase 2</span>
+              </div>
+              <div class="row" style="margin-top:8px">
+                <a class="ghost" style="text-decoration:none;display:inline-block" target="_blank" href="${repoBase}/actions/workflows/integration-tests.yml">Integration Tests</a>
+                <a class="ghost" style="text-decoration:none;display:inline-block" target="_blank" href="${repoBase}/actions/workflows/smoke-prod.yml">Smoke Prod</a>
+                <a class="ghost" style="text-decoration:none;display:inline-block" target="_blank" href="${repoBase}/actions/workflows/dr-drill-monthly.yml">DR Drill Monthly</a>
+              </div>
+              <div class="muted" style="margin-top:8px">Validar ultimo run verde y evidenciar link en docs/registro_operacion_diaria.md.</div>
             </div>
           `;
           setModuleMessage("Control tecnico cargado.");
