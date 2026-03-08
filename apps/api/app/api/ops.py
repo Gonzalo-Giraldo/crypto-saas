@@ -1822,12 +1822,16 @@ def _auto_pick_from_scan(
     min_score_pct = float(runtime_policy.get("min_score_pct", 78.0))
     score_weight_rules = float(runtime_policy.get("score_weight_rules", 0.4))
     score_weight_market = float(runtime_policy.get("score_weight_market", 0.6))
-    universe = _build_auto_pick_universe(
-        exchange,
-        db=db,
-        tenant_id=_tenant_id(current_user),
-        direction=payload.direction,
-    )
+    # Respect explicit candidates when provided (tests/manual overrides).
+    # Otherwise use the broker universe from market monitor snapshots.
+    universe = list(payload.candidates or [])
+    if not universe:
+        universe = _build_auto_pick_universe(
+            exchange,
+            db=db,
+            tenant_id=_tenant_id(current_user),
+            direction=payload.direction,
+        )
     scan_payload = PretradeScanRequest(
         candidates=universe,
         # Auto-pick evaluates the full broker universe each tick.
@@ -2592,8 +2596,10 @@ def _build_exit_checks(
             "detail": f"progress_r={round(progress_r,4)} required>={round(min_progress_r,4)}",
         }
     )
-    if timeout and not progress_ok:
-        reasons.append("time_limit_no_progress")
+    if timeout:
+        reasons.append("time_limit_reached")
+        if not progress_ok:
+            reasons.append("time_limit_no_progress")
 
     trend_break = bool(payload.trend_break)
     signal_reverse = bool(payload.signal_reverse)

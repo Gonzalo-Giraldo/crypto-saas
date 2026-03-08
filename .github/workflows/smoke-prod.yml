@@ -51,6 +51,9 @@ jobs:
           SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
           SMOKE_BINANCE_API_KEY: ${{ secrets.SMOKE_BINANCE_API_KEY }}
           SMOKE_BINANCE_API_SECRET: ${{ secrets.SMOKE_BINANCE_API_SECRET }}
+          SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD }}
+          SMOKE_ADMIN_OTP: ${{ secrets.SMOKE_ADMIN_OTP }}
         run: |
           set -euo pipefail
           if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
@@ -65,6 +68,7 @@ jobs:
           export EMAIL="${SMOKE_EMAIL}"
           export PASSWORD="$SMOKE_PASSWORD"
 
+          # Attempt public register first (may be disabled in production).
           curl -s -X POST "$BASE_URL/auth/register" \
             -H "Content-Type: application/json" \
             --data "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" >/dev/null || true
@@ -74,9 +78,51 @@ jobs:
             --data "username=$EMAIL&password=$PASSWORD" \
             | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
 
+          # Fallback when public register is blocked:
+          # create/update smoke user via admin API if admin secrets are available.
           if [[ -z "$TOKEN" ]]; then
-            echo "Failed to login smoke user"
-            exit 1
+            if [[ -z "${SMOKE_ADMIN_EMAIL:-}" || -z "${SMOKE_ADMIN_PASSWORD:-}" ]]; then
+              echo "Failed to login smoke user and no SMOKE_ADMIN_EMAIL/SMOKE_ADMIN_PASSWORD configured for fallback."
+              exit 1
+            fi
+            admin_login_data="username=$SMOKE_ADMIN_EMAIL&password=$SMOKE_ADMIN_PASSWORD"
+            if [[ -n "${SMOKE_ADMIN_OTP:-}" ]]; then
+              admin_login_data="${admin_login_data}&otp=${SMOKE_ADMIN_OTP}"
+            fi
+            ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data "$admin_login_data" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
+            if [[ -z "$ADMIN_TOKEN" ]]; then
+              echo "Failed to login fallback admin user"
+              exit 1
+            fi
+
+            # Idempotent create/update smoke user as trader.
+            create_resp=$(curl -s -X POST "$BASE_URL/users" \
+              -H "Authorization: Bearer $ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"role\":\"trader\"}" || true)
+            if [[ "$create_resp" == *"already exists"* ]]; then
+              user_id=$(curl -s "$BASE_URL/users" \
+                -H "Authorization: Bearer $ADMIN_TOKEN" \
+                | python3 -c 'import json,sys; arr=json.load(sys.stdin); e="'$EMAIL'".lower(); print(next((u.get("id","") for u in arr if str(u.get("email","")).lower()==e), ""))')
+              if [[ -n "$user_id" ]]; then
+                curl -s -X PUT "$BASE_URL/users/$user_id/password?reason=smoke%20ci%20password%20sync" \
+                  -H "Authorization: Bearer $ADMIN_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  --data "{\"new_password\":\"$PASSWORD\"}" >/dev/null || true
+              fi
+            fi
+
+            TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data "username=$EMAIL&password=$PASSWORD" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin).get("access_token",""))')
+            if [[ -z "$TOKEN" ]]; then
+              echo "Failed to login smoke user after admin fallback"
+              exit 1
+            fi
           fi
 
           curl -s -X POST "$BASE_URL/users/exchange-secrets" \
