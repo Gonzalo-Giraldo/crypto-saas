@@ -1,10 +1,19 @@
 import os
 import sys
 import tempfile
+import warnings
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+# FastAPI/Starlette TestClient currently triggers an httpx deprecation warning
+# about the `app` shortcut. Keep CI output clean until the stack is upgraded.
+warnings.filterwarnings(
+    "ignore",
+    message="The 'app' shortcut is now deprecated.*",
+    category=DeprecationWarning,
+)
 
 # Ensure project root is importable in local and CI runs.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
