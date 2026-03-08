@@ -34,6 +34,8 @@ jobs:
       ALLOW_BINANCE_TEST_ERROR: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_binance_test_error || 'true' }}
       SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL != '' && secrets.SMOKE_EMAIL || 'smoke.ci@example.com' }}
       RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL != '' && secrets.SMOKE_ADMIN_EMAIL || secrets.DUAL_ADMIN_EMAIL }}
+      SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD != '' && secrets.SMOKE_ADMIN_PASSWORD || secrets.DUAL_ADMIN_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,52 +53,15 @@ jobs:
           SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
           SMOKE_BINANCE_API_KEY: ${{ secrets.SMOKE_BINANCE_API_KEY }}
           SMOKE_BINANCE_API_SECRET: ${{ secrets.SMOKE_BINANCE_API_SECRET }}
-          SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL }}
-          SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD }}
+          SMOKE_ADMIN_EMAIL: ${{ env.SMOKE_ADMIN_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ env.SMOKE_ADMIN_PASSWORD }}
           SMOKE_ADMIN_OTP: ${{ secrets.SMOKE_ADMIN_OTP }}
           DUAL_ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
         run: |
           set -euo pipefail
           generate_totp() {
             local secret="$1"
-            python3 - "$secret" <<'PY'
-            import base64
-            import binascii
-            import hashlib
-            import hmac
-            import struct
-            import sys
-            import time
-            from urllib.parse import parse_qs, urlparse
-
-            secret = (sys.argv[1] or "").strip().replace(" ", "").upper()
-            if not secret:
-                print("")
-                raise SystemExit(0)
-
-            if secret.startswith("OTPAUTH://"):
-                parsed = urlparse(secret)
-                query = parse_qs(parsed.query)
-                secret = (query.get("secret", [""])[0] or "").strip().replace(" ", "").upper()
-
-            if "SECRET=" in secret and not secret.startswith("OTPAUTH://"):
-                maybe = secret.split("SECRET=", 1)[1].split("&", 1)[0]
-                secret = maybe.strip().replace(" ", "").upper()
-
-            padding = "=" * ((8 - len(secret) % 8) % 8)
-            try:
-                key = base64.b32decode(secret + padding, casefold=True)
-            except (binascii.Error, ValueError):
-                print("")
-                raise SystemExit(0)
-
-            counter = int(time.time() // 30)
-            msg = struct.pack(">Q", counter)
-            h = hmac.new(key, msg, hashlib.sha1).digest()
-            offset = h[-1] & 0x0F
-            code = (struct.unpack(">I", h[offset:offset+4])[0] & 0x7FFFFFFF) % 1000000
-            print(f"{code:06d}")
-            PY
+            python3 -c 'import base64,binascii,hashlib,hmac,struct,sys,time; from urllib.parse import parse_qs,urlparse; s=(sys.argv[1] or "").strip().replace(" ","").upper(); s=(parse_qs(urlparse(s).query).get("secret",[""])[0] if s.startswith("OTPAUTH://") else s); s=s.split("SECRET=",1)[1].split("&",1)[0] if ("SECRET=" in s and not s.startswith("OTPAUTH://")) else s; s=s.strip().replace(" ","").upper(); pad="="*((8-len(s)%8)%8); k=base64.b32decode(s+pad,casefold=True) if s else b""; c=int(time.time()//30); m=struct.pack(">Q",c); h=hmac.new(k,m,hashlib.sha1).digest() if s else b""; o=(h[-1]&0x0F) if s else 0; print(f"{((struct.unpack('\"'\"'>I'\"'\"',h[o:o+4])[0]&0x7FFFFFFF)%1000000):06d}" if s else "")' "$secret"
           }
 
           if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
@@ -136,7 +101,7 @@ jobs:
             if [[ -z "$ADMIN_TOKEN" ]]; then
               admin_otp="${SMOKE_ADMIN_OTP:-}"
               if [[ -z "$admin_otp" && -n "${DUAL_ADMIN_TOTP_SECRET:-}" ]]; then
-                admin_otp="$(generate_totp "$DUAL_ADMIN_TOTP_SECRET")"
+                admin_otp="$(generate_totp "$DUAL_ADMIN_TOTP_SECRET" || true)"
               fi
               if [[ -n "$admin_otp" ]]; then
                 admin_login_data="username=$SMOKE_ADMIN_EMAIL&password=$SMOKE_ADMIN_PASSWORD&otp=$admin_otp"
