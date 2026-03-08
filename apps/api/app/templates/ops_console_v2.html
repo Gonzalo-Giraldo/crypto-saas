@@ -105,8 +105,8 @@
 
     function roleModules(role) {
       const r = String(role || "").toLowerCase();
-      if (r === "admin") return ["summary", "users", "risk", "execution", "audit", "learning", "config"];
-      if (r === "operator") return ["summary", "risk", "execution", "audit", "learning"];
+      if (r === "admin") return ["summary", "control", "users", "risk", "execution", "audit", "learning", "config"];
+      if (r === "operator") return ["summary", "control", "risk", "execution", "audit", "learning"];
       if (r === "trader") return ["summary", "execution", "risk"];
       return ["summary", "audit"];
     }
@@ -114,6 +114,7 @@
     function moduleLabel(key) {
       const map = {
         summary: "Resumen Operativo",
+        control: "Control Tecnico",
         users: "Usuarios",
         risk: "Riesgo",
         execution: "Ejecucion",
@@ -173,6 +174,32 @@
             </table>
           `;
           setModuleMessage(`Usuarios cargados: ${rows.length}`);
+          return;
+        }
+        if (moduleKey === "control") {
+          const health = await api("/healthz");
+          const gate = await api("/ops/admin/readiness/daily-gate");
+          const posture = await api("/ops/security/posture?real_only=true&max_secret_age_days=30");
+          const idem = await api("/ops/admin/idempotency/stats");
+          byId("moduleBody").innerHTML = `
+            <div class="grid">
+              <div class="card"><div class="muted">Health API</div><div><strong>${esc(health.status || "unknown")}</strong></div></div>
+              <div class="card"><div class="muted">Daily Gate</div><div><strong>${esc(gate.passed ? "PASS" : "FAIL")}</strong></div></div>
+              <div class="card"><div class="muted">Users in scope</div><div><strong>${esc(posture.total_users)}</strong></div></div>
+              <div class="card"><div class="muted">Users missing 2FA</div><div><strong>${esc(posture.users_missing_2fa)}</strong></div></div>
+              <div class="card"><div class="muted">Users stale secrets</div><div><strong>${esc(posture.users_with_stale_secrets)}</strong></div></div>
+              <div class="card"><div class="muted">Idempotency entries</div><div><strong>${esc(idem.records_total)}</strong></div></div>
+            </div>
+            <div class="card">
+              <div class="muted">Operacion y recuperacion</div>
+              <ul>
+                <li>Runbook produccion: <span class="mono">docs/runbook_produccion.md</span></li>
+                <li>Runbook DR: <span class="mono">docs/runbook_disaster_recovery.md</span></li>
+                <li>Checklist operativa: <span class="mono">docs/checklist_operativa_1pagina.md</span></li>
+              </ul>
+            </div>
+          `;
+          setModuleMessage("Control tecnico cargado.");
           return;
         }
         if (moduleKey === "risk") {

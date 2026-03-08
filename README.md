@@ -271,6 +271,7 @@ pytest -q tests/integration
 - Backend Definition of Done: `docs/backend_definition_of_done.md`
 - IBKR real go-live package: `docs/ibkr_real_go_live_checklist.md`
 - Frontend MVP blueprint: `docs/frontend_mvp_blueprint.md`
+- Technical/Admin panel proposal: `docs/panel_tecnico_administrativo.md`
 - Market regime matrix (Binance vs IBKR): `docs/market_regime_matrix_binance_ibkr.md`
 
 ## Continuous Ops Follow-up
