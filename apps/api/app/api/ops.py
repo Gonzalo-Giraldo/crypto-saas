@@ -2141,6 +2141,9 @@ def _auto_pick_from_scan(
     execution = None
     decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
     if not payload.dry_run:
+        enforce_exit_plan = bool(
+            settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN and settings.AUTO_PICK_REAL_GUARD_ENABLED
+        )
         real_guard_reason = _auto_pick_real_guard_reason(
             current_user=current_user,
             exchange=exchange,
@@ -2184,7 +2187,7 @@ def _auto_pick_from_scan(
                 "scan": scan,
             }, max_spread=max_spread, max_slippage=max_slippage)
         exit_plan = None
-        if bool(settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN):
+        if enforce_exit_plan:
             rr_estimate = float(candidate.rr_estimate) if candidate else None
             atr_pct = float(candidate.atr_pct) if candidate else None
             exit_plan, plan_reason = _build_auto_pick_exit_plan(
@@ -2247,7 +2250,7 @@ def _auto_pick_from_scan(
                     qty=selected_qty,
                 )
             decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
-            if bool(settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN):
+            if enforce_exit_plan:
                 execution = {**(execution or {}), "exit_plan": exit_plan}
         except HTTPException as exc:
             decision = "insufficient_resources_or_execution_error"
