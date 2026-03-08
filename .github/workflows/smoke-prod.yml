@@ -61,10 +61,11 @@ jobs:
           set -euo pipefail
           generate_totp() {
             local secret="$1"
-            python3 -c 'import base64,binascii,hashlib,hmac,struct,sys,time; from urllib.parse import parse_qs,urlparse; s=(sys.argv[1] or "").strip().replace(" ","").upper(); s=(parse_qs(urlparse(s).query).get("secret",[""])[0] if s.startswith("OTPAUTH://") else s); s=(s.split("SECRET=",1)[1].split("&",1)[0] if ("SECRET=" in s and not s.startswith("OTPAUTH://")) else s).strip().replace(" ","").upper(); pad="="*((8-len(s)%8)%8); \
-            import sys as _sys; \
-            _k=base64.b32decode(s+pad,casefold=True) if s else b""; \
-            _c=int(time.time()//30); _m=struct.pack(">Q",_c); _h=hmac.new(_k,_m,hashlib.sha1).digest() if s else b""; _o=(_h[-1]&0x0F) if s else 0; _code=(struct.unpack(">I",_h[_o:_o+4])[0] & 0x7FFFFFFF) % 1000000 if s else 0; print("{:06d}".format(_code) if s else "")' "$secret"
+            python3 -c 'import base64,hashlib,hmac,struct,sys,time,re; from urllib.parse import parse_qs,urlparse,unquote; s=unquote((sys.argv[1] or "").strip()); su=s.upper(); s=(parse_qs(urlparse(s).query).get("secret",[""])[0] if su.startswith("OTPAUTH://") else s); su=s.upper(); s=(s.split("SECRET=",1)[1].split("&",1)[0] if ("SECRET=" in su and not su.startswith("OTPAUTH://")) else s); s=re.sub(r"[^A-Z2-7=]","",s.upper()).strip("="); \
+            pad="="*((8-len(s)%8)%8); \
+            try: k=base64.b32decode(s+pad,casefold=True) if s else b""; \
+            except Exception: print(""); raise SystemExit(0); \
+            c=int(time.time()//30); m=struct.pack(">Q",c); h=hmac.new(k,m,hashlib.sha1).digest() if s else b""; o=(h[-1]&0x0F) if s else 0; code=(struct.unpack(">I",h[o:o+4])[0]&0x7FFFFFFF)%1000000 if s else 0; print("{:06d}".format(code) if s else "")' "$secret"
           }
 
           if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
