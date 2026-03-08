@@ -3,6 +3,7 @@ import hmac
 import time
 import uuid
 import requests
+import re
 
 from fastapi import HTTPException, status
 
@@ -22,6 +23,48 @@ def _mask_api_key(value: str) -> str:
     if len(value) <= 6:
         return "*" * len(value)
     return f"{value[:3]}***{value[-3:]}"
+
+
+def _assert_binance_gateway_policy() -> None:
+    if not bool(settings.BINANCE_GATEWAY_STRICT_MODE):
+        return
+    gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+    if not gateway_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Binance strict mode requires gateway enabled",
+        )
+    if bool(settings.BINANCE_GATEWAY_FALLBACK_DIRECT):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Binance strict mode requires BINANCE_GATEWAY_FALLBACK_DIRECT=false",
+        )
+
+
+def _extract_upstream_code(text: str) -> str | None:
+    msg = str(text or "")
+    m = re.search(r"\bcode=([A-Za-z0-9_\-]+)", msg)
+    if m:
+        return m.group(1)
+    m = re.search(r'"code"\s*:\s*"?([A-Za-z0-9_\-]+)"?', msg)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _build_gateway_runtime_error(status_code: int, body_text: str) -> str:
+    detail = f"gateway_upstream_error status={int(status_code)}"
+    code = _extract_upstream_code(body_text)
+    if code:
+        detail += f" code={code}"
+    return detail
+
+
+def _sanitize_ibkr_error(exc: Exception) -> str:
+    msg = str(exc or "").strip()
+    if msg.startswith("ibkr_"):
+        return msg
+    return "ibkr_runtime_error"
 
 
 def prepare_execution_for_user(
@@ -90,6 +133,7 @@ def execute_binance_test_order_for_user(
 ):
     db = SessionLocal()
     try:
+        _assert_binance_gateway_policy()
         creds = get_decrypted_exchange_secret(
             db=db,
             user_id=user_id,
@@ -318,8 +362,8 @@ def _send_binance_test_order_via_gateway(
         timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
     )
     if response.status_code >= 400:
-        detail = response.text
-        raise RuntimeError(f"Binance gateway error {response.status_code}: {detail}")
+        detail = _build_gateway_runtime_error(response.status_code, response.text)
+        raise RuntimeError(detail)
 
 
 def _get_binance_account_status(
@@ -357,8 +401,8 @@ def _get_binance_account_status_via_gateway(
         timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
     )
     if response.status_code >= 400:
-        detail = response.text
-        raise RuntimeError(f"Binance gateway error {response.status_code}: {detail}")
+        detail = _build_gateway_runtime_error(response.status_code, response.text)
+        raise RuntimeError(detail)
     return response.json()
 
 
@@ -390,6 +434,7 @@ def execute_ibkr_test_order_for_user(
                 quantity=qty,
             )
         except Exception as exc:
+            err_detail = _sanitize_ibkr_error(exc)
             log_audit_event(
                 db,
                 action="execution.ibkr.test_order.error",
@@ -399,13 +444,13 @@ def execute_ibkr_test_order_for_user(
                     "symbol": symbol,
                     "side": side,
                     "qty": qty,
-                    "error": str(exc),
+                    "error": err_detail,
                 },
             )
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"IBKR test order failed: {exc}",
+                detail=err_detail,
             )
 
         mode = "paper_bridge_test" if result.get("mode") == "bridge" else "paper_simulated_test"
@@ -435,6 +480,7 @@ def execute_ibkr_test_order_for_user(
 def get_binance_account_status_for_user(user_id: str):
     db = SessionLocal()
     try:
+        _assert_binance_gateway_policy()
         creds = get_decrypted_exchange_secret(
             db=db,
             user_id=user_id,
@@ -528,17 +574,18 @@ def get_ibkr_account_status_for_user(user_id: str):
                 api_secret=creds["api_secret"],
             )
         except Exception as exc:
+            err_detail = _sanitize_ibkr_error(exc)
             log_audit_event(
                 db,
                 action="execution.ibkr.account_status.error",
                 user_id=user_id,
                 entity_type="execution",
-                details={"error": str(exc)},
+                details={"error": err_detail},
             )
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"IBKR account status failed: {exc}",
+                detail=err_detail,
             )
 
         positions = []

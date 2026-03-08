@@ -17,5 +17,6 @@ class ExchangeSecret(Base):
     exchange = Column(String, index=True, nullable=False)  # BINANCE | IBKR
     api_key_encrypted = Column(Text, nullable=False)
     api_secret_encrypted = Column(Text, nullable=False)
+    key_version = Column(String, index=True, nullable=False, default="v1", server_default="v1")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now(), nullable=False)

@@ -2,6 +2,9 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, field_validator
 from pydantic import Field
+import math
+
+from apps.api.app.core.config import settings
 
 
 class StrategyAssignRequest(BaseModel):
@@ -82,6 +85,50 @@ class PretradeCheckRequest(BaseModel):
     def normalize_tf(cls, value: str):
         return value.upper().strip()
 
+    @field_validator(
+        "qty",
+        "rr_estimate",
+        "spread_bps",
+        "slippage_bps",
+        "volume_24h_usdt",
+        "leverage",
+        "funding_rate_bps",
+        "market_trend_score",
+        "atr_pct",
+        "momentum_score",
+        "market_trend_score_1d",
+        "market_trend_score_4h",
+        "market_trend_score_1h",
+        "market_micro_trend_15m",
+        mode="before",
+    )
+    @classmethod
+    def validate_numeric_fields(cls, value):
+        if value is None:
+            return value
+        try:
+            out = float(value)
+        except Exception as exc:
+            raise ValueError("numeric field must be a valid number") from exc
+        if not math.isfinite(out):
+            raise ValueError("numeric field must be finite")
+        return out
+
+    @field_validator("qty")
+    @classmethod
+    def validate_qty(cls, value: float):
+        max_qty = max(1.0, float(settings.RISK_INPUT_MAX_QTY or 1_000_000.0))
+        if value <= 0 or value > max_qty:
+            raise ValueError(f"qty must be within (0, {max_qty}]")
+        return value
+
+    @field_validator("volume_24h_usdt", "spread_bps", "slippage_bps", "leverage", "atr_pct")
+    @classmethod
+    def validate_non_negative(cls, value: float):
+        if value < 0:
+            raise ValueError("field must be >= 0")
+        return value
+
     @field_validator("market_session")
     @classmethod
     def normalize_market_session(cls, value: str):
@@ -112,6 +159,13 @@ class PretradeScanRequest(BaseModel):
     def validate_top_n(cls, value: int):
         if value < 1 or value > 200:
             raise ValueError("top_n must be between 1 and 200")
+        return value
+
+    @field_validator("candidates")
+    @classmethod
+    def validate_candidates_len(cls, value: list[PretradeCheckRequest]):
+        if len(value) > 500:
+            raise ValueError("candidates must contain at most 500 items")
         return value
 
 
@@ -154,6 +208,13 @@ class PretradeAutoPickRequest(BaseModel):
     def validate_top_n(cls, value: int):
         if value < 1 or value > 200:
             raise ValueError("top_n must be between 1 and 200")
+        return value
+
+    @field_validator("candidates")
+    @classmethod
+    def validate_candidates_len(cls, value: list[PretradeCheckRequest]):
+        if len(value) > 500:
+            raise ValueError("candidates must contain at most 500 items")
         return value
 
     @field_validator("direction")
@@ -225,6 +286,26 @@ class ExitCheckRequest(BaseModel):
         if normalized not in {"BUY", "SELL"}:
             raise ValueError("side must be BUY or SELL")
         return normalized
+
+    @field_validator("entry_price", "current_price", "stop_loss", "take_profit", mode="before")
+    @classmethod
+    def validate_prices(cls, value):
+        max_price = max(1.0, float(settings.RISK_INPUT_MAX_PRICE or 10_000_000.0))
+        try:
+            out = float(value)
+        except Exception as exc:
+            raise ValueError("price must be numeric") from exc
+        if (not math.isfinite(out)) or out <= 0 or out > max_price:
+            raise ValueError(f"price must be finite and within (0, {max_price}]")
+        return out
+
+    @field_validator("opened_minutes")
+    @classmethod
+    def validate_opened_minutes(cls, value: int):
+        max_opened = max(1, int(settings.RISK_INPUT_MAX_OPENED_MINUTES or 10080))
+        if value < 0 or value > max_opened:
+            raise ValueError(f"opened_minutes must be between 0 and {max_opened}")
+        return value
 
 
 class ExitCheckOut(BaseModel):

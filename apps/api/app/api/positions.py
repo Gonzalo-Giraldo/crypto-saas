@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, select
 from datetime import datetime, timezone
 from typing import Optional
+import math
 
 from apps.api.app.models.daily_risk import DailyRiskState
 from apps.api.app.db.session import get_db
@@ -27,6 +28,11 @@ from apps.api.app.services.trading_controls import (
     assert_exposure_limits,
     assert_trading_enabled,
     infer_exchange_from_symbol,
+)
+from apps.api.app.services.state_machine import (
+    assert_position_transition,
+    assert_signal_transition,
+    can_transition_signal,
 )
 
 router = APIRouter(prefix="/positions", tags=["positions"])
@@ -240,6 +246,7 @@ def open_from_signal(
     db.flush()
 
     # avanzamos el estado de la señal
+    assert_signal_transition(s.status, "OPENED")
     s.status = "OPENED"
 
     log_audit_event(
@@ -285,9 +292,30 @@ def close_position(
     position_id: str,
     exit_price: float,
     fees: float = 0.0,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    req_payload = {
+        "position_id": position_id,
+        "exit_price": float(exit_price),
+        "fees": float(fees),
+    }
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/positions/close",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
+    if (not math.isfinite(float(exit_price))) or float(exit_price) <= 0:
+        raise HTTPException(status_code=400, detail="exit_price must be finite and > 0")
+    if (not math.isfinite(float(fees))) or float(fees) < 0:
+        raise HTTPException(status_code=400, detail="fees must be finite and >= 0")
+
     profile = resolve_risk_profile(db, current_user.id, current_user.email)
     p = db.execute(select(Position).where(Position.id == position_id)).scalar_one_or_none()
     if not p:
@@ -295,8 +323,7 @@ def close_position(
     if p.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Cannot close another user's position")
 
-    if p.status != "OPEN":
-        raise HTTPException(status_code=409, detail=f"Position status must be OPEN (got {p.status})")
+    assert_position_transition(p.status, "CLOSED")
 
     # PnL simple (LONG)
     realized_pnl = (float(exit_price) - float(p.entry_price)) * float(p.qty) - float(fees)
@@ -309,8 +336,18 @@ def close_position(
 
     # marcar signal como COMPLETED
     s = db.execute(select(Signal).where(Signal.id == p.signal_id)).scalar_one_or_none()
-    if s:
+    if s and can_transition_signal(s.status, "COMPLETED"):
+        assert_signal_transition(s.status, "COMPLETED")
         s.status = "COMPLETED"
+    elif s:
+        log_audit_event(
+            db,
+            action="signal.transition.skipped",
+            user_id=current_user.id,
+            entity_type="signal",
+            entity_id=s.id,
+            details={"current_status": s.status, "target_status": "COMPLETED"},
+        )
 
     today = today_colombia()
 
@@ -343,6 +380,14 @@ def close_position(
     )
     db.commit()
     db.refresh(p)
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/positions/close",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=PositionOut.model_validate(p).model_dump(),
+    )
     return p
 
 @router.get("/risk/today")

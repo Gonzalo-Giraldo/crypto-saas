@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import uuid
+import re
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -19,6 +20,22 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
+
+
+def validate_password_policy(password: str) -> Optional[str]:
+    pwd = str(password or "")
+    min_len = max(8, int(settings.AUTH_PASSWORD_MIN_LENGTH or 10))
+    if len(pwd) < min_len:
+        return f"Password must be at least {min_len} characters long"
+    if settings.AUTH_PASSWORD_REQUIRE_UPPER and re.search(r"[A-Z]", pwd) is None:
+        return "Password must include at least one uppercase letter"
+    if settings.AUTH_PASSWORD_REQUIRE_LOWER and re.search(r"[a-z]", pwd) is None:
+        return "Password must include at least one lowercase letter"
+    if settings.AUTH_PASSWORD_REQUIRE_DIGIT and re.search(r"[0-9]", pwd) is None:
+        return "Password must include at least one digit"
+    if settings.AUTH_PASSWORD_REQUIRE_SPECIAL and re.search(r"[^A-Za-z0-9]", pwd) is None:
+        return "Password must include at least one special character"
+    return None
 
 
 def create_access_token(

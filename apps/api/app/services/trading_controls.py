@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+import math
 
 from apps.api.app.core.config import settings
 from apps.api.app.models.position import Position
@@ -72,6 +73,27 @@ def assert_exposure_limits(
     qty: float,
     price_estimate: float = 0.0,
 ):
+    try:
+        qty_f = float(qty)
+        price_f = float(price_estimate)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="qty and price_estimate must be numeric",
+        )
+    max_input_qty = max(1.0, float(settings.RISK_INPUT_MAX_QTY or 1000000.0))
+    max_input_price = max(1.0, float(settings.RISK_INPUT_MAX_PRICE or 10000000.0))
+    if (not math.isfinite(qty_f)) or qty_f <= 0.0 or qty_f > max_input_qty:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"qty must be finite and within (0, {max_input_qty}]",
+        )
+    if (not math.isfinite(price_f)) or price_f < 0.0 or price_f > max_input_price:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"price_estimate must be finite and within [0, {max_input_price}]",
+        )
+
     max_qty = float(settings.MAX_OPEN_QTY_PER_SYMBOL)
     max_notional_exchange = float(settings.MAX_OPEN_NOTIONAL_PER_EXCHANGE)
 
@@ -98,7 +120,7 @@ def assert_exposure_limits(
         if p_exchange == exchange_upper:
             open_notional_exchange += float(p.qty) * float(p.entry_price)
 
-    projected_qty_symbol = open_qty_symbol + float(qty)
+    projected_qty_symbol = open_qty_symbol + qty_f
     if max_qty > 0 and projected_qty_symbol > max_qty:
         log_audit_event(
             db,
@@ -118,7 +140,7 @@ def assert_exposure_limits(
             detail=f"Risk block: symbol exposure exceeded ({projected_qty_symbol}>{max_qty})",
         )
 
-    projected_notional_exchange = open_notional_exchange + (float(qty) * max(0.0, float(price_estimate)))
+    projected_notional_exchange = open_notional_exchange + (qty_f * max(0.0, price_f))
     if max_notional_exchange > 0 and projected_notional_exchange > max_notional_exchange:
         log_audit_event(
             db,

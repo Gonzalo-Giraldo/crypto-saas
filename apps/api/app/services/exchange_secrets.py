@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.models.exchange_secret import ExchangeSecret
-from apps.api.app.services.crypto import decrypt_value, encrypt_value
+from apps.api.app.services.crypto import decrypt_value, encrypt_value, get_active_key_version
 
 
 def upsert_exchange_secret(
@@ -25,12 +25,14 @@ def upsert_exchange_secret(
         .scalar_one_or_none()
     )
 
-    encrypted_key = encrypt_value(api_key)
-    encrypted_secret = encrypt_value(api_secret)
+    key_version = get_active_key_version()
+    encrypted_key = encrypt_value(api_key, key_version=key_version)
+    encrypted_secret = encrypt_value(api_secret, key_version=key_version)
 
     if row:
         row.api_key_encrypted = encrypted_key
         row.api_secret_encrypted = encrypted_secret
+        row.key_version = key_version
         return row
 
     row = ExchangeSecret(
@@ -38,6 +40,7 @@ def upsert_exchange_secret(
         exchange=normalized_exchange,
         api_key_encrypted=encrypted_key,
         api_secret_encrypted=encrypted_secret,
+        key_version=key_version,
     )
     db.add(row)
     return row
@@ -63,6 +66,6 @@ def get_decrypted_exchange_secret(
 
     return {
         "exchange": row.exchange,
-        "api_key": decrypt_value(row.api_key_encrypted),
-        "api_secret": decrypt_value(row.api_secret_encrypted),
+        "api_key": decrypt_value(row.api_key_encrypted, key_version=row.key_version),
+        "api_secret": decrypt_value(row.api_secret_encrypted, key_version=row.key_version),
     }

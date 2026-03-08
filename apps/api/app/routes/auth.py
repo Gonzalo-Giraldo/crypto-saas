@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import threading
+import time
 
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 import pyotp
 
 from apps.api.app.api.deps import get_current_user, oauth2_scheme
@@ -16,6 +19,7 @@ from apps.api.app.models.user import User
 from apps.api.app.core.security import (
     verify_password,
     get_password_hash,
+    validate_password_policy,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -24,6 +28,8 @@ from apps.api.app.core.config import settings
 from apps.api.app.services.audit import log_audit_event
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_LOGIN_RATE_LOCK = threading.Lock()
+_LOGIN_RATE_STATE: dict[tuple[str, str], list[float]] = {}
 
 
 class RegisterRequest(BaseModel):
@@ -48,6 +54,65 @@ def _token_exp_to_datetime(exp_value) -> Optional[datetime]:
         return datetime.utcfromtimestamp(int(exp_value))
     except Exception:
         return None
+
+
+def _to_utc_epoch_seconds(value: Optional[datetime]) -> Optional[int]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.astimezone(timezone.utc).timestamp())
+
+
+def _login_rate_key(username: str, client_ip: str) -> tuple[str, str]:
+    return (str(username or "").strip().lower(), str(client_ip or "").strip())
+
+
+def _extract_client_ip(request: Request) -> str:
+    if request is None:
+        return "unknown"
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for.strip():
+        first = forwarded_for.split(",")[0].strip()
+        if first:
+            return first
+    return str((request.client.host if request.client else "unknown") or "unknown")
+
+
+def _check_login_rate_limit(username: str, client_ip: str) -> None:
+    if not settings.AUTH_LOGIN_RATE_LIMIT_ENABLED:
+        return
+    window_seconds = max(60, int(settings.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS or 300))
+    max_attempts = max(1, int(settings.AUTH_LOGIN_RATE_LIMIT_MAX_ATTEMPTS or 7))
+    now = time.time()
+    key = _login_rate_key(username, client_ip)
+    with _LOGIN_RATE_LOCK:
+        attempts = [ts for ts in _LOGIN_RATE_STATE.get(key, []) if now - ts <= window_seconds]
+        _LOGIN_RATE_STATE[key] = attempts
+        if len(attempts) >= max_attempts:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts. Try again later",
+            )
+
+
+def _record_login_failure(username: str, client_ip: str) -> None:
+    if not settings.AUTH_LOGIN_RATE_LIMIT_ENABLED:
+        return
+    window_seconds = max(60, int(settings.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS or 300))
+    now = time.time()
+    key = _login_rate_key(username, client_ip)
+    with _LOGIN_RATE_LOCK:
+        attempts = [ts for ts in _LOGIN_RATE_STATE.get(key, []) if now - ts <= window_seconds]
+        attempts.append(now)
+        _LOGIN_RATE_STATE[key] = attempts
+
+
+def _clear_login_failures(username: str, client_ip: str) -> None:
+    key = _login_rate_key(username, client_ip)
+    with _LOGIN_RATE_LOCK:
+        if key in _LOGIN_RATE_STATE:
+            _LOGIN_RATE_STATE.pop(key, None)
 
 
 def _revoke_token_payload(
@@ -103,8 +168,7 @@ def _issued_at_after_revocation(
     db: Session,
     user_id: str,
 ) -> datetime:
-    now = datetime.utcnow()
-    now_ts = int(now.timestamp())
+    now_ts = int(datetime.now(timezone.utc).timestamp())
     row = (
         db.query(SessionRevocation)
         .filter(SessionRevocation.user_id == user_id)
@@ -112,7 +176,9 @@ def _issued_at_after_revocation(
     )
     if not row:
         return datetime.utcfromtimestamp(now_ts)
-    marker_ts = int(row.revoked_after.replace(tzinfo=None).timestamp())
+    marker_ts = _to_utc_epoch_seconds(row.revoked_after)
+    if marker_ts is None:
+        return datetime.utcfromtimestamp(now_ts)
     target_ts = max(now_ts, marker_ts + 1)
     return datetime.utcfromtimestamp(target_ts)
 
@@ -121,11 +187,15 @@ def _issued_at_after_revocation(
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     otp: Optional[str] = Form(default=None),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
+    username_norm = str(form_data.username or "").strip().lower()
+    client_ip = _extract_client_ip(request)
+    _check_login_rate_limit(username_norm, client_ip)
     user = (
         db.query(User)
-        .filter(User.email == form_data.username)
+        .filter(func.lower(User.email) == username_norm)
         .first()
     )
 
@@ -133,6 +203,7 @@ def login(
         form_data.password,
         user.hashed_password,
         ):
+        _record_login_failure(username_norm, client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -166,6 +237,7 @@ def login(
 
     if user_2fa and user_2fa.enabled:
         if not otp:
+            _record_login_failure(username_norm, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="OTP required",
@@ -176,11 +248,13 @@ def login(
             valid_window=1,
         )
         if not is_valid_otp:
+            _record_login_failure(username_norm, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid OTP",
             )
 
+    _clear_login_failures(username_norm, client_ip)
     issued_at = _issued_at_after_revocation(db, user.id)
     access_token = create_access_token(
         data={
@@ -279,7 +353,7 @@ def refresh_tokens(
     if session_revoke and token_iat:
         try:
             iat_ts = int(token_iat)
-            revoke_cutoff_ts = int(session_revoke.revoked_after.replace(tzinfo=None).timestamp())
+            revoke_cutoff_ts = _to_utc_epoch_seconds(session_revoke.revoked_after)
         except Exception:
             iat_ts = None
             revoke_cutoff_ts = None
@@ -399,9 +473,22 @@ def register(
     payload: RegisterRequest,
     db: Session = Depends(get_db),
 ):
+    if not settings.AUTH_PUBLIC_REGISTER_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public registration is disabled",
+        )
+
+    password_error = validate_password_policy(payload.password)
+    if password_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=password_error,
+        )
+
     existing_user = (
         db.query(User)
-        .filter(User.email == payload.email)
+        .filter(func.lower(User.email) == str(payload.email).lower())
         .first()
     )
 

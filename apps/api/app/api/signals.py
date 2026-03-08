@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -11,6 +11,7 @@ from apps.api.app.schemas.signal import SignalCreate, SignalOut
 from apps.api.app.api.deps import get_current_user
 from apps.api.app.models.user import User
 from apps.api.app.services.audit import log_audit_event
+from apps.api.app.services.state_machine import assert_signal_transition
 
 
 router = APIRouter(prefix="/signals", tags=["signals"])
@@ -70,6 +71,12 @@ def claim_signals(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="limit must be between 1 and 100",
+        )
+
     # seleccionar señales disponibles
     rows = (
         db.query(Signal)
@@ -82,6 +89,7 @@ def claim_signals(
     claimed = []
 
     for signal in rows:
+        assert_signal_transition(signal.status, "EXECUTING")
         signal.status = "EXECUTING"
         claimed.append(signal)
 

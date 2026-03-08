@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -12,6 +12,14 @@ from apps.api.app.core.security import decode_token
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+def _to_utc_epoch_seconds(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.astimezone(timezone.utc).timestamp())
 
 
 def get_current_user(
@@ -88,7 +96,7 @@ def get_current_user(
     if session_revoke and token_iat:
         try:
             iat_ts = int(token_iat)
-            revoke_cutoff_ts = int(session_revoke.revoked_after.replace(tzinfo=None).timestamp())
+            revoke_cutoff_ts = _to_utc_epoch_seconds(session_revoke.revoked_after)
         except Exception:
             iat_ts = None
             revoke_cutoff_ts = None

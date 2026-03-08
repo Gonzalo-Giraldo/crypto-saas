@@ -7,7 +7,6 @@ import pyotp
 
 from apps.api.app.db.session import get_db
 from apps.api.app.models.exchange_secret import ExchangeSecret
-from apps.api.app.models.strategy_assignment import StrategyAssignment
 from apps.api.app.models.user_2fa import UserTwoFactor
 from apps.api.app.models.user_risk_profile import UserRiskProfileOverride
 from apps.api.app.models.user_risk_settings import UserRiskSettings
@@ -26,11 +25,17 @@ from apps.api.app.schemas.user import (
 )
 from apps.api.app.core.config import settings
 from apps.api.app.api.deps import get_current_user, require_role
-from apps.api.app.core.security import get_password_hash
+from apps.api.app.core.security import get_password_hash, validate_password_policy
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import upsert_exchange_secret
 from apps.api.app.services.risk_profiles import list_profile_names, resolve_risk_profile
 from apps.api.app.services.strategy_assignments import is_exchange_enabled_for_user
+from apps.api.app.services.user_readiness import (
+    build_readiness_report,
+    build_user_readiness,
+    is_real_user_email,
+    is_service_user_email,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 ALLOWED_USER_ROLES = {"admin", "operator", "viewer", "trader", "disabled"}
@@ -40,18 +45,14 @@ def _tenant_id(user: User) -> str:
     return (user.tenant_id or "default")
 
 
-def _is_real_user_email(email: str) -> bool:
-    e = (email or "").lower()
-    if e.startswith("smoke.") or e.startswith("disabled_"):
-        return False
-    if e.endswith("@example.com") or e.endswith("@example.invalid"):
-        return False
-    return True
-
-
-def _is_service_user_email(email: str) -> bool:
-    e = (email or "").lower()
-    return e.startswith("ops.bot.")
+def _validate_change_reason(reason: str | None) -> str:
+    normalized = (reason or "").strip()
+    if len(normalized) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reason must contain at least 8 characters",
+        )
+    return normalized
 
 
 def _tenant_user_or_404(db: Session, user_id: str, current_user: User) -> User:
@@ -67,82 +68,7 @@ def _tenant_user_or_404(db: Session, user_id: str, current_user: User) -> User:
 
 
 def _build_user_readiness(db: Session, user: User) -> dict:
-    user_2fa = (
-        db.execute(select(UserTwoFactor).where(UserTwoFactor.user_id == user.id))
-        .scalar_one_or_none()
-    )
-    two_factor_enabled = bool(user_2fa and user_2fa.enabled)
-
-    secret_rows = db.execute(
-        select(ExchangeSecret.exchange).where(ExchangeSecret.user_id == user.id)
-    ).all()
-    secret_set = {row[0] for row in secret_rows}
-
-    assignment_rows = db.execute(
-        select(StrategyAssignment.exchange, StrategyAssignment.enabled).where(
-            StrategyAssignment.user_id == user.id
-        )
-    ).all()
-    assignment_enabled = {
-        exchange: bool(enabled)
-        for exchange, enabled in assignment_rows
-    }
-
-    checks: list[dict] = []
-    changed_at = user.password_changed_at
-    if changed_at is not None and changed_at.tzinfo is None:
-        changed_at = changed_at.replace(tzinfo=timezone.utc)
-    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
-    enforce_max_age = bool(settings.ENFORCE_PASSWORD_MAX_AGE and max_age_days > 0)
-    if changed_at is None:
-        password_age_days = None
-    else:
-        password_age_days = max(0, (datetime.now(timezone.utc) - changed_at.astimezone(timezone.utc)).days)
-
-    checks.append(
-        {
-            "name": "role_allowed",
-            "passed": user.role in ALLOWED_USER_ROLES,
-            "detail": user.role,
-        }
-    )
-    checks.append(
-        {
-            "name": "password_not_expired",
-            "passed": (not enforce_max_age) or (password_age_days is not None and password_age_days <= max_age_days),
-            "detail": f"age_days={password_age_days} max_age_days={max_age_days} enforced={enforce_max_age}",
-        }
-    )
-    checks.append(
-        {
-            "name": "admin_has_2fa",
-            "passed": (user.role != "admin") or two_factor_enabled,
-            "detail": f"two_factor_enabled={two_factor_enabled}",
-        }
-    )
-    for exchange in ("BINANCE", "IBKR"):
-        enabled_for_user = assignment_enabled.get(exchange, False)
-        has_secret = exchange in secret_set
-        checks.append(
-            {
-                "name": f"{exchange.lower()}_enabled_has_secret",
-                "passed": (not enabled_for_user) or has_secret,
-                "detail": f"enabled={enabled_for_user} secret_configured={has_secret}",
-            }
-        )
-
-    return {
-        "user_id": user.id,
-        "email": user.email,
-        "role": user.role,
-        "password_age_days": password_age_days,
-        "password_max_age_days": max_age_days if enforce_max_age else None,
-        "two_factor_enabled": two_factor_enabled,
-        "assignments": assignment_enabled,
-        "secrets_configured": sorted(secret_set),
-        "checks": checks,
-        "ready": all(bool(c["passed"]) for c in checks),
-    }
+    return build_user_readiness(db, user)
 
 
 # 🔹 Crear usuario (solo admin)
@@ -156,8 +82,16 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    password_error = validate_password_policy(payload.password)
+    if password_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=password_error,
+        )
+
+    email_norm = str(payload.email).strip().lower()
     existing = db.execute(
-        select(User).where(User.email == payload.email)
+        select(User).where(func.lower(User.email) == email_norm)
     ).scalar_one_or_none()
 
     if existing:
@@ -167,7 +101,7 @@ def create_user(
         )
 
     new_user = User(
-        email=payload.email,
+        email=email_norm,
         tenant_id=_tenant_id(current_user),
         hashed_password=get_password_hash(payload.password),
         role="trader",
@@ -230,6 +164,7 @@ def update_user_role(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    change_reason = _validate_change_reason(payload.reason)
     normalized_role = (payload.role or "").strip().lower()
     if normalized_role not in ALLOWED_USER_ROLES:
         raise HTTPException(
@@ -263,7 +198,7 @@ def update_user_role(
         user_id=current_user.id,
         entity_type="user",
         entity_id=user.id,
-        details={"target_email": user.email, "role": normalized_role},
+        details={"target_email": user.email, "role": normalized_role, "reason": change_reason},
     )
     db.commit()
     db.refresh(user)
@@ -288,11 +223,12 @@ def update_user_email(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    change_reason = _validate_change_reason(payload.reason)
     user = _tenant_user_or_404(db, user_id, current_user)
 
     new_email = payload.email.strip().lower()
     existing = db.execute(
-        select(User).where(User.email == new_email, User.id != user_id)
+        select(User).where(func.lower(User.email) == new_email, User.id != user_id)
     ).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
@@ -305,7 +241,7 @@ def update_user_email(
         user_id=current_user.id,
         entity_type="user",
         entity_id=user.id,
-        details={"old_email": old_email, "new_email": new_email},
+        details={"old_email": old_email, "new_email": new_email, "reason": change_reason},
     )
     db.commit()
     db.refresh(user)
@@ -330,13 +266,15 @@ def update_user_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    change_reason = _validate_change_reason(payload.reason)
     user = _tenant_user_or_404(db, user_id, current_user)
 
     new_password = (payload.new_password or "").strip()
-    if len(new_password) < 8:
+    password_error = validate_password_policy(new_password)
+    if password_error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="new_password must have at least 8 characters",
+            detail=password_error,
         )
 
     user.hashed_password = get_password_hash(new_password)
@@ -347,7 +285,7 @@ def update_user_password(
         user_id=current_user.id,
         entity_type="user",
         entity_id=user.id,
-        details={"target_email": user.email},
+        details={"target_email": user.email, "reason": change_reason},
     )
     db.commit()
     return {"message": "Password updated"}
@@ -356,9 +294,11 @@ def update_user_password(
 @router.post("/{user_id}/2fa/reset", response_model=User2FAResetOut)
 def reset_user_2fa(
     user_id: str,
+    reason: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    change_reason = _validate_change_reason(reason)
     user = _tenant_user_or_404(db, user_id, current_user)
     secret = pyotp.random_base32()
     issuer = getattr(settings, "APP_2FA_ISSUER", None) or "crypto-saas"
@@ -382,7 +322,7 @@ def reset_user_2fa(
         user_id=current_user.id,
         entity_type="user",
         entity_id=user.id,
-        details={"target_email": user.email},
+        details={"target_email": user.email, "reason": change_reason},
     )
     db.commit()
     return User2FAResetOut(
@@ -540,33 +480,20 @@ def get_readiness_report(
         .where(User.tenant_id == _tenant_id(current_user))
         .order_by(User.email.asc())
     ).scalars().all()
-
-    rows = []
-    ready = 0
-    missing = 0
-    for user in users:
-        if real_only and not _is_real_user_email(user.email):
-            continue
-        if not include_service_users and _is_service_user_email(user.email):
-            continue
-        item = _build_user_readiness(db, user)
-        if item["ready"]:
-            ready += 1
-        else:
-            missing += 1
-        rows.append(item)
+    report = build_readiness_report(
+        db,
+        users=users,
+        real_only=real_only,
+        include_service_users=include_service_users,
+    )
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_for": current_user.email,
         "real_only": real_only,
         "include_service_users": include_service_users,
-        "summary": {
-            "total_users": len(rows),
-            "ready_users": ready,
-            "missing_users": missing,
-        },
-        "users": rows,
+        "summary": report["summary"],
+        "users": report["users"],
     }
 
 

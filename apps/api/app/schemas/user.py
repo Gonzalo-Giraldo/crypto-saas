@@ -24,6 +24,7 @@ class UserOut(UserBase):
 
 class UserRoleUpdate(BaseModel):
     role: str
+    reason: Optional[str] = None
 
 
 class UserRiskProfileUpdate(BaseModel):
@@ -32,10 +33,12 @@ class UserRiskProfileUpdate(BaseModel):
 
 class UserEmailUpdate(BaseModel):
     email: EmailStr
+    reason: Optional[str] = None
 
 
 class UserPasswordUpdate(BaseModel):
     new_password: str
+    reason: Optional[str] = None
 
 
 class User2FAResetOut(BaseModel):

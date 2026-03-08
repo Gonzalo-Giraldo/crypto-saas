@@ -77,6 +77,25 @@ def _ensure_runtime_policy_columns():
 
 _ensure_runtime_policy_columns()
 
+
+def _ensure_exchange_secret_columns():
+    insp = inspect(engine)
+    try:
+        cols = {c["name"] for c in insp.get_columns("exchange_secret")}
+    except Exception:
+        return
+    with engine.begin() as conn:
+        if "key_version" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE exchange_secret "
+                    "ADD COLUMN IF NOT EXISTS key_version VARCHAR NOT NULL DEFAULT 'v1'"
+                )
+            )
+
+
+_ensure_exchange_secret_columns()
+
 app.include_router(ops_router)
 app.include_router(users_router)
 app.include_router(signals_router)

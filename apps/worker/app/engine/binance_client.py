@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import time
 import threading
+import re
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from urllib.parse import urlencode
 
@@ -52,6 +53,25 @@ def _gateway_headers() -> dict[str, str]:
     return out
 
 
+def _extract_upstream_code(text: str) -> str | None:
+    msg = str(text or "")
+    m = re.search(r"\bcode=([A-Za-z0-9_\-]+)", msg)
+    if m:
+        return m.group(1)
+    m = re.search(r'"code"\s*:\s*"?([A-Za-z0-9_\-]+)"?', msg)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _build_gateway_error(status_code: int, body_text: str) -> str:
+    detail = f"gateway_upstream_error status={int(status_code)}"
+    code = _extract_upstream_code(body_text)
+    if code:
+        detail += f" code={code}"
+    return detail
+
+
 def _post_gateway(path: str, payload: dict, timeout: int = 10) -> dict | None:
     if not _gateway_enabled():
         return None
@@ -64,7 +84,7 @@ def _post_gateway(path: str, payload: dict, timeout: int = 10) -> dict | None:
         timeout=max(3, timeout),
     )
     if response.status_code >= 400:
-        raise RuntimeError(f"Binance gateway error {response.status_code}: {response.text}")
+        raise RuntimeError(_build_gateway_error(response.status_code, response.text))
     body = response.json()
     return body if isinstance(body, dict) else None
 

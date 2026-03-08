@@ -72,13 +72,34 @@ def _base_url_for_market(market: str) -> str:
     return BINANCE_FUTURES_BASE if market == "FUTURES" else BINANCE_SPOT_BASE
 
 
+def _request_upstream(method: str, url: str, **kwargs) -> requests.Response:
+    try:
+        return requests.request(method=method.upper(), url=url, **kwargs)
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="binance_upstream_unreachable")
+
+
+def _raise_upstream_http_error(response: requests.Response) -> None:
+    binance_code = None
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            binance_code = body.get("code")
+    except Exception:
+        pass
+    detail = f"binance_upstream_error status={response.status_code}"
+    if binance_code is not None:
+        detail += f" code={binance_code}"
+    raise HTTPException(status_code=502, detail=detail)
+
+
 @app.get("/healthz")
 def healthz():
     if not HEALTHZ_CHECK_BINANCE:
         return {"status": "ok", "binance_check": "skipped"}
 
     try:
-        r = requests.get(f"{BINANCE_SPOT_BASE}/api/v3/time", timeout=max(2, REQUEST_TIMEOUT_SECONDS))
+        r = _request_upstream("GET", f"{BINANCE_SPOT_BASE}/api/v3/time", timeout=max(2, REQUEST_TIMEOUT_SECONDS))
         ok = r.status_code == 200
         return {"status": "ok" if ok else "degraded", "binance_check": r.status_code}
     except Exception:
@@ -116,20 +137,10 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
 
     url = f"{base_url}{endpoint}?{query}&signature={signature}"
     headers = {"X-MBX-APIKEY": payload.api_key}
-    r = requests.post(url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    r = _request_upstream("POST", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
 
     if r.status_code >= 400:
-        binance_code = None
-        try:
-            body = r.json()
-            binance_code = body.get("code")
-        except Exception:
-            pass
-        # Avoid leaking upstream payloads; keep a concise diagnostic.
-        detail = f"binance_upstream_error status={r.status_code}"
-        if binance_code is not None:
-            detail += f" code={binance_code}"
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_upstream_http_error(r)
 
     return {"ok": True, "mode": f"gateway_test_order_{market.lower()}"}
 
@@ -150,20 +161,11 @@ def binance_account_status(payload: BinanceAccountStatusIn, x_internal_token: st
         hashlib.sha256,
     ).hexdigest()
 
-    url = f"{BINANCE_BASE}/api/v3/account?{query}&signature={signature}"
+    url = f"{BINANCE_SPOT_BASE}/api/v3/account?{query}&signature={signature}"
     headers = {"X-MBX-APIKEY": payload.api_key}
-    r = requests.get(url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    r = _request_upstream("GET", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
-        binance_code = None
-        try:
-            body = r.json()
-            binance_code = body.get("code")
-        except Exception:
-            pass
-        detail = f"binance_upstream_error status={r.status_code}"
-        if binance_code is not None:
-            detail += f" code={binance_code}"
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_upstream_http_error(r)
     return r.json()
 
 
@@ -178,10 +180,9 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
         url = f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/24hr"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/ticker/24hr"
-    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
-        detail = f"binance_upstream_error status={r.status_code}"
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_upstream_http_error(r)
     data = r.json()
     if not isinstance(data, list):
         raise HTTPException(status_code=502, detail="invalid_ticker_payload")
@@ -219,10 +220,9 @@ def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(defa
         url = f"{BINANCE_FUTURES_BASE}/fapi/v1/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
-    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
-        detail = f"binance_upstream_error status={r.status_code}"
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_upstream_http_error(r)
     data = r.json()
     if not isinstance(data, list):
         raise HTTPException(status_code=502, detail="invalid_klines_payload")
@@ -248,10 +248,9 @@ def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str 
             url = f"{BINANCE_FUTURES_BASE}/fapi/v1/exchangeInfo"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/exchangeInfo?{query}"
-    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
-        detail = f"binance_upstream_error status={r.status_code}"
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_upstream_http_error(r)
     data = r.json()
     rows = data.get("symbols") if isinstance(data, dict) else None
     if not isinstance(rows, list):
@@ -277,10 +276,9 @@ def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = 
         url = f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/price?{query}"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/ticker/price?{query}"
-    r = requests.get(url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if r.status_code >= 400:
-        detail = f"binance_upstream_error status={r.status_code}"
-        raise HTTPException(status_code=502, detail=detail)
+        _raise_upstream_http_error(r)
     data = r.json()
     if not isinstance(data, dict):
         raise HTTPException(status_code=502, detail="invalid_ticker_price_payload")

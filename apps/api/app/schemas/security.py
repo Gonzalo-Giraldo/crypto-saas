@@ -7,12 +7,20 @@ class ReencryptSecretsRequest(BaseModel):
     old_key: str
     new_key: str
     dry_run: bool = True
+    new_version: str = "v2"
+    batch_size: int = 200
+    canary_count: Optional[int] = None
 
 
 class ReencryptSecretsOut(BaseModel):
     dry_run: bool
     scanned: int
     updated: int
+    failed: int = 0
+    batch_size: int = 200
+    batches: int = 0
+    new_version: Optional[str] = None
+    canary_count: Optional[int] = None
 
 
 class CleanupSmokeUsersUserOut(BaseModel):
@@ -339,6 +347,9 @@ class LearningLabelRunOut(BaseModel):
     labeled: int
     expired: int
     no_price: int
+    labeled_rate_pct: float = 0.0
+    expired_rate_pct: float = 0.0
+    no_price_rate_pct: float = 0.0
 
 
 class LearningRetentionRunOut(BaseModel):
@@ -419,6 +430,10 @@ class LearningStatusOut(BaseModel):
     no_price: int
     snapshots_total: int
     outcomes_total: int
+    pending_rate_pct: float = 0.0
+    labeled_rate_pct: float = 0.0
+    expired_rate_pct: float = 0.0
+    no_price_rate_pct: float = 0.0
 
 
 class LearningSuggestionReportRowOut(BaseModel):
