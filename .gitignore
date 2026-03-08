@@ -19,6 +19,7 @@ db.sqlite
 
 # Logs
 *.log
+*.save
 
 # MacOS
 .DS_Store

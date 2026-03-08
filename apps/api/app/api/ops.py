@@ -6,6 +6,7 @@ import random
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Optional
 from urllib import error as urllib_error, parse as urllib_parse, request as urllib_request
 
@@ -110,6 +111,19 @@ from apps.api.app.services.idempotency import (
     consume_idempotent_response,
     store_idempotent_response,
 )
+from apps.api.app.services.decision_engine import (
+    rank_scan_rows,
+    score_threshold_for_side,
+)
+from apps.api.app.services.exit_policy_engine import (
+    sort_exit_candidates,
+    resolve_policy_skip_reason_basic,
+)
+from apps.api.app.services.learning_pipeline_engine import (
+    compute_rate,
+    validate_choice_param,
+    validate_range_param,
+)
 from apps.api.app.services.trading_controls import (
     assert_exposure_limits,
     assert_trading_enabled,
@@ -128,6 +142,7 @@ from apps.api.app.services.strategy_runtime_policy import (
     resolve_runtime_policy,
     upsert_runtime_policy,
 )
+from apps.api.app.services.user_readiness import build_readiness_report
 from apps.worker.app.engine.execution_runtime import (
     get_binance_account_status_for_user,
     get_ibkr_account_status_for_user,
@@ -137,6 +152,13 @@ from apps.worker.app.engine.execution_runtime import (
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
+_TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
+
+
+def _render_ops_template(filename: str) -> HTMLResponse:
+    path = _TEMPLATES_DIR / filename
+    html = path.read_text(encoding="utf-8")
+    return HTMLResponse(html)
 
 
 _binance_ticker_cache_lock = threading.Lock()
@@ -1011,103 +1033,12 @@ def _build_operational_readiness_report(
         .where(User.tenant_id == tenant_id)
         .order_by(User.email.asc())
     ).scalars().all()
-
-    rows = []
-    ready_users = 0
-    missing_users = 0
-    max_age_days = int(settings.PASSWORD_MAX_AGE_DAYS or 0)
-    enforce_max_age = bool(settings.ENFORCE_PASSWORD_MAX_AGE and max_age_days > 0)
-    now = datetime.now(timezone.utc)
-
-    for user in users:
-        if real_only and not _is_real_user_email(user.email):
-            continue
-        if not include_service_users and _is_service_user_email(user.email):
-            continue
-
-        user_2fa = (
-            db.execute(select(UserTwoFactor).where(UserTwoFactor.user_id == user.id))
-            .scalar_one_or_none()
-        )
-        two_factor_enabled = bool(user_2fa and user_2fa.enabled)
-
-        secret_rows = db.execute(
-            select(ExchangeSecret.exchange).where(ExchangeSecret.user_id == user.id)
-        ).all()
-        secret_set = {row[0] for row in secret_rows}
-
-        assignment_rows = db.execute(
-            select(StrategyAssignment.exchange, StrategyAssignment.enabled).where(
-                StrategyAssignment.user_id == user.id
-            )
-        ).all()
-        enabled_map = {exchange: bool(enabled) for exchange, enabled in assignment_rows}
-
-        changed_at = user.password_changed_at
-        if changed_at is not None and changed_at.tzinfo is None:
-            changed_at = changed_at.replace(tzinfo=timezone.utc)
-        if changed_at is None:
-            password_age_days = None
-        else:
-            password_age_days = max(0, (now - changed_at.astimezone(timezone.utc)).days)
-
-        checks = [
-            {
-                "name": "role_allowed",
-                "passed": user.role in {"admin", "operator", "viewer", "trader", "disabled"},
-                "detail": user.role,
-            },
-            {
-                "name": "password_not_expired",
-                "passed": (not enforce_max_age) or (
-                    password_age_days is not None and password_age_days <= max_age_days
-                ),
-                "detail": f"age_days={password_age_days} max_age_days={max_age_days} enforced={enforce_max_age}",
-            },
-            {
-                "name": "admin_has_2fa",
-                "passed": (user.role != "admin") or two_factor_enabled,
-                "detail": f"two_factor_enabled={two_factor_enabled}",
-            },
-        ]
-        for exchange in ("BINANCE", "IBKR"):
-            enabled_for_user = bool(enabled_map.get(exchange, False))
-            has_secret = exchange in secret_set
-            checks.append(
-                {
-                    "name": f"{exchange.lower()}_enabled_has_secret",
-                    "passed": (not enabled_for_user) or has_secret,
-                    "detail": f"enabled={enabled_for_user} secret_configured={has_secret}",
-                }
-            )
-
-        ready = all(bool(c["passed"]) for c in checks)
-        if ready:
-            ready_users += 1
-        else:
-            missing_users += 1
-
-        rows.append(
-            {
-                "user_id": user.id,
-                "email": user.email,
-                "role": user.role,
-                "two_factor_enabled": two_factor_enabled,
-                "password_age_days": password_age_days,
-                "checks": checks,
-                "ready": ready,
-            }
-        )
-
-    return {
-        "summary": {
-            "total_users": len(rows),
-            "ready_users": ready_users,
-            "missing_users": missing_users,
-            "password_max_age_days": max_age_days if enforce_max_age else None,
-        },
-        "users": rows,
-    }
+    return build_readiness_report(
+        db,
+        users=users,
+        real_only=real_only,
+        include_service_users=include_service_users,
+    )
 
 
 def _build_security_posture_rows(
@@ -1852,10 +1783,11 @@ def _scan_pretrade_candidates(
             }
         )
 
-    rows.sort(key=lambda r: (r["passed"], r["score"]), reverse=True)
-    if not payload.include_blocked:
-        rows = [r for r in rows if bool(r["passed"])]
-    rows = rows[: payload.top_n]
+    rows = rank_scan_rows(
+        rows,
+        include_blocked=bool(payload.include_blocked),
+        top_n=int(payload.top_n),
+    )
 
     total_ms = round((time.perf_counter() - started) * 1000.0, 2)
     avg_ms = round(total_ms / max(1, len(payload.candidates)), 2)
@@ -2047,12 +1979,15 @@ def _auto_pick_from_scan(
         })
 
     passed_assets = [a for a in assets if bool(a.get("passed"))]
-    def _score_threshold(asset: dict) -> float:
-        side = str(asset.get("side") or "BUY").upper()
-        if side == "SELL":
-            return max(float(min_score_pct) + 4.0, 85.0)
-        return float(min_score_pct)
-    score_eligible = [a for a in passed_assets if float(a.get("score") or 0.0) >= _score_threshold(a)]
+    score_eligible = [
+        a
+        for a in passed_assets
+        if float(a.get("score") or 0.0)
+        >= score_threshold_for_side(
+            min_score_pct=float(min_score_pct),
+            side=str(a.get("side") or "BUY"),
+        )
+    ]
     if not score_eligible:
         top_failed_checks: list[str] = []
         if assets:
@@ -2808,6 +2743,11 @@ def update_admin_trading_control(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    if payload.trading_enabled is False and len((payload.reason or "").strip()) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="reason is required (min 8 chars) when disabling trading",
+        )
     set_trading_enabled(db, enabled=payload.trading_enabled)
     log_audit_event(
         db,
@@ -3538,6 +3478,11 @@ def pretrade_binance_check(
         action="pretrade_check",
         exchange="BINANCE",
     )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
     assert_exposure_limits(
         db=db,
         current_user=current_user,
@@ -3587,6 +3532,11 @@ def pretrade_ibkr_check(
         action="pretrade_check",
         exchange="IBKR",
     )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
     assert_exposure_limits(
         db=db,
         current_user=current_user,
@@ -3626,6 +3576,7 @@ def pretrade_ibkr_check(
 @router.post("/execution/pretrade/binance/scan", response_model=PretradeScanOut)
 def pretrade_binance_scan(
     payload: PretradeScanRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3635,11 +3586,34 @@ def pretrade_binance_scan(
         action="pretrade_scan",
         exchange="BINANCE",
     )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/binance/scan",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
     out = _scan_pretrade_candidates(
         db=db,
         current_user=current_user,
         exchange="BINANCE",
         payload=payload,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/binance/scan",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=out,
     )
     log_audit_event(
         db,
@@ -3663,6 +3637,7 @@ def pretrade_binance_scan(
 @router.post("/execution/pretrade/ibkr/scan", response_model=PretradeScanOut)
 def pretrade_ibkr_scan(
     payload: PretradeScanRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3672,11 +3647,34 @@ def pretrade_ibkr_scan(
         action="pretrade_scan",
         exchange="IBKR",
     )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/ibkr/scan",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
     out = _scan_pretrade_candidates(
         db=db,
         current_user=current_user,
         exchange="IBKR",
         payload=payload,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/ibkr/scan",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=out,
     )
     log_audit_event(
         db,
@@ -3700,6 +3698,7 @@ def pretrade_ibkr_scan(
 @router.post("/execution/pretrade/binance/auto-pick", response_model=PretradeAutoPickOut)
 def pretrade_binance_auto_pick(
     payload: PretradeAutoPickRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3709,11 +3708,34 @@ def pretrade_binance_auto_pick(
         action="pretrade_auto_pick",
         exchange="BINANCE",
     )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/binance/auto-pick",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
     out = _auto_pick_from_scan(
         db=db,
         current_user=current_user,
         exchange="BINANCE",
         payload=payload,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/binance/auto-pick",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=out,
     )
     log_audit_event(
         db,
@@ -3775,6 +3797,7 @@ def pretrade_binance_auto_pick(
 @router.post("/execution/pretrade/ibkr/auto-pick", response_model=PretradeAutoPickOut)
 def pretrade_ibkr_auto_pick(
     payload: PretradeAutoPickRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3784,11 +3807,34 @@ def pretrade_ibkr_auto_pick(
         action="pretrade_auto_pick",
         exchange="IBKR",
     )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="IBKR",
+    )
+    req_payload = payload.model_dump()
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/ibkr/auto-pick",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
     out = _auto_pick_from_scan(
         db=db,
         current_user=current_user,
         exchange="IBKR",
         payload=payload,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/pretrade/ibkr/auto-pick",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=out,
     )
     log_audit_event(
         db,
@@ -4026,9 +4072,28 @@ def admin_exit_tick(
     include_service_users: bool = False,
     max_positions: int = 500,
     user_email: Optional[str] = None,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    req_payload = {
+        "dry_run": bool(dry_run),
+        "real_only": bool(real_only),
+        "include_service_users": bool(include_service_users),
+        "max_positions": int(max_positions),
+        "user_email": (user_email or "").strip().lower() or None,
+        "tenant_id": _tenant_id(current_user),
+    }
+    cached = consume_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/admin/exit/tick",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
     out = run_exit_tick_for_tenant(
         db=db,
         tenant_id=_tenant_id(current_user),
@@ -4037,6 +4102,14 @@ def admin_exit_tick(
         include_service_users=include_service_users,
         max_positions=max_positions,
         user_email=user_email,
+    )
+    store_idempotent_response(
+        db,
+        user_id=current_user.id,
+        endpoint="/ops/admin/exit/tick",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=out,
     )
     db.commit()
     return out
@@ -4282,27 +4355,24 @@ def run_exit_tick_for_tenant(
                 },
             )
 
-    if exit_candidates_pending:
-        exit_candidates_pending.sort(key=lambda item: (item["priority"], -item["opened_minutes"]))
-
-    for item in exit_candidates_pending:
+    for item in sort_exit_candidates(exit_candidates_pending):
         p = item["position"]
         user = item["user"]
         key = (str(user.id), str(item["symbol"]))
         out_row = results_by_position_id.get(p.id)
         if out_row is None:
             continue
-        policy_skip_reason: Optional[str] = None
+        policy_skip_reason: Optional[str] = resolve_policy_skip_reason_basic(
+            dry_run=bool(dry_run),
+            paused=bool(paused),
+            errors=int(errors),
+            max_errors_per_tick=int(max_errors_per_tick),
+            closed_positions=int(closed_positions),
+            max_closes_per_tick=int(max_closes_per_tick),
+            already_closed_symbol_in_tick=(key in closed_in_tick),
+        )
 
-        if errors >= max_errors_per_tick:
-            policy_skip_reason = "max_errors_reached"
-        elif paused and not dry_run:
-            policy_skip_reason = "paused"
-        elif (not dry_run) and max_closes_per_tick > 0 and closed_positions >= max_closes_per_tick:
-            policy_skip_reason = "max_closes_reached"
-        elif (not dry_run) and key in closed_in_tick:
-            policy_skip_reason = "symbol_cooldown_tick"
-        elif (not dry_run) and symbol_cooldown_seconds > 0:
+        if policy_skip_reason is None and (not dry_run) and symbol_cooldown_seconds > 0:
             recent_cutoff = now - timedelta(seconds=symbol_cooldown_seconds)
             recent_closed = db.execute(
                 select(Position.id).where(
@@ -4469,6 +4539,9 @@ def _label_learning_outcomes(
             "labeled": 0,
             "expired": 0,
             "no_price": 0,
+            "labeled_rate_pct": 0.0,
+            "expired_rate_pct": 0.0,
+            "no_price_rate_pct": 0.0,
         }
 
     symbols = [str(r.symbol or "") for r in rows if (r.exchange or "").upper() == "BINANCE" and r.symbol]
@@ -4535,6 +4608,9 @@ def _label_learning_outcomes(
         "labeled": labeled,
         "expired": expired,
         "no_price": no_price,
+        "labeled_rate_pct": compute_rate(labeled, scanned),
+        "expired_rate_pct": compute_rate(expired, scanned),
+        "no_price_rate_pct": compute_rate(no_price, scanned),
     }
 
 
@@ -4604,6 +4680,7 @@ def _refresh_learning_rollup_hourly(
     dry_run: bool = False,
 ) -> dict:
     window_hours = max(1, min(int(hours), 24 * 30))
+    max_rows = max(1_000, min(int(settings.LEARNING_ROLLUP_MAX_ROWS or 50_000), 500_000))
     now = datetime.now(timezone.utc)
     from_dt = now - timedelta(hours=window_hours)
     rows = db.execute(
@@ -4617,17 +4694,60 @@ def _refresh_learning_rollup_hourly(
             LearningDecisionOutcome.outcome_status == "labeled",
             LearningDecisionOutcome.labeled_at >= from_dt,
         )
-    ).all()
+        .order_by(LearningDecisionOutcome.labeled_at.desc())
+        .limit(max_rows)
+    )
 
-    grouped: dict[tuple, list[tuple[LearningDecisionOutcome, LearningDecisionSnapshot]]] = {}
+    grouped: dict[tuple, dict] = {}
+    processed_rows = 0
     for outcome, snap in rows:
+        processed_rows += 1
         key = (
             _bucket_1h(outcome.labeled_at or outcome.decision_ts),
             str(outcome.exchange or "UNKNOWN"),
             str(outcome.symbol or snap.selected_symbol or ""),
             int(outcome.horizon_minutes or 60),
         )
-        grouped.setdefault(key, []).append((outcome, snap))
+        agg = grouped.setdefault(
+            key,
+            {
+                "samples": 0,
+                "hit_count": 0,
+                "returns": [],
+                "sum_returns": 0.0,
+                "sum_score": 0.0,
+                "count_score": 0,
+                "sum_score_rules": 0.0,
+                "count_score_rules": 0,
+                "sum_score_market": 0.0,
+                "count_score_market": 0,
+                "green": 0,
+                "gray": 0,
+                "red": 0,
+            },
+        )
+        agg["samples"] += 1
+        ret = float(outcome.return_pct or 0.0)
+        agg["returns"].append(ret)
+        agg["sum_returns"] += ret
+        if bool(outcome.hit):
+            agg["hit_count"] += 1
+        if snap.selected_score is not None:
+            agg["sum_score"] += float(snap.selected_score)
+            agg["count_score"] += 1
+        if snap.selected_score_rules is not None:
+            agg["sum_score_rules"] += float(snap.selected_score_rules)
+            agg["count_score_rules"] += 1
+        if snap.selected_score_market is not None:
+            agg["sum_score_market"] += float(snap.selected_score_market)
+            agg["count_score_market"] += 1
+        liq_state = str(snap.selected_liquidity_state or "").lower()
+        if liq_state == "green":
+            agg["green"] += 1
+        elif liq_state == "gray":
+            agg["gray"] += 1
+        elif liq_state == "red":
+            agg["red"] += 1
 
     upserted = 0
     if not dry_run:
@@ -4637,17 +4757,11 @@ def _refresh_learning_rollup_hourly(
                 LearningRollupHourly.bucket_hour >= from_dt,
             )
         )
-    for key, items in grouped.items():
+    for key, agg in grouped.items():
         bucket_hour, exchange, symbol, horizon = key
-        returns = [float(o.return_pct or 0.0) for o, _ in items]
-        scores = [float(s.selected_score or 0.0) for _, s in items if s.selected_score is not None]
-        scores_rules = [float(s.selected_score_rules or 0.0) for _, s in items if s.selected_score_rules is not None]
-        scores_market = [float(s.selected_score_market or 0.0) for _, s in items if s.selected_score_market is not None]
-        green = sum(1 for _, s in items if str(s.selected_liquidity_state or "").lower() == "green")
-        gray = sum(1 for _, s in items if str(s.selected_liquidity_state or "").lower() == "gray")
-        red = sum(1 for _, s in items if str(s.selected_liquidity_state or "").lower() == "red")
-        samples = len(items)
-        hit_rate = (sum(1 for o, _ in items if bool(o.hit)) / samples) * 100.0 if samples else 0.0
+        samples = int(agg["samples"])
+        returns = agg["returns"]
+        hit_rate = (int(agg["hit_count"]) / samples) * 100.0 if samples else 0.0
 
         if not dry_run:
             db.add(
@@ -4660,22 +4774,42 @@ def _refresh_learning_rollup_hourly(
                     horizon_minutes=horizon,
                     samples=samples,
                     hit_rate_pct=round(hit_rate, 4),
-                    avg_return_pct=round(sum(returns) / samples if samples else 0.0, 6),
+                    avg_return_pct=round(float(agg["sum_returns"]) / samples if samples else 0.0, 6),
                     p50_return_pct=round(_percentile(returns, 0.50), 6),
                     p90_return_pct=round(_percentile(returns, 0.90), 6),
-                    avg_score=round(sum(scores) / len(scores), 4) if scores else None,
-                    avg_score_rules=round(sum(scores_rules) / len(scores_rules), 4) if scores_rules else None,
-                    avg_score_market=round(sum(scores_market) / len(scores_market), 4) if scores_market else None,
-                    green_count=green,
-                    gray_count=gray,
-                    red_count=red,
+                    avg_score=(
+                        round(float(agg["sum_score"]) / int(agg["count_score"]), 4)
+                        if int(agg["count_score"]) > 0
+                        else None
+                    ),
+                    avg_score_rules=(
+                        round(float(agg["sum_score_rules"]) / int(agg["count_score_rules"]), 4)
+                        if int(agg["count_score_rules"]) > 0
+                        else None
+                    ),
+                    avg_score_market=(
+                        round(float(agg["sum_score_market"]) / int(agg["count_score_market"]), 4)
+                        if int(agg["count_score_market"]) > 0
+                        else None
+                    ),
+                    green_count=int(agg["green"]),
+                    gray_count=int(agg["gray"]),
+                    red_count=int(agg["red"]),
                 )
             )
         upserted += 1
 
     if not dry_run:
         db.flush()
-    return {"hours": window_hours, "groups": len(grouped), "upserted": upserted, "dry_run": bool(dry_run)}
+    return {
+        "hours": window_hours,
+        "groups": len(grouped),
+        "upserted": upserted,
+        "dry_run": bool(dry_run),
+        "processed_rows": int(processed_rows),
+        "max_rows": int(max_rows),
+        "truncated": bool(processed_rows >= max_rows),
+    }
 
 
 def run_learning_pipeline_tick(db: Session, tenant_id: str) -> None:
@@ -4719,6 +4853,15 @@ def admin_learning_label(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    if horizon_minutes is not None:
+        horizon_minutes = validate_range_param(
+            name="horizon_minutes",
+            value=int(horizon_minutes),
+            minimum=5,
+            maximum=10080,
+        )
+    limit = validate_range_param(name="limit", value=int(limit), minimum=1, maximum=5000)
+
     out = _label_learning_outcomes(
         db=db,
         tenant_id=_tenant_id(current_user),
@@ -4758,6 +4901,7 @@ def admin_learning_rollup_refresh(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    hours = validate_range_param(name="hours", value=int(hours), minimum=1, maximum=24 * 30)
     out = _refresh_learning_rollup_hourly(
         db=db,
         tenant_id=_tenant_id(current_user),
@@ -4810,14 +4954,23 @@ def admin_learning_status(
             LearningDecisionOutcome.tenant_id == tenant,
         )
     ).scalar_one()
+    outcomes_total_i = int(outcomes_total)
+    pending_i = int(pending)
+    labeled_i = int(labeled)
+    expired_i = int(expired)
+    no_price_i = int(no_price)
     return LearningStatusOut(
         generated_at=now.isoformat(),
-        pending=int(pending),
-        labeled=int(labeled),
-        expired=int(expired),
-        no_price=int(no_price),
+        pending=pending_i,
+        labeled=labeled_i,
+        expired=expired_i,
+        no_price=no_price_i,
         snapshots_total=int(snapshots_total),
-        outcomes_total=int(outcomes_total),
+        outcomes_total=outcomes_total_i,
+        pending_rate_pct=compute_rate(pending_i, outcomes_total_i),
+        labeled_rate_pct=compute_rate(labeled_i, outcomes_total_i),
+        expired_rate_pct=compute_rate(expired_i, outcomes_total_i),
+        no_price_rate_pct=compute_rate(no_price_i, outcomes_total_i),
     )
 
 
@@ -4830,13 +4983,21 @@ def admin_learning_dataset(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    hours = max(1, min(int(hours), 24 * 30))
-    limit = max(1, min(int(limit), 5000))
+    hours = validate_range_param(name="hours", value=int(hours), minimum=1, maximum=24 * 30)
+    limit = validate_range_param(name="limit", value=int(limit), minimum=1, maximum=5000)
     now = datetime.now(timezone.utc)
     from_dt = now - timedelta(hours=hours)
     tenant = _tenant_id(current_user)
-    status_norm = str(outcome_status or "ALL").upper().strip()
-    exchange_norm = str(exchange or "ALL").upper().strip()
+    status_norm = validate_choice_param(
+        name="outcome_status",
+        value=outcome_status,
+        allowed={"ALL", "PENDING", "LABELED", "EXPIRED", "NO_PRICE"},
+    )
+    exchange_norm = validate_choice_param(
+        name="exchange",
+        value=exchange,
+        allowed={"ALL", "BINANCE", "IBKR"},
+    )
 
     q = (
         select(LearningDecisionSnapshot, LearningDecisionOutcome)
@@ -4908,13 +5069,21 @@ def admin_learning_suggestion_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    hours = max(1, min(hours, 24 * 30))
-    limit = max(1, min(limit, 5000))
+    hours = validate_range_param(name="hours", value=int(hours), minimum=1, maximum=24 * 30)
+    limit = validate_range_param(name="limit", value=int(limit), minimum=1, maximum=5000)
     now = datetime.now(timezone.utc)
     tenant = _tenant_id(current_user)
     from_dt = now - timedelta(hours=hours)
-    exchange_norm = (exchange or "ALL").upper().strip()
-    status_norm = (outcome_status or "ALL").upper().strip()
+    exchange_norm = validate_choice_param(
+        name="exchange",
+        value=exchange,
+        allowed={"ALL", "BINANCE", "IBKR"},
+    )
+    status_norm = validate_choice_param(
+        name="outcome_status",
+        value=outcome_status,
+        allowed={"ALL", "PENDING", "LABELED", "EXPIRED", "NO_PRICE"},
+    )
 
     q = (
         select(LearningDecisionSnapshot, LearningDecisionOutcome)
@@ -4934,12 +5103,8 @@ def admin_learning_suggestion_report(
     )
     if exchange_norm in {"BINANCE", "IBKR"}:
         q = q.where(LearningDecisionSnapshot.exchange == exchange_norm)
-    else:
-        exchange_norm = "ALL"
     if status_norm in {"PENDING", "LABELED", "EXPIRED", "NO_PRICE"}:
         q = q.where(LearningDecisionOutcome.outcome_status == status_norm.lower())
-    else:
-        status_norm = "ALL"
 
     rows = db.execute(q).all()
     out_rows: list[LearningSuggestionReportRowOut] = []
@@ -5031,12 +5196,16 @@ def admin_learning_rollup(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
-    hours = max(1, min(int(hours), 24 * 30))
-    limit = max(1, min(int(limit), 5000))
+    hours = validate_range_param(name="hours", value=int(hours), minimum=1, maximum=24 * 30)
+    limit = validate_range_param(name="limit", value=int(limit), minimum=1, maximum=5000)
     now = datetime.now(timezone.utc)
     from_dt = now - timedelta(hours=hours)
     tenant = _tenant_id(current_user)
-    exchange_norm = str(exchange or "ALL").upper().strip()
+    exchange_norm = validate_choice_param(
+        name="exchange",
+        value=exchange,
+        allowed={"ALL", "BINANCE", "IBKR"},
+    )
     q = (
         select(LearningRollupHourly)
         .where(
@@ -5503,13 +5672,23 @@ def security_reencrypt_exchange_secrets(
         old_key=payload.old_key,
         new_key=payload.new_key,
         dry_run=payload.dry_run,
+        new_version=payload.new_version,
+        batch_size=payload.batch_size,
+        canary_count=payload.canary_count,
     )
     log_audit_event(
         db,
         action="security.key_rotation.reencrypt",
         user_id=current_user.id,
         entity_type="security",
-        details={"dry_run": payload.dry_run, "updated": result["updated"]},
+        details={
+            "dry_run": payload.dry_run,
+            "updated": result["updated"],
+            "failed": result.get("failed", 0),
+            "new_version": payload.new_version,
+            "batch_size": payload.batch_size,
+            "canary_count": payload.canary_count,
+        },
     )
     db.commit()
     return result
@@ -6020,6 +6199,7 @@ def admin_readiness_daily_gate(
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_page():
+    return _render_ops_template("ops_console_v2.html")
     return HTMLResponse(
         """
 <!doctype html>
@@ -6645,6 +6825,7 @@ def dashboard_page():
 
 @router.get("/console", response_class=HTMLResponse)
 def ops_console_page():
+    return _render_ops_template("ops_console_v2.html")
     return HTMLResponse(
         """
 <!doctype html>

@@ -25,6 +25,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Enforce no legacy .save files
+        run: |
+          found="$(find . -type f -name "*.save" -not -path "./.git/*" -print)"
+          if [[ -n "$found" ]]; then
+            echo "Found forbidden .save files:"
+            echo "$found"
+            exit 1
+          fi
+
       - name: Run integration tests
         run: |
           export PYTHONPATH="$GITHUB_WORKSPACE"

@@ -254,6 +254,7 @@ pytest -q tests/integration
 - Local/dev operations: `docs/runbook_operativo.md`
 - Staging/production operations: `docs/runbook_produccion.md`
 - Post-deploy validation (market monitor, auto-pick, learning): `docs/04_runbook_validacion.md`
+- Disaster recovery backup/restore: `docs/runbook_disaster_recovery.md`
 - Daily one-page checklist: `docs/checklist_operativa_1pagina.md`
 - NOC-lite decision table: `docs/noc_lite.md`
 - Backend Definition of Done: `docs/backend_definition_of_done.md`
