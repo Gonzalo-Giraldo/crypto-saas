@@ -34,8 +34,6 @@ jobs:
       ALLOW_BINANCE_TEST_ERROR: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_binance_test_error || 'true' }}
       SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL != '' && secrets.SMOKE_EMAIL || 'smoke.ci@example.com' }}
       RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-      SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL != '' && secrets.SMOKE_ADMIN_EMAIL || secrets.DUAL_ADMIN_EMAIL }}
-      SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD != '' && secrets.SMOKE_ADMIN_PASSWORD || secrets.DUAL_ADMIN_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,8 +51,10 @@ jobs:
           SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
           SMOKE_BINANCE_API_KEY: ${{ secrets.SMOKE_BINANCE_API_KEY }}
           SMOKE_BINANCE_API_SECRET: ${{ secrets.SMOKE_BINANCE_API_SECRET }}
-          SMOKE_ADMIN_EMAIL: ${{ env.SMOKE_ADMIN_EMAIL }}
-          SMOKE_ADMIN_PASSWORD: ${{ env.SMOKE_ADMIN_PASSWORD }}
+          SMOKE_ADMIN_EMAIL: ${{ secrets.SMOKE_ADMIN_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD }}
+          DUAL_ADMIN_EMAIL: ${{ secrets.DUAL_ADMIN_EMAIL }}
+          DUAL_ADMIN_PASSWORD: ${{ secrets.DUAL_ADMIN_PASSWORD }}
           SMOKE_ADMIN_OTP: ${{ secrets.SMOKE_ADMIN_OTP }}
           DUAL_ADMIN_TOTP_SECRET: ${{ secrets.DUAL_ADMIN_TOTP_SECRET }}
         run: |
@@ -92,11 +92,20 @@ jobs:
           # Fallback when public register is blocked:
           # create/update smoke user via admin API if admin secrets are available.
           if [[ -z "$TOKEN" ]]; then
-            if [[ -z "${SMOKE_ADMIN_EMAIL:-}" || -z "${SMOKE_ADMIN_PASSWORD:-}" ]]; then
-              echo "Failed to login smoke user and no SMOKE_ADMIN_EMAIL/SMOKE_ADMIN_PASSWORD configured for fallback."
+            ADMIN_EMAIL="${SMOKE_ADMIN_EMAIL:-}"
+            ADMIN_PASSWORD="${SMOKE_ADMIN_PASSWORD:-}"
+            if [[ -z "$ADMIN_EMAIL" ]]; then
+              ADMIN_EMAIL="${DUAL_ADMIN_EMAIL:-}"
+            fi
+            if [[ -z "$ADMIN_PASSWORD" ]]; then
+              ADMIN_PASSWORD="${DUAL_ADMIN_PASSWORD:-}"
+            fi
+            if [[ -z "$ADMIN_EMAIL" || -z "$ADMIN_PASSWORD" ]]; then
+              echo "Failed to login smoke user and no admin fallback credentials configured (SMOKE_ADMIN_* or DUAL_ADMIN_*)."
               exit 1
             fi
-            admin_login_data="username=$SMOKE_ADMIN_EMAIL&password=$SMOKE_ADMIN_PASSWORD"
+            echo "Using admin fallback account for smoke bootstrap."
+            admin_login_data="username=$ADMIN_EMAIL&password=$ADMIN_PASSWORD"
             ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
               -H "Content-Type: application/x-www-form-urlencoded" \
               --data "$admin_login_data" \
@@ -107,7 +116,7 @@ jobs:
                 admin_otp="$(generate_totp "$DUAL_ADMIN_TOTP_SECRET" || true)"
               fi
               if [[ -n "$admin_otp" ]]; then
-                admin_login_data="username=$SMOKE_ADMIN_EMAIL&password=$SMOKE_ADMIN_PASSWORD&otp=$admin_otp"
+                admin_login_data="username=$ADMIN_EMAIL&password=$ADMIN_PASSWORD&otp=$admin_otp"
                 ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/auth/login" \
                   -H "Content-Type: application/x-www-form-urlencoded" \
                   --data "$admin_login_data" \
@@ -115,6 +124,11 @@ jobs:
               fi
             fi
             if [[ -z "$ADMIN_TOKEN" ]]; then
+              admin_detail=$(curl -s -X POST "$BASE_URL/auth/login" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                --data "username=$ADMIN_EMAIL&password=$ADMIN_PASSWORD" \
+                | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("detail","unknown"))' 2>/dev/null || true)
+              echo "Admin fallback login failed. detail=$admin_detail"
               echo "Failed to login fallback admin user"
               exit 1
             fi
