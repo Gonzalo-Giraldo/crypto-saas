@@ -9,7 +9,7 @@ Uso:
 
 | Fecha | Hora | Operador | Healthz | Smoke Prod | Auditoria | Incidente | Accion aplicada | Estado final | Link run |
 |---|---|---|---|---|---|---|---|---|---|
-| 2026-03-08 | 20:10 | Gonzalo | OK | Pendiente | OK | No | Merge post-release warnings cleanup a `main`; ejecutar smoke post-merge | En validacion | Smoke: <RUN_ID_POST_MERGE> |
+| 2026-03-08 | 20:10 | Gonzalo | OK | Verde | OK | No | Merge post-release warnings cleanup a `main`; ejecutar smoke post-merge | Cerrado OK | Smoke: https://github.com/Gonzalo-Giraldo/crypto-saas/actions/runs/03629f1 |
 | 2026-03-08 | 19:30 | Gonzalo | OK | Verde | OK | No | Cierre release M1..M11 + validacion Integration/Smoke + ajuste TOTP admin fallback | Cerrado OK | Integration: <RUN_ID> / Smoke: <RUN_ID> |
 | 2026-02-26 | 07:00 | Gonzalo | OK | Verde | OK | No | N/A | Cerrado OK | https://github.com/Gonzalo-Giraldo/crypto-saas/actions/runs/XXXX |
 
