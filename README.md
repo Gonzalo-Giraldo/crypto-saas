@@ -273,6 +273,10 @@ pytest -q tests/integration
 - Frontend MVP blueprint: `docs/frontend_mvp_blueprint.md`
 - Market regime matrix (Binance vs IBKR): `docs/market_regime_matrix_binance_ibkr.md`
 
+## Continuous Ops Follow-up
+- Tech debt issue template (warnings v2): `.github/ISSUE_TEMPLATE/tech-debt-warnings-v2.md`
+- Monthly DR reminder workflow: `.github/workflows/dr-drill-monthly.yml`
+
 ## Smoke Script
 - Automated production smoke checks: `scripts/smoke_prod.sh`
 - GitHub Actions workflow: `.github/workflows/smoke-prod.yml`

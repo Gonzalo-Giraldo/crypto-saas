@@ -111,3 +111,10 @@ RTO observado:
 RPO observado:
 Notas:
 ```
+
+## 9) Automatizacion mensual
+- Workflow: `.github/workflows/dr-drill-monthly.yml`
+- Frecuencia: dia 1 de cada mes (12:15 UTC) + ejecucion manual (`workflow_dispatch`).
+- Objetivo:
+  - abrir/actualizar issue de checklist DR mensual,
+  - forzar registro de evidencia operativa (RTO/RPO) en `docs/registro_operacion_diaria.md`.
