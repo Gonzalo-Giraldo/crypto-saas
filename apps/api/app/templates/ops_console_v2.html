@@ -15,6 +15,7 @@
     .grid { display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
     h1, h2 { margin:0 0 8px; }
     .muted { color:var(--muted); font-size:13px; }
+    .vwrap { word-break:break-word; overflow-wrap:anywhere; }
     .hidden { display:none; }
     input, button, select { border-radius:10px; padding:10px 12px; font-size:14px; }
     input, select { border:1px solid var(--line); background:#fff; min-width:220px; }
@@ -43,9 +44,6 @@
           <input id="loginEmail" placeholder="email" />
           <input id="loginPassword" type="password" placeholder="password" />
           <input id="loginOtp" placeholder="otp/token (opcional)" />
-        </div>
-        <div class="row">
-          <input id="accessToken" placeholder="Bearer token (opcional)" style="min-width:520px" />
         </div>
         <div class="row">
           <button id="loginBtn">Ingresar</button>
@@ -156,15 +154,29 @@
 
       try {
         if (moduleKey === "summary") {
-          const d = await api("/ops/dashboard/summary?real_only=true&include_service_users=false");
-          byId("moduleBody").innerHTML = `
-            <div class="grid">
-              <div class="card"><div class="muted">Estado</div><div><strong>${esc(d.overall_status)}</strong></div></div>
-              <div class="card"><div class="muted">Usuarios</div><div><strong>${esc(d.security.total_users)}</strong></div></div>
-              <div class="card"><div class="muted">Missing 2FA</div><div><strong>${esc(d.security.users_missing_2fa)}</strong></div></div>
-              <div class="card"><div class="muted">Trades hoy</div><div><strong>${esc(d.operations.trades_today_total)}</strong></div></div>
-            </div>
-          `;
+          const role = String((state.me && state.me.role) || "").toLowerCase();
+          if (role === "admin" || role === "operator" || role === "viewer") {
+            const d = await api("/ops/dashboard/summary?real_only=true&include_service_users=false");
+            byId("moduleBody").innerHTML = `
+              <div class="grid">
+                <div class="card"><div class="muted">Estado</div><div><strong>${esc(d.overall_status)}</strong></div></div>
+                <div class="card"><div class="muted">Usuarios</div><div><strong>${esc(d.security.total_users)}</strong></div></div>
+                <div class="card"><div class="muted">Missing 2FA</div><div><strong>${esc(d.security.users_missing_2fa)}</strong></div></div>
+                <div class="card"><div class="muted">Trades hoy</div><div><strong>${esc(d.operations.trades_today_total)}</strong></div></div>
+              </div>
+            `;
+          } else {
+            const me = await api("/users/me");
+            const risk = await api("/positions/risk/today");
+            byId("moduleBody").innerHTML = `
+              <div class="grid">
+                <div class="card"><div class="muted">Usuario</div><div><strong class="vwrap">${esc(me.email)}</strong></div></div>
+                <div class="card"><div class="muted">Rol</div><div><strong>${esc(me.role)}</strong></div></div>
+                <div class="card"><div class="muted">Risk profile</div><div><strong class="vwrap">${esc(risk.risk_profile)}</strong></div></div>
+                <div class="card"><div class="muted">Max trades</div><div><strong>${esc(risk.max_trades)}</strong></div></div>
+              </div>
+            `;
+          }
           setModuleMessage("Resumen cargado.");
           return;
         }
@@ -263,7 +275,7 @@
           const d = await api("/positions/risk/today");
           byId("moduleBody").innerHTML = `
             <div class="grid">
-              <div class="card"><div class="muted">Risk profile</div><div><strong>${esc(d.risk_profile)}</strong></div></div>
+              <div class="card"><div class="muted">Risk profile</div><div><strong class="vwrap">${esc(d.risk_profile)}</strong></div></div>
               <div class="card"><div class="muted">Trades hoy</div><div><strong>${esc(d.trades_today)}</strong></div></div>
               <div class="card"><div class="muted">Max trades</div><div><strong>${esc(d.max_trades)}</strong></div></div>
               <div class="card"><div class="muted">PnL hoy</div><div><strong>${esc(d.realized_pnl_today)}</strong></div></div>
@@ -324,22 +336,19 @@
         setModuleMessage("Modulo no implementado.", true);
       } catch (e) {
         byId("moduleBody").innerHTML = "";
-        setModuleMessage(String(e.message || e), true);
+        const raw = String(e.message || e);
+        let msg = raw;
+        const low = raw.toLowerCase();
+        if (low.includes("insufficient permissions")) {
+          msg = "No tienes permisos para este modulo.";
+        } else if (low.includes("gateway_upstream_error") || low.includes("upstream")) {
+          msg = "No se pudo consultar Binance/IBKR en este momento. Verifica credenciales y estado del gateway.";
+        }
+        setModuleMessage(msg, true);
       }
     }
 
     async function login() {
-      const tokenFromInput = (byId("accessToken").value || "").trim();
-      if (tokenFromInput) {
-        state.token = tokenFromInput;
-        sessionStorage.setItem(TOKEN_SESSION_KEY, state.token);
-        state.me = await api("/users/me");
-        await renderMenu();
-        show("menuScreen");
-        byId("loginMsg").textContent = "Sesion iniciada con token.";
-        return;
-      }
-
       const email = (byId("loginEmail").value || "").trim();
       const password = byId("loginPassword").value || "";
       const otp = (byId("loginOtp").value || "").trim();
@@ -363,6 +372,7 @@
       state.me = await api("/users/me");
       await renderMenu();
       show("menuScreen");
+      byId("loginEmail").value = "";
       byId("loginPassword").value = "";
       byId("loginOtp").value = "";
       byId("loginMsg").textContent = "Sesion iniciada.";
@@ -373,7 +383,9 @@
       state.token = "";
       state.me = null;
       sessionStorage.removeItem(TOKEN_SESSION_KEY);
-      byId("accessToken").value = "";
+      byId("loginEmail").value = "";
+      byId("loginPassword").value = "";
+      byId("loginOtp").value = "";
       byId("moduleBody").innerHTML = "";
       setModuleMessage("");
       try {
@@ -402,7 +414,20 @@
     byId("backToMenuBtn").addEventListener("click", () => show("menuScreen"));
 
     const saved = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
-    if (saved) byId("accessToken").value = saved;
+    if (saved) {
+      state.token = saved;
+      api("/users/me")
+        .then(async (me) => {
+          state.me = me;
+          await renderMenu();
+          show("menuScreen");
+        })
+        .catch(() => {
+          sessionStorage.removeItem(TOKEN_SESSION_KEY);
+          state.token = "";
+          show("loginScreen");
+        });
+    }
   </script>
 </body>
 </html>
