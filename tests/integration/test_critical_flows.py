@@ -621,6 +621,7 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     assert dry_data["selected"] is True
     assert dry_data["decision"] == "dry_run_selected"
     assert dry_data["execution_status"] == "dry_run"
+    assert dry_data["prediction_vs_real"] in {"no_prediction", "pending", "match", "mismatch"}
     assert dry_data["execution"] is None
 
     import apps.api.app.api.ops as ops_api
@@ -667,6 +668,7 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     assert exec_data["selected"] is True
     assert exec_data["decision"] == "executed_test_order"
     assert exec_data["execution_status"] == "executed"
+    assert exec_data["prediction_vs_real"] in {"no_prediction", "pending", "match", "mismatch"}
     assert exec_data["execution"]["sent"] is True
 
 
@@ -850,6 +852,7 @@ def test_auto_pick_report_last_2_hours(client, monkeypatch):
     assert "decision" in row
     assert "bought" in row
     assert "reason" in row
+    assert row["prediction_vs_real"] in {"no_prediction", "pending", "match", "mismatch"}
 
 
 def test_admin_exit_tick_idempotency_deduplicates_processing(client, monkeypatch):

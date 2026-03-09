@@ -161,6 +161,11 @@
       return [
         `execution_status: ${out.execution_status || "-"}`,
         `decision: ${out.decision || "-"}`,
+        `prediction_vs_real: ${out.prediction_vs_real || "-"}`,
+        `predicted_hit_pct: ${out.predicted_hit_pct ?? "-"}`,
+        `predicted_positive: ${out.predicted_positive ?? "-"}`,
+        `outcome_status: ${out.outcome_status || "-"}`,
+        `realized_hit: ${out.realized_hit ?? "-"}`,
         `selected: ${String(!!out.selected)}`,
         `symbol: ${out.selected_symbol || "-"}`,
         `side: ${out.selected_side || "-"}`,

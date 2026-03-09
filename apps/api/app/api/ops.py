@@ -350,6 +350,73 @@ def _resolve_auto_pick_execution_status(response: dict) -> str:
     return "not_selected"
 
 
+def _resolve_prediction_vs_real_state(
+    *,
+    predicted_positive: Optional[bool],
+    outcome_status: Optional[str],
+    realized_hit: Optional[bool],
+) -> str:
+    if predicted_positive is None:
+        return "no_prediction"
+    if str(outcome_status or "").lower() != "labeled" or realized_hit is None:
+        return "pending"
+    return "match" if bool(predicted_positive) == bool(realized_hit) else "mismatch"
+
+
+def _attach_prediction_vs_real(
+    *,
+    db: Session,
+    response: dict,
+) -> None:
+    predicted_hit_pct = response.get("selected_learning_prob_hit_pct")
+    if predicted_hit_pct is None:
+        predicted_hit_pct = response.get("top_candidate_learning_prob_hit_pct")
+
+    predicted_positive: Optional[bool] = None
+    if predicted_hit_pct is not None:
+        try:
+            predicted_positive = float(predicted_hit_pct) >= 50.0
+            predicted_hit_pct = round(float(predicted_hit_pct), 2)
+        except Exception:
+            predicted_positive = None
+            predicted_hit_pct = None
+
+    outcome_status: Optional[str] = None
+    realized_hit: Optional[bool] = None
+    decision_id = str(response.get("learning_decision_id") or "").strip()
+    if decision_id:
+        outcomes = (
+            db.execute(
+                select(LearningDecisionOutcome)
+                .where(LearningDecisionOutcome.decision_id == decision_id)
+                .order_by(LearningDecisionOutcome.horizon_minutes.asc())
+            )
+            .scalars()
+            .all()
+        )
+        chosen = None
+        for o in outcomes:
+            if chosen is None:
+                chosen = o
+            if str(o.outcome_status or "").lower() == "labeled":
+                chosen = o
+                break
+        if chosen is not None:
+            outcome_status = chosen.outcome_status
+            if str(chosen.outcome_status or "").lower() == "labeled":
+                realized_hit = chosen.hit
+
+    response["predicted_hit_pct"] = predicted_hit_pct
+    response["predicted_positive"] = predicted_positive
+    response["outcome_status"] = outcome_status
+    response["realized_hit"] = realized_hit
+    response["prediction_vs_real"] = _resolve_prediction_vs_real_state(
+        predicted_positive=predicted_positive,
+        outcome_status=outcome_status,
+        realized_hit=realized_hit,
+    )
+
+
 def _require_idempotency_for_auto_pick_execution(
     *,
     payload: PretradeAutoPickRequest,
@@ -2106,6 +2173,14 @@ def _auto_pick_from_scan(
         except Exception:
             # Learning must never block trading decisions.
             pass
+        try:
+            _attach_prediction_vs_real(db=db, response=response)
+        except Exception:
+            response["predicted_hit_pct"] = None
+            response["predicted_positive"] = None
+            response["outcome_status"] = None
+            response["realized_hit"] = None
+            response["prediction_vs_real"] = "no_prediction"
         return response
 
     if not universe:
@@ -3227,12 +3302,48 @@ def auto_pick_report(
         .all()
     )
 
-    out_rows = []
+    parsed_rows: list[tuple[AuditLog, dict]] = []
+    decision_ids: set[str] = set()
     for r in rows:
         try:
             details = json.loads(r.details) if r.details else {}
         except Exception:
             details = {}
+        parsed_rows.append((r, details))
+        decision_id = str(details.get("learning_decision_id") or "").strip()
+        if decision_id:
+            decision_ids.add(decision_id)
+
+    outcome_by_decision: dict[str, LearningDecisionOutcome] = {}
+    if decision_ids:
+        outcomes = (
+            db.execute(
+                select(LearningDecisionOutcome).where(
+                    LearningDecisionOutcome.decision_id.in_(decision_ids)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for o in outcomes:
+            key = str(o.decision_id or "").strip()
+            if not key:
+                continue
+            prev = outcome_by_decision.get(key)
+            if prev is None:
+                outcome_by_decision[key] = o
+                continue
+            prev_labeled = str(prev.outcome_status or "").lower() == "labeled"
+            new_labeled = str(o.outcome_status or "").lower() == "labeled"
+            if (not prev_labeled and new_labeled) or (
+                prev.horizon_minutes is not None
+                and o.horizon_minutes is not None
+                and int(o.horizon_minutes) < int(prev.horizon_minutes)
+            ):
+                outcome_by_decision[key] = o
+
+    out_rows = []
+    for r, details in parsed_rows:
         row_direction = str(details.get("requested_direction") or "LONG").upper().strip()
         if direction_norm != "ALL" and row_direction != direction_norm:
             continue
@@ -3272,6 +3383,28 @@ def auto_pick_report(
         top_candidate_trend_score_4h = details.get("top_candidate_trend_score_4h")
         top_candidate_trend_score_1h = details.get("top_candidate_trend_score_1h")
         top_candidate_micro_trend_15m = details.get("top_candidate_micro_trend_15m")
+        decision_id = str(details.get("learning_decision_id") or "").strip()
+        predicted_hit_pct = details.get("selected_learning_prob_hit_pct")
+        if predicted_hit_pct is None:
+            predicted_hit_pct = details.get("top_candidate_learning_prob_hit_pct")
+        predicted_positive = None
+        if predicted_hit_pct is not None:
+            try:
+                predicted_hit_pct = round(float(predicted_hit_pct), 2)
+                predicted_positive = float(predicted_hit_pct) >= 50.0
+            except Exception:
+                predicted_hit_pct = None
+                predicted_positive = None
+        outcome_row = outcome_by_decision.get(decision_id) if decision_id else None
+        outcome_status = outcome_row.outcome_status if outcome_row is not None else None
+        realized_hit = None
+        if outcome_row is not None and str(outcome_status or "").lower() == "labeled":
+            realized_hit = outcome_row.hit
+        prediction_vs_real = _resolve_prediction_vs_real_state(
+            predicted_positive=predicted_positive,
+            outcome_status=outcome_status,
+            realized_hit=realized_hit,
+        )
         out_rows.append(
             AutoPickReportItemOut(
                 timestamp=created_at.isoformat(),
@@ -3301,6 +3434,11 @@ def auto_pick_report(
                 avg_score_rules=details.get("avg_score_rules"),
                 avg_score_market=details.get("avg_score_market"),
                 market_regime=details.get("selected_market_regime"),
+                predicted_hit_pct=predicted_hit_pct,
+                predicted_positive=predicted_positive,
+                outcome_status=outcome_status,
+                realized_hit=realized_hit,
+                prediction_vs_real=prediction_vs_real,
                 decision=decision,
                 reason=reason,
                 scanned_assets=int(details.get("scanned_assets") or 0),

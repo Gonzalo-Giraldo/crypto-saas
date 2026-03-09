@@ -259,6 +259,11 @@ class PretradeAutoPickOut(BaseModel):
     avg_score_rules: Optional[float] = None
     avg_score_market: Optional[float] = None
     decision: str
+    predicted_hit_pct: Optional[float] = None
+    predicted_positive: Optional[bool] = None
+    outcome_status: Optional[str] = None
+    realized_hit: Optional[bool] = None
+    prediction_vs_real: Optional[str] = None
     top_failed_checks: list[str] = Field(default_factory=list)
     execution: Optional[dict] = None
     scan: PretradeScanOut

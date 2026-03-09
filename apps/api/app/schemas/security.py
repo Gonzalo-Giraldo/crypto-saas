@@ -275,6 +275,11 @@ class AutoPickReportItemOut(BaseModel):
     avg_score_rules: Optional[float] = None
     avg_score_market: Optional[float] = None
     market_regime: Optional[str] = None
+    predicted_hit_pct: Optional[float] = None
+    predicted_positive: Optional[bool] = None
+    outcome_status: Optional[str] = None
+    realized_hit: Optional[bool] = None
+    prediction_vs_real: Optional[str] = None
     decision: str
     reason: str
     scanned_assets: int = 0
