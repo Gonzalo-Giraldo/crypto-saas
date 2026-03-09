@@ -246,6 +246,49 @@ def test_auth_normalize_otp_keeps_only_digits(client):
     assert auth_routes._normalize_otp("abc12 3x4-56") == "123456"
 
 
+def test_auth_2fa_login_bypass_until_future_allows_login_without_otp(client, monkeypatch):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    setup = client.post("/auth/2fa/setup", headers=_auth(token))
+    assert setup.status_code == 200, setup.text
+    secret = setup.json()["secret"]
+    verify = client.post(
+        "/auth/2fa/verify-enable",
+        headers=_auth(token),
+        json={"otp": pyotp.TOTP(secret).now()},
+    )
+    assert verify.status_code == 200, verify.text
+
+    import apps.api.app.routes.auth as auth_routes
+
+    monkeypatch.setattr(auth_routes.settings, "AUTH_2FA_LOGIN_ENABLED", False)
+    monkeypatch.setattr(auth_routes.settings, "AUTH_2FA_TEMP_DISABLE_UNTIL_UTC", "2999-01-01T00:00:00Z")
+
+    no_otp = _login(client, "trader@test.com", "TraderPass123!")
+    assert no_otp.status_code == 200, no_otp.text
+
+
+def test_auth_2fa_login_bypass_expired_still_requires_otp(client, monkeypatch):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    setup = client.post("/auth/2fa/setup", headers=_auth(token))
+    assert setup.status_code == 200, setup.text
+    secret = setup.json()["secret"]
+    verify = client.post(
+        "/auth/2fa/verify-enable",
+        headers=_auth(token),
+        json={"otp": pyotp.TOTP(secret).now()},
+    )
+    assert verify.status_code == 200, verify.text
+
+    import apps.api.app.routes.auth as auth_routes
+
+    monkeypatch.setattr(auth_routes.settings, "AUTH_2FA_LOGIN_ENABLED", False)
+    monkeypatch.setattr(auth_routes.settings, "AUTH_2FA_TEMP_DISABLE_UNTIL_UTC", "2000-01-01T00:00:00Z")
+
+    no_otp = _login(client, "trader@test.com", "TraderPass123!")
+    assert no_otp.status_code == 401
+    assert no_otp.json()["detail"] == "OTP required"
+
+
 def test_exchange_secrets_pretrade_and_test_orders(client, monkeypatch):
     token = _token(client, "trader@test.com", "TraderPass123!")
 

@@ -166,6 +166,27 @@ def _normalize_otp(value: Optional[str]) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
+def _is_2fa_login_temporarily_disabled() -> bool:
+    """
+    Temporary bypass switch for login OTP checks.
+    - Fail-closed on malformed date values.
+    - If disabled with no end date, bypass remains active (not recommended).
+    """
+    if settings.AUTH_2FA_LOGIN_ENABLED:
+        return False
+    raw_until = str(settings.AUTH_2FA_TEMP_DISABLE_UNTIL_UTC or "").strip()
+    if not raw_until:
+        return True
+    try:
+        normalized = raw_until.replace("Z", "+00:00")
+        until_dt = datetime.fromisoformat(normalized)
+    except Exception:
+        return False
+    if until_dt.tzinfo is None:
+        until_dt = until_dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) <= until_dt.astimezone(timezone.utc)
+
+
 def _is_password_expired(user: User) -> bool:
     if not settings.ENFORCE_PASSWORD_MAX_AGE:
         return False
@@ -252,7 +273,8 @@ def login(
             detail="2FA must be enabled for this account",
         )
 
-    if user_2fa and user_2fa.enabled:
+    skip_login_2fa = _is_2fa_login_temporarily_disabled()
+    if user_2fa and user_2fa.enabled and not skip_login_2fa:
         otp_normalized = _normalize_otp(otp)
         if not otp_normalized:
             _record_login_failure(username_norm, client_ip)
@@ -301,7 +323,10 @@ def login(
         user_id=user.id,
         entity_type="user",
         entity_id=user.id,
-        details={"email": user.email},
+        details={
+            "email": user.email,
+            "login_2fa_bypassed": bool(skip_login_2fa),
+        },
     )
     db.commit()
 
