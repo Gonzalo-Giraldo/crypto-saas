@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     AUTH_LOGIN_RATE_LIMIT_ENABLED: bool = True
     AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 300
     AUTH_LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = 7
+    AUTH_TOTP_VALID_WINDOW: int = 2
     ENFORCE_2FA_FOR_ADMINS: bool = False
     ENFORCE_2FA_EMAILS: str = ""
     SUPERUSER_EMAILS: str = "gonzalogiraldo@yahoo.com"

@@ -149,6 +149,18 @@ def _enforced_2fa_emails() -> set[str]:
     }
 
 
+def _totp_valid_window() -> int:
+    """
+    OTP tolerance in 30-second steps.
+    Clamp to a safe range to avoid accidental overexposure.
+    """
+    try:
+        configured = int(settings.AUTH_TOTP_VALID_WINDOW)
+    except Exception:
+        configured = 1
+    return max(0, min(configured, 3))
+
+
 def _is_password_expired(user: User) -> bool:
     if not settings.ENFORCE_PASSWORD_MAX_AGE:
         return False
@@ -245,7 +257,7 @@ def login(
 
         is_valid_otp = pyotp.TOTP(user_2fa.secret).verify(
             otp,
-            valid_window=1,
+            valid_window=_totp_valid_window(),
         )
         if not is_valid_otp:
             _record_login_failure(username_norm, client_ip)

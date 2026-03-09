@@ -223,6 +223,20 @@ def test_auth_and_2fa_flow(client):
     assert "access_token" in with_otp.json()
 
 
+def test_auth_totp_window_clamps_to_safe_range(client, monkeypatch):
+    _ = client
+    import apps.api.app.routes.auth as auth_routes
+
+    monkeypatch.setattr(auth_routes.settings, "AUTH_TOTP_VALID_WINDOW", -10)
+    assert auth_routes._totp_valid_window() == 0
+
+    monkeypatch.setattr(auth_routes.settings, "AUTH_TOTP_VALID_WINDOW", 2)
+    assert auth_routes._totp_valid_window() == 2
+
+    monkeypatch.setattr(auth_routes.settings, "AUTH_TOTP_VALID_WINDOW", 99)
+    assert auth_routes._totp_valid_window() == 3
+
+
 def test_exchange_secrets_pretrade_and_test_orders(client, monkeypatch):
     token = _token(client, "trader@test.com", "TraderPass123!")
 
