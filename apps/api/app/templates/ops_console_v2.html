@@ -364,11 +364,13 @@
       const password = byId("loginPassword").value || "";
       const otp = (byId("loginOtp").value || "").trim();
       if (!email || !password) throw new Error("email y password son requeridos");
+      const otpDigits = otp.replace(/\D/g, "");
+      if (otp && otpDigits.length !== 6) throw new Error("OTP debe tener 6 digitos");
 
       const body = new URLSearchParams();
       body.set("username", email);
       body.set("password", password);
-      if (otp) body.set("otp", otp);
+      if (otpDigits) body.set("otp", otpDigits);
       const res = await fetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -386,6 +388,7 @@
       byId("loginEmail").value = "";
       byId("loginPassword").value = "";
       byId("loginOtp").value = "";
+      byId("loginMsg").className = "ok";
       byId("loginMsg").textContent = "Sesion iniciada.";
     }
 
@@ -413,12 +416,25 @@
     }
 
     byId("loginBtn").addEventListener("click", async () => {
+      const btn = byId("loginBtn");
       try {
-        byId("loginMsg").className = "ok";
+        btn.disabled = true;
+        btn.textContent = "Validando...";
+        byId("loginMsg").className = "muted";
+        byId("loginMsg").textContent = "Validando credenciales...";
         await login();
       } catch (e) {
         byId("loginMsg").className = "bad";
-        byId("loginMsg").textContent = String(e.message || e);
+        const raw = String(e.message || e);
+        const low = raw.toLowerCase();
+        if (low.includes("invalid otp")) {
+          byId("loginMsg").textContent = "OTP invalido. Verifica codigo actual, hora automatica del telefono o resetea 2FA.";
+        } else {
+          byId("loginMsg").textContent = raw;
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Ingresar";
       }
     });
     byId("logoutBtn").addEventListener("click", logout);
