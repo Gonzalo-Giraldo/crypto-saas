@@ -237,6 +237,15 @@ def test_auth_totp_window_clamps_to_safe_range(client, monkeypatch):
     assert auth_routes._totp_valid_window() == 3
 
 
+def test_auth_normalize_otp_keeps_only_digits(client):
+    _ = client
+    import apps.api.app.routes.auth as auth_routes
+
+    assert auth_routes._normalize_otp(" 123 456 ") == "123456"
+    assert auth_routes._normalize_otp("123-456") == "123456"
+    assert auth_routes._normalize_otp("abc12 3x4-56") == "123456"
+
+
 def test_exchange_secrets_pretrade_and_test_orders(client, monkeypatch):
     token = _token(client, "trader@test.com", "TraderPass123!")
 

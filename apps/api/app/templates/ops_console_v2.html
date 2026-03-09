@@ -41,9 +41,9 @@
       <div class="muted">Pantalla 1: ingreso al aplicativo</div>
       <div class="col" style="margin-top:10px">
         <div class="row">
-          <input id="loginEmail" name="ops_email" type="email" placeholder="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
-          <input id="loginPassword" name="ops_password" type="password" placeholder="password" autocomplete="off" />
-          <input id="loginOtp" name="ops_otp" placeholder="otp/token (opcional)" autocomplete="off" />
+          <input id="loginEmail" name="ops_email_field" type="text" inputmode="email" placeholder="email" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" readonly data-lpignore="true" />
+          <input id="loginPassword" name="ops_password_field" type="password" placeholder="password" autocomplete="new-password" />
+          <input id="loginOtp" name="ops_otp_field" placeholder="otp/token" autocomplete="one-time-code" inputmode="numeric" />
         </div>
         <div class="row">
           <button id="loginBtn">Ingresar</button>
@@ -423,13 +423,18 @@
     });
     byId("logoutBtn").addEventListener("click", logout);
     byId("backToMenuBtn").addEventListener("click", () => show("menuScreen"));
-    byId("loginEmail").addEventListener("focus", () => {
+    function unlockLoginEmail() {
       const input = byId("loginEmail");
+      if (input && input.hasAttribute("readonly")) {
+        input.removeAttribute("readonly");
+      }
       if (input && !input.dataset.focused && String(input.value || "").includes("@")) {
         input.value = "";
       }
       if (input) input.dataset.focused = "1";
-    });
+    }
+    byId("loginEmail").addEventListener("pointerdown", unlockLoginEmail);
+    byId("loginEmail").addEventListener("focus", unlockLoginEmail);
 
     const saved = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
     if (saved) {

@@ -161,6 +161,11 @@ def _totp_valid_window() -> int:
     return max(0, min(configured, 3))
 
 
+def _normalize_otp(value: Optional[str]) -> str:
+    # Accept user input with spaces or separators; keep digits only.
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
 def _is_password_expired(user: User) -> bool:
     if not settings.ENFORCE_PASSWORD_MAX_AGE:
         return False
@@ -248,7 +253,8 @@ def login(
         )
 
     if user_2fa and user_2fa.enabled:
-        if not otp:
+        otp_normalized = _normalize_otp(otp)
+        if not otp_normalized:
             _record_login_failure(username_norm, client_ip)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -256,7 +262,7 @@ def login(
             )
 
         is_valid_otp = pyotp.TOTP(user_2fa.secret).verify(
-            otp,
+            otp_normalized,
             valid_window=_totp_valid_window(),
         )
         if not is_valid_otp:
