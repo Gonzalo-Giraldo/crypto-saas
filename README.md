@@ -16,6 +16,7 @@ Backend SaaS (FastAPI + PostgreSQL) for conservative crypto trading operations w
   - `docs/06_revision_modular_iterativa.md`
   - `docs/runbook_disaster_recovery.md`
   - `docs/registro_operacion_diaria.md`
+  - `docs/metodologia_learning.md`
 
 ## Stack
 - FastAPI
@@ -115,6 +116,7 @@ pytest -q tests/integration
 - `POST /ops/admin/exit/tick` (admin, evaluates open positions and auto-closes when exit rules trigger)
 - Both admin tick endpoints accept optional `user_email` query param to scope execution to a single user during controlled tests.
 - `GET /ops/admin/learning/status` (admin)
+- `GET /ops/admin/learning/health` (admin, salud temporal y experiencia acumulada)
 - `GET /ops/admin/learning/dataset` (admin)
 - `GET /ops/admin/learning/suggestion-report` (admin, sugerencia ML vs resultado real)
 - `POST /ops/admin/learning/label` (admin)
@@ -256,6 +258,7 @@ pytest -q tests/integration
   - labels outcomes by horizon (`horizon_minutes`),
   - supports retention and hourly rollups for model-ready datasets.
   - conservative decision blend: `rules/math 90%` + `learning 10%` (configurable).
+  - metodologia formal documentada en `docs/metodologia_learning.md`.
 - `exit` check now applies strategy-specific exit triggers:
   - stop loss / take profit hit
   - max holding time by strategy
