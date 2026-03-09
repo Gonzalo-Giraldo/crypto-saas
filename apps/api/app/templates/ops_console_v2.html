@@ -310,13 +310,11 @@
           return;
         }
         if (moduleKey === "execution") {
-          const b = await api("/ops/execution/binance/account-status");
           byId("moduleBody").innerHTML = `
             <div class="grid">
               <div class="card">
-                <div class="muted">Exchange</div><div><strong>${esc(b.exchange)}</strong></div>
-                <div class="muted">Mode</div><div><strong>${esc(b.mode)}</strong></div>
-                <div class="muted">Balances</div><div><strong>${esc((b.balances || []).length)}</strong></div>
+                <div class="muted">Estado Binance</div>
+                <div id="execAccountStatus"><strong>Cargando...</strong></div>
               </div>
               <div class="card">
                 <div class="row" style="justify-content:space-between">
@@ -351,6 +349,18 @@
               </div>
             </div>
           `;
+          try {
+            const b = await api("/ops/execution/binance/account-status");
+            byId("execAccountStatus").innerHTML = `
+              <div class="muted">Exchange</div><div><strong>${esc(b.exchange)}</strong></div>
+              <div class="muted">Mode</div><div><strong>${esc(b.mode)}</strong></div>
+              <div class="muted">Balances</div><div><strong>${esc((b.balances || []).length)}</strong></div>
+            `;
+          } catch (err) {
+            byId("execAccountStatus").innerHTML = `
+              <div class="bad">No se pudo consultar Binance ahora (gateway/timeout). Puedes usar Auto-pick igual.</div>
+            `;
+          }
           const runBtn = byId("apRunBtn");
           runBtn.addEventListener("click", async () => {
             try {
@@ -446,7 +456,12 @@
         const low = raw.toLowerCase();
         if (low.includes("insufficient permissions")) {
           msg = "No tienes permisos para este modulo.";
-        } else if (low.includes("gateway_upstream_error") || low.includes("upstream")) {
+        } else if (
+          low.includes("gateway_upstream_error")
+          || low.includes("upstream")
+          || low.includes("read timed out")
+          || low.includes("connectionpool")
+        ) {
           msg = "No se pudo consultar Binance/IBKR en este momento. Verifica credenciales y estado del gateway.";
         }
         setModuleMessage(msg, true);
