@@ -620,6 +620,7 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     dry_data = dry_run_pick.json()
     assert dry_data["selected"] is True
     assert dry_data["decision"] == "dry_run_selected"
+    assert dry_data["execution_status"] == "dry_run"
     assert dry_data["execution"] is None
 
     import apps.api.app.api.ops as ops_api
@@ -638,7 +639,7 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     )
     execute_pick = client.post(
         "/ops/execution/pretrade/binance/auto-pick",
-        headers=_auth(token),
+        headers={**_auth(token), "X-Idempotency-Key": "autopick-exec-1"},
         json={
             "top_n": 10,
             "dry_run": False,
@@ -665,7 +666,46 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     exec_data = execute_pick.json()
     assert exec_data["selected"] is True
     assert exec_data["decision"] == "executed_test_order"
+    assert exec_data["execution_status"] == "executed"
     assert exec_data["execution"]["sent"] is True
+
+
+def test_pretrade_auto_pick_requires_idempotency_key_when_executing(client):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    saved = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert saved.status_code == 201, saved.text
+
+    resp = client.post(
+        "/ops/execution/pretrade/binance/auto-pick",
+        headers=_auth(token),
+        json={
+            "top_n": 10,
+            "dry_run": False,
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 400
+    assert "X-Idempotency-Key is required" in resp.json()["detail"]
 
 
 def test_pretrade_auto_pick_idempotency_deduplicates_processing(client, monkeypatch):
@@ -775,7 +815,7 @@ def test_auto_pick_report_last_2_hours(client, monkeypatch):
     )
     picked = client.post(
         "/ops/execution/pretrade/binance/auto-pick",
-        headers=_auth(trader_token),
+        headers={**_auth(trader_token), "X-Idempotency-Key": "autopick-report-1"},
         json={
             "top_n": 5,
             "dry_run": False,

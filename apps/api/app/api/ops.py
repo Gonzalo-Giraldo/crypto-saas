@@ -332,6 +332,37 @@ def _parse_csv_allowlist(value: str, *, upper: bool = False) -> set[str]:
     return out
 
 
+def _resolve_auto_pick_execution_status(response: dict) -> str:
+    decision = str(response.get("decision") or "").strip().lower()
+    selected = bool(response.get("selected"))
+    execution = response.get("execution")
+    if str(response.get("dry_run") or "").lower() == "true":
+        return "dry_run"
+    if decision.startswith("executed_test_order"):
+        return "executed"
+    if isinstance(execution, dict) and execution.get("error"):
+        return "execution_error"
+    if selected:
+        return "selected_not_executed"
+    return "not_selected"
+
+
+def _require_idempotency_for_auto_pick_execution(
+    *,
+    payload: PretradeAutoPickRequest,
+    idempotency_key: Optional[str],
+) -> None:
+    if bool(payload.dry_run):
+        return
+    key = str(idempotency_key or "").strip()
+    if key:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="X-Idempotency-Key is required when dry_run=false",
+    )
+
+
 def _auto_pick_real_guard_reason(
     *,
     current_user: User,
@@ -2047,6 +2078,7 @@ def _auto_pick_from_scan(
         avg_score_market = round(sum(float(a.get("score_market") or 0.0) for a in assets) / len(assets), 2)
 
     def _finalize(response: dict, *, max_spread: Optional[float] = None, max_slippage: Optional[float] = None) -> dict:
+        response["execution_status"] = _resolve_auto_pick_execution_status(response)
         try:
             selected_symbol = response.get("selected_symbol")
             selected_candidate = (
@@ -3849,6 +3881,10 @@ def pretrade_binance_auto_pick(
         current_user=current_user,
         exchange="BINANCE",
     )
+    _require_idempotency_for_auto_pick_execution(
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
     req_payload = payload.model_dump()
     cached = consume_idempotent_response(
         db,
@@ -3883,6 +3919,7 @@ def pretrade_binance_auto_pick(
             "dry_run": bool(payload.dry_run),
             "requested_direction": out.get("requested_direction", payload.direction),
             "decision": out["decision"],
+            "execution_status": out.get("execution_status"),
             "selected": out["selected"],
             "selected_symbol": out["selected_symbol"],
             "selected_side": out["selected_side"],
@@ -3948,6 +3985,10 @@ def pretrade_ibkr_auto_pick(
         current_user=current_user,
         exchange="IBKR",
     )
+    _require_idempotency_for_auto_pick_execution(
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
     req_payload = payload.model_dump()
     cached = consume_idempotent_response(
         db,
@@ -3982,6 +4023,7 @@ def pretrade_ibkr_auto_pick(
             "dry_run": bool(payload.dry_run),
             "requested_direction": out.get("requested_direction", payload.direction),
             "decision": out["decision"],
+            "execution_status": out.get("execution_status"),
             "selected": out["selected"],
             "selected_symbol": out["selected_symbol"],
             "selected_side": out["selected_side"],

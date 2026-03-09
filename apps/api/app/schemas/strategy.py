@@ -230,6 +230,7 @@ class PretradeAutoPickOut(BaseModel):
     exchange: str
     dry_run: bool
     requested_direction: str = "LONG"
+    execution_status: Optional[str] = None
     selected: bool
     selected_symbol: Optional[str] = None
     selected_side: Optional[str] = None
