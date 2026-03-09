@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     AUTH_LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = 7
     ENFORCE_2FA_FOR_ADMINS: bool = False
     ENFORCE_2FA_EMAILS: str = ""
+    SUPERUSER_EMAILS: str = "gonzalogiraldo@yahoo.com"
     PASSWORD_MAX_AGE_DAYS: int = 0
     ENFORCE_PASSWORD_MAX_AGE: bool = False
     TRADING_ENABLED_DEFAULT: bool = True

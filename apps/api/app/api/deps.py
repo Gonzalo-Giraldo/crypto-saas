@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
+from apps.api.app.core.config import settings
 from apps.api.app.db.session import get_db
 from apps.api.app.models.session_revocation import SessionRevocation
 from apps.api.app.models.revoked_token import RevokedToken
@@ -12,6 +15,17 @@ from apps.api.app.core.security import decode_token
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+def _is_superuser_email(email: str | None) -> bool:
+    if not email:
+        return False
+    privileged = {
+        e.strip().lower()
+        for e in (settings.SUPERUSER_EMAILS or "").split(",")
+        if e and e.strip()
+    }
+    return email.strip().lower() in privileged
 
 
 def _to_utc_epoch_seconds(value: datetime | None) -> int | None:
@@ -119,6 +133,8 @@ def require_role(required_role: str):
     def role_checker(
         current_user: User = Depends(get_current_user),
     ):
+        if _is_superuser_email(current_user.email):
+            return current_user
         if current_user.role != required_role:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -138,6 +154,8 @@ def require_any_role(*allowed_roles: str):
     def role_checker(
         current_user: User = Depends(get_current_user),
     ):
+        if _is_superuser_email(current_user.email):
+            return current_user
         if current_user.role not in allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

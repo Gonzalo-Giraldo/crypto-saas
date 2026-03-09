@@ -41,9 +41,9 @@
       <div class="muted">Pantalla 1: ingreso al aplicativo</div>
       <div class="col" style="margin-top:10px">
         <div class="row">
-          <input id="loginEmail" placeholder="email" />
-          <input id="loginPassword" type="password" placeholder="password" />
-          <input id="loginOtp" placeholder="otp/token (opcional)" />
+          <input id="loginEmail" name="ops_email" type="email" placeholder="email" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />
+          <input id="loginPassword" name="ops_password" type="password" placeholder="password" autocomplete="off" />
+          <input id="loginOtp" name="ops_otp" placeholder="otp/token (opcional)" autocomplete="off" />
         </div>
         <div class="row">
           <button id="loginBtn">Ingresar</button>
@@ -80,6 +80,7 @@
     const byId = (id) => document.getElementById(id);
     const state = { token: "", me: null };
     const TOKEN_SESSION_KEY = "ops_menu_token_session";
+    const SUPERUSER_EMAILS = new Set(["gonzalogiraldo@yahoo.com"]);
 
     function esc(v) {
       return String(v ?? "")
@@ -94,6 +95,16 @@
       ["loginScreen", "menuScreen", "moduleScreen"].forEach((id) => {
         byId(id).classList.toggle("hidden", id !== screenId);
       });
+    }
+
+    function isSuperuser() {
+      const email = String((state.me && state.me.email) || "").trim().toLowerCase();
+      return SUPERUSER_EMAILS.has(email);
+    }
+
+    function effectiveRole() {
+      if (isSuperuser()) return "admin";
+      return String((state.me && state.me.role) || "viewer").toLowerCase();
     }
 
     async function api(path, opts = {}) {
@@ -129,7 +140,7 @@
     }
 
     async function renderMenu() {
-      const role = (state.me && state.me.role) || "viewer";
+      const role = effectiveRole();
       byId("sessionInfo").textContent = `${state.me.email} | rol=${role}`;
       const mods = roleModules(role);
       byId("menuItems").innerHTML = mods.map((m) => `
@@ -154,7 +165,7 @@
 
       try {
         if (moduleKey === "summary") {
-          const role = String((state.me && state.me.role) || "").toLowerCase();
+          const role = effectiveRole();
           if (role === "admin" || role === "operator" || role === "viewer") {
             const d = await api("/ops/dashboard/summary?real_only=true&include_service_users=false");
             byId("moduleBody").innerHTML = `
@@ -412,6 +423,13 @@
     });
     byId("logoutBtn").addEventListener("click", logout);
     byId("backToMenuBtn").addEventListener("click", () => show("menuScreen"));
+    byId("loginEmail").addEventListener("focus", () => {
+      const input = byId("loginEmail");
+      if (input && !input.dataset.focused && String(input.value || "").includes("@")) {
+        input.value = "";
+      }
+      if (input) input.dataset.focused = "1";
+    });
 
     const saved = sessionStorage.getItem(TOKEN_SESSION_KEY) || "";
     if (saved) {

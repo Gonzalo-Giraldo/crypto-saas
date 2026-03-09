@@ -1363,6 +1363,14 @@ def test_ops_console_page_served(client):
     assert "sessionStorage" in res.text
 
 
+def test_ops_console_login_fields_disable_autofill(client):
+    res = client.get("/ops/console")
+    assert res.status_code == 200
+    assert 'id="loginEmail"' in res.text
+    assert 'autocomplete="off"' in res.text
+    assert 'name="ops_email"' in res.text
+
+
 def test_ops_dashboard_page_serves_same_console_shell(client):
     res = client.get("/ops/dashboard")
     assert res.status_code == 200
@@ -1370,6 +1378,19 @@ def test_ops_dashboard_page_serves_same_console_shell(client):
     assert "id=\"loginScreen\"" in res.text
     assert "id=\"menuScreen\"" in res.text
     assert "id=\"moduleScreen\"" in res.text
+
+
+def test_superuser_email_bypasses_admin_role_checks(client, monkeypatch):
+    import apps.api.app.api.deps as deps_mod
+
+    monkeypatch.setattr(deps_mod.settings, "SUPERUSER_EMAILS", "trader@test.com")
+    trader_token = _token(client, "trader@test.com", "TraderPass123!")
+
+    trading_control = client.get("/ops/admin/trading-control", headers=_auth(trader_token))
+    assert trading_control.status_code == 200, trading_control.text
+
+    users = client.get("/users", headers=_auth(trader_token))
+    assert users.status_code == 200, users.text
 
 
 def test_admin_can_reset_user_2fa(client):
