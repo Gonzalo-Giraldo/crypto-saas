@@ -156,6 +156,20 @@
       byId("moduleMsg").className = isError ? "bad" : "muted";
     }
 
+    function renderAutoPickSummary(out) {
+      const failed = Array.isArray(out.top_failed_checks) ? out.top_failed_checks : [];
+      return [
+        `execution_status: ${out.execution_status || "-"}`,
+        `decision: ${out.decision || "-"}`,
+        `selected: ${String(!!out.selected)}`,
+        `symbol: ${out.selected_symbol || "-"}`,
+        `side: ${out.selected_side || "-"}`,
+        `qty: ${out.selected_qty ?? "-"}`,
+        `score: ${out.selected_score ?? "-"}`,
+        `failed_checks: ${failed.length ? failed.join(", ") : "none"}`,
+      ].join("\n");
+    }
+
     async function openModule(moduleKey) {
       byId("moduleTitle").textContent = moduleLabel(moduleKey);
       byId("moduleHint").textContent = "Pantalla 3: informacion solicitada";
@@ -298,12 +312,92 @@
         if (moduleKey === "execution") {
           const b = await api("/ops/execution/binance/account-status");
           byId("moduleBody").innerHTML = `
-            <div class="card">
-              <div class="muted">Exchange</div><div><strong>${esc(b.exchange)}</strong></div>
-              <div class="muted">Mode</div><div><strong>${esc(b.mode)}</strong></div>
-              <div class="muted">Balances</div><div><strong>${esc((b.balances || []).length)}</strong></div>
+            <div class="grid">
+              <div class="card">
+                <div class="muted">Exchange</div><div><strong>${esc(b.exchange)}</strong></div>
+                <div class="muted">Mode</div><div><strong>${esc(b.mode)}</strong></div>
+                <div class="muted">Balances</div><div><strong>${esc((b.balances || []).length)}</strong></div>
+              </div>
+              <div class="card">
+                <div class="row" style="justify-content:space-between">
+                  <strong>Auto-pick rapido</strong>
+                  <span class="muted">formato legible</span>
+                </div>
+                <div class="row" style="margin-top:8px">
+                  <input id="apSymbol" value="BTCUSDT" placeholder="symbol" />
+                  <select id="apSide">
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                  </select>
+                  <input id="apQty" value="0.01" placeholder="qty" />
+                  <input id="apRR" value="1.7" placeholder="rr_estimate" />
+                </div>
+                <div class="row">
+                  <input id="apSpread" value="6" placeholder="spread_bps" />
+                  <input id="apSlippage" value="9" placeholder="slippage_bps" />
+                  <input id="apVolume" value="95000000" placeholder="volume_24h_usdt" />
+                </div>
+                <div class="row">
+                  <input id="apTrend" value="0.6" placeholder="market_trend_score" />
+                  <input id="apAtr" value="3.0" placeholder="atr_pct" />
+                  <input id="apMomentum" value="0.4" placeholder="momentum_score" />
+                </div>
+                <div class="row">
+                  <label class="muted"><input id="apDryRun" type="checkbox" checked /> dry_run</label>
+                  <input id="apIdem" placeholder="X-Idempotency-Key (obligatoria si dry_run=false)" style="min-width:340px" />
+                  <button id="apRunBtn" type="button">Ejecutar auto-pick</button>
+                </div>
+                <textarea id="apResult" class="mono" style="width:100%;min-height:110px;border:1px solid var(--line);border-radius:10px;padding:8px;margin-top:8px" placeholder="Resultado..."></textarea>
+              </div>
             </div>
           `;
+          const runBtn = byId("apRunBtn");
+          runBtn.addEventListener("click", async () => {
+            try {
+              runBtn.disabled = true;
+              const dryRun = !!byId("apDryRun").checked;
+              const payload = {
+                top_n: 10,
+                dry_run: dryRun,
+                direction: byId("apSide").value === "SELL" ? "SHORT" : "LONG",
+                candidates: [
+                  {
+                    symbol: (byId("apSymbol").value || "").trim().toUpperCase(),
+                    side: (byId("apSide").value || "BUY").trim().toUpperCase(),
+                    qty: Number(byId("apQty").value || 0),
+                    rr_estimate: Number(byId("apRR").value || 0),
+                    trend_tf: "4H",
+                    signal_tf: "1H",
+                    timing_tf: "15M",
+                    spread_bps: Number(byId("apSpread").value || 0),
+                    slippage_bps: Number(byId("apSlippage").value || 0),
+                    volume_24h_usdt: Number(byId("apVolume").value || 0),
+                    market_trend_score: Number(byId("apTrend").value || 0),
+                    atr_pct: Number(byId("apAtr").value || 0),
+                    momentum_score: Number(byId("apMomentum").value || 0),
+                  },
+                ],
+              };
+              const keyInput = (byId("apIdem").value || "").trim();
+              if (!dryRun && !keyInput) {
+                throw new Error("X-Idempotency-Key requerida cuando dry_run=false");
+              }
+              const headers = { "Content-Type": "application/json" };
+              if (keyInput) headers["X-Idempotency-Key"] = keyInput;
+              const out = await api("/ops/execution/pretrade/binance/auto-pick", {
+                method: "POST",
+                headers,
+                body: JSON.stringify(payload),
+              });
+              byId("apResult").value = renderAutoPickSummary(out);
+              setModuleMessage("Auto-pick ejecutado.");
+            } catch (err) {
+              byId("apResult").value = String(err.message || err);
+              setModuleMessage("Auto-pick con error. Revisa detalle.", true);
+            } finally {
+              runBtn.disabled = false;
+            }
+          });
           setModuleMessage("Ejecucion cargada.");
           return;
         }
