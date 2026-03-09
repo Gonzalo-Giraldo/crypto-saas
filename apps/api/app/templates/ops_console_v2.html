@@ -426,12 +426,63 @@
         }
         if (moduleKey === "learning") {
           const d = await api("/ops/admin/learning/status");
+          const h = await api("/ops/admin/learning/health?exchange=ALL");
+          const semClass = h.semaphore === "green" ? "ok" : (h.semaphore === "red" ? "bad" : "muted");
           byId("moduleBody").innerHTML = `
             <div class="grid">
               <div class="card"><div class="muted">Pending</div><div><strong>${esc(d.pending)}</strong></div></div>
               <div class="card"><div class="muted">Labeled %</div><div><strong>${esc(d.labeled_rate_pct)}</strong></div></div>
               <div class="card"><div class="muted">Expired %</div><div><strong>${esc(d.expired_rate_pct)}</strong></div></div>
               <div class="card"><div class="muted">No price %</div><div><strong>${esc(d.no_price_rate_pct)}</strong></div></div>
+            </div>
+            <div class="card">
+              <div class="row" style="justify-content:space-between">
+                <strong>Salud de aprendizaje</strong>
+                <span class="${esc(semClass)}"><strong>${esc(String(h.semaphore || "").toUpperCase())}</strong></span>
+              </div>
+              <div class="muted" style="margin-top:6px">${esc(h.summary || "")}</div>
+              <div style="margin-top:8px"><strong>Recomendaciones</strong></div>
+              <ul style="margin-top:6px">
+                ${(h.recommendations || []).map((r) => `<li>${esc(r)}</li>`).join("")}
+              </ul>
+            </div>
+            <div class="card">
+              <div class="row" style="justify-content:space-between">
+                <strong>Evolucion temporal</strong>
+                <span class="muted">horas/dias/semanas/meses/anio</span>
+              </div>
+              <table style="margin-top:8px">
+                <thead>
+                  <tr>
+                    <th>Ventana</th><th>Decisiones</th><th>Outcomes</th><th>Labeled %</th><th>Expired %</th><th>No price %</th><th>Hit %</th><th>Avg return %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${(h.windows || []).map((w) => `
+                    <tr>
+                      <td>${esc(w.label)}</td>
+                      <td>${esc(w.decisions_total)}</td>
+                      <td>${esc(w.outcomes_total)}</td>
+                      <td>${esc(w.labeled_rate_pct)}</td>
+                      <td>${esc(w.expired_rate_pct)}</td>
+                      <td>${esc(w.no_price_rate_pct)}</td>
+                      <td>${esc(w.hit_rate_pct ?? "-")}</td>
+                      <td>${esc(w.avg_return_pct ?? "-")}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+            <div class="card">
+              <strong>Acumulacion de experiencia</strong>
+              <div class="grid" style="margin-top:8px">
+                <div><div class="muted">Lifetime dias</div><div><strong>${esc((h.experience || {}).lifetime_days ?? 0)}</strong></div></div>
+                <div><div class="muted">Snapshots total</div><div><strong>${esc((h.experience || {}).snapshots_total ?? 0)}</strong></div></div>
+                <div><div class="muted">Outcomes total</div><div><strong>${esc((h.experience || {}).outcomes_total ?? 0)}</strong></div></div>
+                <div><div class="muted">Labeled total</div><div><strong>${esc((h.experience || {}).labeled_total ?? 0)}</strong></div></div>
+                <div><div class="muted">Rollups total</div><div><strong>${esc((h.experience || {}).rollup_rows_total ?? 0)}</strong></div></div>
+                <div><div class="muted">Ultimo rollup</div><div><strong class="mono">${esc((h.experience || {}).last_rollup_at || "-")}</strong></div></div>
+              </div>
             </div>
           `;
           setModuleMessage("Learning cargado.");

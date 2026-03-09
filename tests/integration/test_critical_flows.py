@@ -1563,6 +1563,25 @@ def test_learning_status_exposes_quality_rates(client):
     assert "no_price_rate_pct" in data
 
 
+def test_learning_health_exposes_time_windows_and_experience(client):
+    admin_token = _token(client, "admin@test.com", "AdminPass123!")
+
+    health = client.get("/ops/admin/learning/health?exchange=ALL", headers=_auth(admin_token))
+    assert health.status_code == 200, health.text
+    data = health.json()
+    assert data["exchange"] == "ALL"
+    assert data["semaphore"] in {"green", "yellow", "red"}
+    assert isinstance(data["recommendations"], list)
+    labels = {row["label"] for row in data["windows"]}
+    assert {"24h", "7d", "30d", "6m", "1y"}.issubset(labels)
+    exp = data["experience"]
+    assert "snapshots_total" in exp
+    assert "outcomes_total" in exp
+    assert "labeled_total" in exp
+    assert "rollup_rows_total" in exp
+    assert "lifetime_days" in exp
+
+
 def test_learning_endpoints_reject_invalid_ranges(client):
     admin_token = _token(client, "admin@test.com", "AdminPass123!")
 
@@ -1579,6 +1598,12 @@ def test_learning_endpoints_reject_invalid_ranges(client):
     )
     assert bad_rollup_refresh.status_code == 400
     assert "hours must be between" in bad_rollup_refresh.json()["detail"]
+
+    bad_health_exchange = client.get(
+        "/ops/admin/learning/health?exchange=FOREX",
+        headers=_auth(admin_token),
+    )
+    assert bad_health_exchange.status_code == 400
 
 
 def test_learning_endpoints_reject_invalid_filters(client):

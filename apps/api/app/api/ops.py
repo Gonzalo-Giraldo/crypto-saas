@@ -88,6 +88,9 @@ from apps.api.app.schemas.security import (
     LearningRetentionRunOut,
     LearningRollupOut,
     LearningRollupRowOut,
+    LearningHealthOut,
+    LearningHealthWindowOut,
+    LearningExperienceOut,
     LearningStatusOut,
     LearningSuggestionReportOut,
     LearningSuggestionReportRowOut,
@@ -5149,6 +5152,272 @@ def admin_learning_status(
         labeled_rate_pct=compute_rate(labeled_i, outcomes_total_i),
         expired_rate_pct=compute_rate(expired_i, outcomes_total_i),
         no_price_rate_pct=compute_rate(no_price_i, outcomes_total_i),
+    )
+
+
+_LEARNING_HEALTH_WINDOWS: list[tuple[str, int]] = [
+    ("24h", 24),
+    ("7d", 24 * 7),
+    ("30d", 24 * 30),
+    ("6m", 24 * 30 * 6),
+    ("1y", 24 * 365),
+]
+
+
+def _learning_health_window_metrics(
+    *,
+    db: Session,
+    tenant_id: str,
+    exchange_norm: str,
+    from_dt: datetime,
+) -> dict:
+    outcome_filters = [
+        LearningDecisionOutcome.tenant_id == tenant_id,
+        LearningDecisionOutcome.decision_ts >= from_dt,
+    ]
+    decision_filters = [
+        LearningDecisionSnapshot.tenant_id == tenant_id,
+        LearningDecisionSnapshot.decision_ts >= from_dt,
+    ]
+    if exchange_norm in {"BINANCE", "IBKR"}:
+        outcome_filters.append(LearningDecisionOutcome.exchange == exchange_norm)
+        decision_filters.append(LearningDecisionSnapshot.exchange == exchange_norm)
+
+    outcomes_total = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(*outcome_filters)
+        ).scalar_one()
+        or 0
+    )
+    pending = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(
+                *outcome_filters,
+                LearningDecisionOutcome.outcome_status == "pending",
+            )
+        ).scalar_one()
+        or 0
+    )
+    labeled = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(
+                *outcome_filters,
+                LearningDecisionOutcome.outcome_status == "labeled",
+            )
+        ).scalar_one()
+        or 0
+    )
+    expired = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(
+                *outcome_filters,
+                LearningDecisionOutcome.outcome_status == "expired",
+            )
+        ).scalar_one()
+        or 0
+    )
+    no_price = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(
+                *outcome_filters,
+                LearningDecisionOutcome.outcome_status == "no_price",
+            )
+        ).scalar_one()
+        or 0
+    )
+    decisions_total = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionSnapshot).where(*decision_filters)
+        ).scalar_one()
+        or 0
+    )
+    hit_count = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(
+                *outcome_filters,
+                LearningDecisionOutcome.outcome_status == "labeled",
+                LearningDecisionOutcome.hit.is_(True),
+            )
+        ).scalar_one()
+        or 0
+    )
+    avg_return_raw = db.execute(
+        select(func.avg(LearningDecisionOutcome.return_pct)).where(
+            *outcome_filters,
+            LearningDecisionOutcome.outcome_status == "labeled",
+            LearningDecisionOutcome.return_pct.is_not(None),
+        )
+    ).scalar_one()
+    hit_rate_pct = None
+    if labeled > 0:
+        hit_rate_pct = compute_rate(hit_count, labeled)
+    avg_return_pct = None
+    if avg_return_raw is not None:
+        avg_return_pct = round(float(avg_return_raw), 4)
+    return {
+        "decisions_total": decisions_total,
+        "outcomes_total": outcomes_total,
+        "pending": pending,
+        "labeled": labeled,
+        "expired": expired,
+        "no_price": no_price,
+        "labeled_rate_pct": compute_rate(labeled, outcomes_total),
+        "expired_rate_pct": compute_rate(expired, outcomes_total),
+        "no_price_rate_pct": compute_rate(no_price, outcomes_total),
+        "hit_rate_pct": hit_rate_pct,
+        "avg_return_pct": avg_return_pct,
+    }
+
+
+@router.get("/admin/learning/health", response_model=LearningHealthOut)
+def admin_learning_health(
+    exchange: str = "ALL",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    now = datetime.now(timezone.utc)
+    tenant = _tenant_id(current_user)
+    exchange_norm = validate_choice_param(
+        name="exchange",
+        value=exchange,
+        allowed={"ALL", "BINANCE", "IBKR"},
+    )
+
+    windows: list[LearningHealthWindowOut] = []
+    for label, hours in _LEARNING_HEALTH_WINDOWS:
+        from_dt = now - timedelta(hours=hours)
+        m = _learning_health_window_metrics(
+            db=db,
+            tenant_id=tenant,
+            exchange_norm=exchange_norm,
+            from_dt=from_dt,
+        )
+        windows.append(
+            LearningHealthWindowOut(
+                label=label,
+                hours=hours,
+                decisions_total=m["decisions_total"],
+                outcomes_total=m["outcomes_total"],
+                pending=m["pending"],
+                labeled=m["labeled"],
+                expired=m["expired"],
+                no_price=m["no_price"],
+                labeled_rate_pct=m["labeled_rate_pct"],
+                expired_rate_pct=m["expired_rate_pct"],
+                no_price_rate_pct=m["no_price_rate_pct"],
+                hit_rate_pct=m["hit_rate_pct"],
+                avg_return_pct=m["avg_return_pct"],
+            )
+        )
+
+    snapshot_filters = [LearningDecisionSnapshot.tenant_id == tenant]
+    outcome_filters = [LearningDecisionOutcome.tenant_id == tenant]
+    rollup_filters = [LearningRollupHourly.tenant_id == tenant]
+    if exchange_norm in {"BINANCE", "IBKR"}:
+        snapshot_filters.append(LearningDecisionSnapshot.exchange == exchange_norm)
+        outcome_filters.append(LearningDecisionOutcome.exchange == exchange_norm)
+        rollup_filters.append(LearningRollupHourly.exchange == exchange_norm)
+
+    snapshots_total = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionSnapshot).where(*snapshot_filters)
+        ).scalar_one()
+        or 0
+    )
+    outcomes_total = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(*outcome_filters)
+        ).scalar_one()
+        or 0
+    )
+    labeled_total = int(
+        db.execute(
+            select(func.count()).select_from(LearningDecisionOutcome).where(
+                *outcome_filters,
+                LearningDecisionOutcome.outcome_status == "labeled",
+            )
+        ).scalar_one()
+        or 0
+    )
+    rollup_rows_total = int(
+        db.execute(
+            select(func.count()).select_from(LearningRollupHourly).where(*rollup_filters)
+        ).scalar_one()
+        or 0
+    )
+
+    first_snapshot_at = db.execute(
+        select(func.min(LearningDecisionSnapshot.decision_ts)).where(*snapshot_filters)
+    ).scalar_one()
+    last_snapshot_at = db.execute(
+        select(func.max(LearningDecisionSnapshot.decision_ts)).where(*snapshot_filters)
+    ).scalar_one()
+    last_outcome_at = db.execute(
+        select(func.max(LearningDecisionOutcome.labeled_at)).where(*outcome_filters)
+    ).scalar_one()
+    last_rollup_at = db.execute(
+        select(func.max(LearningRollupHourly.updated_at)).where(*rollup_filters)
+    ).scalar_one()
+
+    lifetime_days = 0
+    if first_snapshot_at is not None:
+        dt = first_snapshot_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        lifetime_days = max(0, (now - dt.astimezone(timezone.utc)).days)
+
+    day24 = windows[0] if windows else LearningHealthWindowOut(
+        label="24h",
+        hours=24,
+        decisions_total=0,
+        outcomes_total=0,
+        pending=0,
+        labeled=0,
+        expired=0,
+        no_price=0,
+    )
+    recommendations: list[str] = []
+    semaphore = "green"
+    if day24.outcomes_total < 10:
+        semaphore = "yellow"
+        recommendations.append("Aumentar muestras recientes (24h) antes de subir peso de modelo.")
+    if day24.expired_rate_pct >= 25.0 or day24.no_price_rate_pct >= 25.0:
+        semaphore = "red"
+        recommendations.append("Reducir expirados/no_price: revisar fuentes de precio y horizonte de etiquetado.")
+    elif day24.labeled_rate_pct < 45.0:
+        semaphore = "yellow"
+        recommendations.append("Subir tasa de etiquetado ejecutando /ops/admin/learning/label con mayor frecuencia.")
+    if day24.hit_rate_pct is not None and day24.labeled >= 20 and float(day24.hit_rate_pct) < 45.0:
+        semaphore = "yellow" if semaphore != "red" else semaphore
+        recommendations.append("Calibrar reglas/modelo: hit_rate 24h bajo para muestras etiquetadas.")
+    if not recommendations:
+        recommendations.append("Salud estable. Mantener ciclo label->rollup->retention y monitoreo diario.")
+
+    summary = (
+        f"24h labeled={day24.labeled_rate_pct}% "
+        f"expired={day24.expired_rate_pct}% "
+        f"no_price={day24.no_price_rate_pct}% "
+        f"hit={day24.hit_rate_pct if day24.hit_rate_pct is not None else '-'}%"
+    )
+
+    return LearningHealthOut(
+        generated_at=now.isoformat(),
+        exchange=exchange_norm,
+        semaphore=semaphore,
+        summary=summary,
+        recommendations=recommendations,
+        windows=windows,
+        experience=LearningExperienceOut(
+            snapshots_total=snapshots_total,
+            outcomes_total=outcomes_total,
+            labeled_total=labeled_total,
+            rollup_rows_total=rollup_rows_total,
+            lifetime_days=lifetime_days,
+            first_snapshot_at=_to_utc_iso(first_snapshot_at),
+            last_snapshot_at=_to_utc_iso(last_snapshot_at),
+            last_outcome_at=_to_utc_iso(last_outcome_at),
+            last_rollup_at=_to_utc_iso(last_rollup_at),
+        ),
     )
 
 

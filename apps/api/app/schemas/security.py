@@ -436,6 +436,44 @@ class LearningStatusOut(BaseModel):
     no_price_rate_pct: float = 0.0
 
 
+class LearningHealthWindowOut(BaseModel):
+    label: str
+    hours: int
+    decisions_total: int
+    outcomes_total: int
+    pending: int
+    labeled: int
+    expired: int
+    no_price: int
+    labeled_rate_pct: float = 0.0
+    expired_rate_pct: float = 0.0
+    no_price_rate_pct: float = 0.0
+    hit_rate_pct: Optional[float] = None
+    avg_return_pct: Optional[float] = None
+
+
+class LearningExperienceOut(BaseModel):
+    snapshots_total: int
+    outcomes_total: int
+    labeled_total: int
+    rollup_rows_total: int
+    lifetime_days: int
+    first_snapshot_at: Optional[str] = None
+    last_snapshot_at: Optional[str] = None
+    last_outcome_at: Optional[str] = None
+    last_rollup_at: Optional[str] = None
+
+
+class LearningHealthOut(BaseModel):
+    generated_at: str
+    exchange: str
+    semaphore: str
+    summary: str
+    recommendations: list[str]
+    windows: list[LearningHealthWindowOut]
+    experience: LearningExperienceOut
+
+
 class LearningSuggestionReportRowOut(BaseModel):
     decision_id: str
     timestamp: str
