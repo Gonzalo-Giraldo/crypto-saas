@@ -1,5 +1,3 @@
-cd /workspace/crypto-saas
-cat > AGENTS.md <<'EOF'
 # AGENTS.md
 Operational Rules for Codex Agents
 
@@ -874,4 +872,4 @@ The role of the agent is to help complete and stabilize the remaining part of th
 The agent must not behave as if it has permission to redesign the product.
 The agent must not assume freedom to perform broad refactors.
 The agent must protect correctness, isolation, safety, and operational stability while helping close the remaining work in a controlled way.
-EOF
+
