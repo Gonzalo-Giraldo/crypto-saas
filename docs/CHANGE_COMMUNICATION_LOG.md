@@ -1,5 +1,17 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening de advisory lock semántico en auto-pick live usando conexión dedicada
+
+- Commit: 31176d6 hardening: add dedicated advisory lock connection for live auto-pick intent
+- Se reemplazó el uso de `db.execute()` para `pg_try_advisory_lock`/`pg_advisory_unlock` en `_auto_pick_from_scan` por una conexión dedicada explícita (`engine.connect()`), evitando el problema de pool affinity de SQLAlchemy tras `db.commit()` en `reserve_idempotent_intent`.
+- Ahora, en el flujo live (`dry_run=false`), la barrera semántica (tenant, usuario, exchange, símbolo, lado) es fiable a través de los commits del ORM Session: acquire y unlock ocurren siempre sobre la misma conexión física.
+- El unlock y el cierre de la conexión dedicada ocurren en `finally`, best-effort, sin enmascarar el error principal del flujo.
+- Mitigación parcial: aplica solo al flujo live bajo Postgres. En no-Postgres, el comportamiento es conservador/fail-closed (`semantic_intent_lock_requires_postgres`), no equivalente.
+- No resuelve race conditions fuera del tramo auto-pick live ni en rutas dry_run.
+- Alcance: `apps/api/app/api/ops.py` únicamente. No modifica: `idempotency.py`, `main.py`, `signals.py`, `positions.py`, `trading_controls.py`, `risk_engine.py`.
+
+---
+
 ## Hardening de idempotencia pre-dispatch en auto-pick live
 
 - Commit: 0b0e21a hardening: add pre-dispatch idempotency reservation for live auto-pick

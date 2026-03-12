@@ -116,7 +116,7 @@ Risks:
 
 - SQLite environments have no scheduler locking
 - scheduler shares process with API
-- manual endpoints can trigger same flows concurrently.
+- manual endpoints can trigger same flows concurrently (partial mitigation for live auto-pick path under PostgreSQL via semantic intent advisory lock, commit 31176d6).
 
 Operational requirement:
 
@@ -135,6 +135,7 @@ Existing protections:
 - idempotency keys for live execution
 - signal lifecycle state transitions
 - advisory lock for scheduler
+- semantic intent advisory lock in live auto-pick path (PostgreSQL only, commit 31176d6)
 - audit logging
 
 Remaining risks:
@@ -284,6 +285,8 @@ Repeated requests may execute identical flows.
 Scheduler execution and manual API actions may operate simultaneously.
 
 Exposure checks may therefore evaluate stale data.
+
+Partial mitigation: live auto-pick (`dry_run=false`) now acquires a semantic intent advisory lock (PostgreSQL only, commit 31176d6) before dispatch, preventing two concurrent live calls with the same material intent from both reaching the broker. Residual risk remains for dry-run paths and non-Postgres environments.
 
 ---
 

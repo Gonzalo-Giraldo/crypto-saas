@@ -234,6 +234,7 @@ Hardening reciente:
 
 - `open_from_signal` ahora usa un bloqueo transaccional de la fila `Signal` y comprueba la existencia de posiciones abiertas con el mismo `signal_id` antes de crear una nueva posición.
 - el flujo auto-pick valida la exposición final con la cantidad normalizada del broker (`execution_preview`), evitando discrepancia entre el cálculo preliminar y la ejecución final.
+- en auto-pick live (`dry_run=false`), se añadió una barrera semántica de intención mediante `pg_try_advisory_lock` sobre una conexión dedicada (`engine.connect()`), indexada por (tenant, usuario, exchange, símbolo, lado). El lock se adquiere antes de `reserve_idempotent_intent` y se libera en `finally` sobre la misma conexión, garantizando affinidad de conexión tras los commits del pool de SQLAlchemy. En no-Postgres: fail-closed sin equivalente real.
 
 
 ---
@@ -359,6 +360,8 @@ and may also be invoked through API calls.
 
 Multiple threads could therefore evaluate the same candidates simultaneously.
 
+Partial mitigation (commit 31176d6): the live path (`dry_run=false`) acquires a semantic advisory lock keyed by (tenant, user, exchange, symbol, side) before idempotent reservation and dispatch. Two concurrent live auto-pick calls with equivalent material intent cannot both proceed to dispatch. Dry-run and non-Postgres paths are not covered by this mechanism.
+
 ---
 
 ## 10.6 Exposure Calculation Race
@@ -431,7 +434,7 @@ The following concurrency risks remain possible:
 
 1. concurrent `open_from_signal` calls
 2. broker retries producing new orders
-3. scheduler competing with manual operations
+3. scheduler competing with manual operations (partially mitigated for live `dry_run=false` auto-pick under PostgreSQL; residual for dry-run and non-Postgres paths)
 4. exposure limits calculated from stale state
 5. SQLite environments running overlapping schedulers
 6. idempotency not enforced in dry-run flows

@@ -328,7 +328,13 @@ la protección depende del lock por tenant
 
 algunas rutas manuales y del scheduler pueden competir por el mismo estado
 
-no toda concurrencia parece resuelta con locking transaccional fino
+no toda concurrencia parece resuelta con locking transaccional fino; la barrera semántica aplica solo al flujo auto-pick live bajo Postgres
+
+Hardening reciente:
+
+- en auto-pick live (`dry_run=false`), se añadió una barrera de intención semántica usando `pg_try_advisory_lock` sobre una conexión dedicada (`engine.connect()`), indexada por (tenant, usuario, exchange, símbolo, lado). El lock se adquiere antes de `reserve_idempotent_intent` y se libera en `finally` sobre la misma conexión dedicada, garantizando correcta affinidad de conexión a pesar de los commits del pool de SQLAlchemy.
+- Bajo Postgres, esto asegura que solo una de dos ejecuciones concurrentes con la misma intención material llegue al dispatch real.
+- En no-Postgres, el flujo live retorna fail-closed explícito (`semantic_intent_lock_requires_postgres`) sin ejecutar la reserva ni el dispatch; no hay equivalente real.
 
 10. Guardas de ejecución contra broker
 
@@ -426,7 +432,7 @@ Los riesgos más sensibles que siguen abiertos son:
 
 duplicación de órdenes a nivel broker
 
-race conditions entre scheduler y acciones manuales
+race conditions entre scheduler y acciones manuales (mitigación parcial activa en auto-pick live bajo Postgres via advisory lock semántico; rutas dry_run y no-Postgres siguen sin protección equivalente)
 
 desalineación entre exposure check y qty final
 
