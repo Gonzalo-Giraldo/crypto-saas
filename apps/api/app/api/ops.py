@@ -2039,6 +2039,7 @@ def _auto_pick_from_scan(
     current_user: User,
     exchange: str,
     payload: PretradeAutoPickRequest,
+    idempotency_key: Optional[str] = None,
 ) -> dict:
     strategy = resolve_strategy_for_user_exchange(
         db=db,
@@ -4127,6 +4128,7 @@ def pretrade_binance_auto_pick(
         current_user=current_user,
         exchange="BINANCE",
         payload=payload,
+        idempotency_key=idempotency_key,
     )
     store_idempotent_response(
         db,
@@ -4231,6 +4233,7 @@ def pretrade_ibkr_auto_pick(
         current_user=current_user,
         exchange="IBKR",
         payload=payload,
+        idempotency_key=idempotency_key,
     )
     store_idempotent_response(
         db,
@@ -4361,6 +4364,7 @@ def run_auto_pick_tick_for_tenant(
                 current_user=u,
                 exchange=exchange,
                 payload=PretradeAutoPickRequest(top_n=top_n, dry_run=dry_run, direction=direction),
+                idempotency_key=None,
             )
             log_audit_event(
                 db,
