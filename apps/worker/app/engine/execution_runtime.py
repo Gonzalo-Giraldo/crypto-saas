@@ -627,6 +627,68 @@ def get_binance_account_status_for_user(user_id: str):
         db.close()
 
 
+def get_binance_spot_usdt_free_for_user(user_id: str) -> dict:
+    db = SessionLocal()
+    try:
+        _assert_binance_gateway_policy()
+        creds = get_decrypted_exchange_secret(
+            db=db,
+            user_id=user_id,
+            exchange="BINANCE",
+        )
+        if not creds:
+            raise RuntimeError("broker_status_unavailable")
+
+        try:
+            raw = _get_binance_account_status(
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+            )
+        except Exception as exc:
+            log_audit_event(
+                db,
+                action="execution.binance.spot_usdt_guard.error",
+                user_id=user_id,
+                entity_type="execution",
+                details={"error": str(exc)},
+            )
+            db.commit()
+            raise RuntimeError("broker_status_unavailable")
+
+        if not isinstance(raw, dict):
+            raise RuntimeError("broker_status_unavailable")
+
+        can_trade = bool(raw.get("canTrade", True))
+        usdt_free = None
+        for balance in (raw.get("balances") or []):
+            asset = str((balance or {}).get("asset") or "").strip().upper()
+            if asset != "USDT":
+                continue
+            try:
+                usdt_free = float((balance or {}).get("free", 0) or 0)
+            except Exception:
+                usdt_free = None
+            break
+
+        log_audit_event(
+            db,
+            action="execution.binance.spot_usdt_guard.success",
+            user_id=user_id,
+            entity_type="execution",
+            details={
+                "can_trade": can_trade,
+                "usdt_free_available": usdt_free is not None,
+            },
+        )
+        db.commit()
+        return {
+            "can_trade": can_trade,
+            "usdt_free": usdt_free,
+        }
+    finally:
+        db.close()
+
+
 def get_ibkr_account_status_for_user(user_id: str):
     db = SessionLocal()
     try:

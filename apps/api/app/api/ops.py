@@ -153,6 +153,7 @@ from apps.api.app.services.strategy_runtime_policy import (
 from apps.api.app.services.user_readiness import build_readiness_report
 from apps.worker.app.engine.execution_runtime import (
     get_binance_account_status_for_user,
+    get_binance_spot_usdt_free_for_user,
     get_ibkr_account_status_for_user,
     execute_binance_test_order_for_user,
     execute_ibkr_test_order_for_user,
@@ -2595,6 +2596,101 @@ def _auto_pick_from_scan(
                     "avg_score_market": avg_score_market,
                     "decision": "blocked_real_execution_guard",
                     "top_failed_checks": [intent_lock_reason],
+                    "execution": None,
+                    "scan": scan,
+                }, max_spread=max_spread, max_slippage=max_slippage)
+
+            guard_exchange = str(exchange or "").upper()
+            guard_side = str(selected_side or "").upper()
+            guard_market = str(execution_preview.get("market") or "").upper()
+            guard_symbol = str(selected_symbol or "").upper()
+            is_usdt_spot_symbol = guard_symbol.endswith("USDT") or "/USDT" in guard_symbol
+            broker_guard_applies = (
+                guard_exchange == "BINANCE"
+                and guard_side == "BUY"
+                and guard_market == "SPOT"
+                and is_usdt_spot_symbol
+            )
+
+            broker_guard_reason = None
+            broker_guard_required_usdt = None
+            broker_guard_usdt_free = None
+            if broker_guard_applies:
+                try:
+                    estimated_notional = float(execution_preview.get("estimated_notional") or 0.0)
+                except Exception:
+                    estimated_notional = 0.0
+
+                if estimated_notional <= 0.0:
+                    broker_guard_reason = "broker_notional_unavailable"
+                else:
+                    broker_guard_required_usdt = estimated_notional * 1.02
+                    try:
+                        broker_state = get_binance_spot_usdt_free_for_user(current_user.id)
+                    except Exception:
+                        broker_guard_reason = "broker_status_unavailable"
+                    else:
+                        if not bool(broker_state.get("can_trade", True)):
+                            broker_guard_reason = "broker_trading_disabled"
+                        else:
+                            try:
+                                broker_guard_usdt_free = float(broker_state.get("usdt_free"))
+                            except Exception:
+                                broker_guard_usdt_free = None
+                            if broker_guard_usdt_free is None or broker_guard_usdt_free < 0.0:
+                                broker_guard_reason = "broker_spot_usdt_unavailable"
+                            elif broker_guard_usdt_free < float(broker_guard_required_usdt):
+                                broker_guard_reason = "broker_spot_usdt_insufficient"
+
+            if broker_guard_reason:
+                log_audit_event(
+                    db,
+                    action="execution.blocked.broker_spot_guard",
+                    user_id=current_user.id,
+                    entity_type="execution",
+                    details={
+                        "exchange": exchange,
+                        "symbol": selected_symbol,
+                        "side": selected_side,
+                        "reason": broker_guard_reason,
+                        "estimated_notional": execution_preview.get("estimated_notional"),
+                        "required_usdt": broker_guard_required_usdt,
+                        "usdt_free": broker_guard_usdt_free,
+                    },
+                )
+                return _finalize({
+                    "exchange": exchange,
+                    "dry_run": bool(payload.dry_run),
+                    "requested_direction": payload.direction,
+                    "selected": False,
+                    "selected_symbol": None,
+                    "selected_side": None,
+                    "selected_qty": None,
+                    "selected_score": None,
+                    "selected_score_rules": None,
+                    "selected_score_market": None,
+                    "selected_trend_score": None,
+                    "selected_trend_score_1d": None,
+                    "selected_trend_score_4h": None,
+                    "selected_trend_score_1h": None,
+                    "selected_micro_trend_15m": None,
+                    "selected_market_regime": None,
+                    "selected_liquidity_state": liquidity_state,
+                    "selected_size_multiplier": round(float(size_multiplier), 4),
+                    "top_candidate_symbol": top_candidate_symbol,
+                    "top_candidate_score": (top_candidate or {}).get("score"),
+                    "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                    "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                    "top_candidate_trend_score": top_candidate_trend_score,
+                    "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                    "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                    "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                    "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                    "avg_score": avg_score,
+                    "avg_score_rules": avg_score_rules,
+                    "avg_score_market": avg_score_market,
+                    "decision": "blocked_real_execution_guard",
+                    "top_failed_checks": [broker_guard_reason],
                     "execution": None,
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
