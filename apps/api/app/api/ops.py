@@ -155,6 +155,7 @@ from apps.worker.app.engine.execution_runtime import (
     execute_binance_test_order_for_user,
     execute_ibkr_test_order_for_user,
     prepare_execution_for_user,
+    resolve_execution_quantity_preview,
 )
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -2368,13 +2369,36 @@ def _auto_pick_from_scan(
             "scan": scan,
         }, max_spread=max_spread, max_slippage=max_slippage)
 
-    selected_qty = float(selected["qty"]) * float(size_multiplier)
+    selected_qty_requested = float(selected["qty"])
+    selected_qty = selected_qty_requested * float(size_multiplier)
     if selected_qty <= 0:
-        selected_qty = float(selected["qty"])
+        selected_qty = selected_qty_requested
     if selected_side == "SELL":
         selected_qty = selected_qty * 0.35
         size_multiplier = float(size_multiplier) * 0.35
+
+    selected_qty_sized = float(selected_qty)
     selected_symbol = str(selected["symbol"])
+
+    execution_preview = resolve_execution_quantity_preview(
+        exchange=exchange,
+        symbol=selected_symbol,
+        side=selected_side,
+        requested_qty=selected_qty_sized,
+    )
+
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange=exchange,
+        symbol=selected_symbol,
+        qty=execution_preview["normalized_qty"],
+        price_estimate=execution_preview.get("price_estimate") or 0.0,
+    )
+
+    # canonical final operational qty for downstream execution path
+    selected_qty = float(execution_preview.get("normalized_qty", 0.0))
+
     execution = None
     decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
     if not payload.dry_run:
@@ -2508,6 +2532,12 @@ def _auto_pick_from_scan(
         "selected": True,
         "selected_symbol": selected_symbol,
         "selected_side": selected["side"],
+        "selected_qty_requested": round(selected_qty_requested, 8),
+        "selected_qty_sized": round(selected_qty_sized, 8),
+        "selected_qty_normalized": round(float(execution_preview.get("normalized_qty", 0.0)), 8),
+        "selected_price_estimate": execution_preview.get("price_estimate"),
+        "selected_estimated_notional": execution_preview.get("estimated_notional"),
+        "selected_qty_normalization_source": execution_preview.get("normalization_source"),
         "selected_qty": round(selected_qty, 8),
         "selected_score": selected["score"],
         "selected_score_base": selected.get("score_base"),

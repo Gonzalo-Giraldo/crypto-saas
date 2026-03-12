@@ -125,6 +125,50 @@ def prepare_execution_for_user(
         db.close()
 
 
+def resolve_execution_quantity_preview(
+    *,
+    exchange: str,
+    symbol: str,
+    side: str,
+    requested_qty: float,
+) -> dict:
+    exchange_up = str(exchange or "").upper().strip()
+    symbol_up = str(symbol or "").upper().strip()
+    side_up = str(side or "").upper().strip()
+
+    if exchange_up == "BINANCE":
+        market = "FUTURES" if side_up == "SELL" else "SPOT"
+        qty_meta = prepare_binance_market_order_quantity(
+            symbol=symbol_up,
+            requested_qty=requested_qty,
+            market=market,
+        )
+        return {
+            "exchange": exchange_up,
+            "symbol": symbol_up,
+            "side": side_up,
+            "requested_qty": float(requested_qty),
+            "normalized_qty": float(qty_meta.get("normalized_qty") or 0.0),
+            "price_estimate": float(qty_meta.get("price") or 0.0),
+            "estimated_notional": float(qty_meta.get("estimated_notional") or 0.0),
+            "normalization_source": "binance_prepare_market_qty_v1",
+            "market": qty_meta.get("market"),
+        }
+
+    # IBKR passthrough for sizing/validation alignment
+    return {
+        "exchange": exchange_up,
+        "symbol": symbol_up,
+        "side": side_up,
+        "requested_qty": float(requested_qty),
+        "normalized_qty": float(requested_qty),
+        "price_estimate": None,
+        "estimated_notional": None,
+        "normalization_source": "ibkr_passthrough_v1",
+        "market": None,
+    }
+
+
 def execute_binance_test_order_for_user(
     user_id: str,
     symbol: str,
