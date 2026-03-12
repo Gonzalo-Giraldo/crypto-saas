@@ -1,5 +1,17 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening de idempotencia pre-dispatch en auto-pick live
+
+- Commit: 0b0e21a hardening: add pre-dispatch idempotency reservation for live auto-pick
+- Se implementó una reserva idempotente pre-dispatch en auto-pick live usando la tabla IdempotencyKey.
+- Ahora, antes de despachar al broker, se reserva la intención idempotente y se bloquea la ejecución concurrente equivalente.
+- La intención se finaliza tanto en éxito como en errores controlados del dispatch, evitando dejar filas in_progress salvo en crash abrupto.
+- Mitigación parcial: filas in_progress pueden quedar stale si el proceso se interrumpe inesperadamente.
+- No resuelve duplicados a nivel broker si el identificador externo no es determinista.
+- Documentación y código alineados; mitigación activa pero no total.
+
+---
+
 ## Hardening de execution validation y duplicate prevention en open_from_signal
 
 - Estado:

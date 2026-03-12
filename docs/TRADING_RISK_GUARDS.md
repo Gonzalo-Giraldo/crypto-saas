@@ -69,10 +69,10 @@ Defensas clave:
 - tenant raíz en `users.tenant_id`
 - claim `tid` en JWT
 - validación estricta de:
-  
+
 ```text
 token.tid == user.tenant_id
-
+```
 fail-closed si hay mismatch
 
 kill-switch por tenant:
@@ -229,35 +229,34 @@ La idempotencia es una defensa crítica del sistema.
 
 Mecanismos observados:
 
-uso de IdempotencyKey
+- uso de IdempotencyKey
+- X-Idempotency-Key obligatorio cuando dry_run=false
+- caching/consumo de respuesta idempotente en endpoints relevantes
+- protección en auto-pick live
+- auditoría de respuestas
 
-X-Idempotency-Key obligatorio cuando dry_run=false
+Hardening reciente:
 
-caching/consumo de respuesta idempotente en endpoints relevantes
-
-protección en auto-pick live
-
-auditoría de respuestas
+- En auto-pick live, ahora se implementa una **reserva idempotente pre-dispatch** usando la tabla existente de `IdempotencyKey`. Esto bloquea una segunda ejecución concurrente equivalente antes del dispatch real al broker, devolviendo la respuesta previa o un error de conflicto si la intención está en progreso.
+- La intención idempotente se finaliza tanto en éxito como en errores controlados del dispatch, evitando dejar filas `in_progress` salvo en caso de crash abrupto o interrupción inesperada del proceso (limitación abierta).
 
 Archivo y funciones relacionadas:
 
-apps/api/app/api/ops.py
-
-modelo IdempotencyKey
+- apps/api/app/api/ops.py
+- modelo IdempotencyKey
 
 Riesgo mitigado:
 
-órdenes duplicadas
-
-repeticiones por retries
-
-reenvío accidental de requests
+- órdenes duplicadas
+- repeticiones por retries
+- reenvío accidental de requests
+- ejecución concurrente de auto-pick live con parámetros equivalentes
 
 Limitación actual:
 
-no todas las rutas dry_run parecen exigir idempotency key
-
-el broker puede seguir viendo reintentos como nuevas órdenes si el identificador final no es estable
+- no todas las rutas dry_run parecen exigir idempotency key
+- el broker puede seguir viendo reintentos como nuevas órdenes si el identificador final no es estable
+- filas `in_progress` pueden quedar stale si el proceso termina abruptamente antes de finalizar la intención
 
 8. Guardas de paper vs live
 
