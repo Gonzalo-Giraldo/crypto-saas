@@ -362,6 +362,8 @@ Multiple threads could therefore evaluate the same candidates simultaneously.
 
 Partial mitigation (commit 31176d6): the live path (`dry_run=false`) acquires a semantic advisory lock keyed by (tenant, user, exchange, symbol, side) before idempotent reservation and dispatch. Two concurrent live auto-pick calls with equivalent material intent cannot both proceed to dispatch. Dry-run and non-Postgres paths are not covered by this mechanism.
 
+Additional bounded mitigation (commit a32fb7a): Binance live auto-pick SPOT BUY eligible in USDT now runs a broker-side pre-dispatch guard (`can_trade` and `USDT free` vs `estimated_notional * 1.02`) with fail-closed behavior when broker state is not usable.
+
 ---
 
 ## 10.6 Exposure Calculation Race
@@ -435,10 +437,11 @@ The following concurrency risks remain possible:
 1. concurrent `open_from_signal` calls
 2. broker retries producing new orders outside hardened Binance live auto-pick or when `intent_key` is unavailable
 3. scheduler competing with manual operations (partially mitigated for live `dry_run=false` auto-pick under PostgreSQL; residual for dry-run and non-Postgres paths)
-4. exposure limits calculated from stale state
-5. SQLite environments running overlapping schedulers
-6. idempotency not enforced in dry-run flows
-7. candidate evaluation performed concurrently
+4. broker-state gating remains partial; new pre-dispatch guard is limited to Binance live SPOT BUY eligible in USDT and is not general reconciliation
+5. exposure limits calculated from stale state
+6. SQLite environments running overlapping schedulers
+7. idempotency not enforced in dry-run flows
+8. candidate evaluation performed concurrently
 
 ---
 

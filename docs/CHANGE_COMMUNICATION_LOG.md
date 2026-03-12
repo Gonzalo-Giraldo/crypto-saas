@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening de guard broker-side USDT spot en Binance auto-pick live
+
+- Commit: a32fb7a hardening: add broker-side USDT spot guard for Binance live auto-pick
+- En Binance auto-pick live, antes del dispatch real, se añadió un guard broker-side puntual para SPOT BUY elegible en USDT.
+- El guard bloquea fail-closed cuando: estado broker no disponible, `can_trade=false`, `estimated_notional` no usable, `USDT free` no usable o `USDT free < estimated_notional * 1.02`.
+- La mitigación es acotada: aplica solo a Binance live SPOT BUY elegible en USDT; no cubre IBKR, futures, SELL, dry-run ni reconciliación general broker vs estado interno.
+- Alcance mínimo: `apps/api/app/api/ops.py` y `apps/worker/app/engine/execution_runtime.py`.
+
+---
+
 ## Hardening de `client_order_id` determinista en Binance auto-pick live endurecido
 
 - Commit: 5964cac hardening: make Binance client_order_id deterministic for live auto-pick intent
