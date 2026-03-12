@@ -2626,6 +2626,7 @@ def _auto_pick_from_scan(
                         symbol=selected["symbol"],
                         side=selected["side"],
                         qty=selected_qty,
+                        intent_key=idempotency_key,
                     )
                 else:
                     execution = execute_ibkr_test_order_for_user(

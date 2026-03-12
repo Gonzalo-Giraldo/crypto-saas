@@ -4,6 +4,7 @@ import time
 import uuid
 import requests
 import re
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 
@@ -174,6 +175,7 @@ def execute_binance_test_order_for_user(
     symbol: str,
     side: str,
     qty: float,
+    intent_key: str | None = None,
 ):
     db = SessionLocal()
     try:
@@ -201,6 +203,8 @@ def execute_binance_test_order_for_user(
                 symbol=symbol,
                 side=side,
                 qty=float(qty_meta["normalized_qty"]),
+                market=market,
+                intent_key=intent_key,
             )
             _send_binance_test_order_with_retry(
                 api_key=creds["api_key"],
@@ -270,8 +274,32 @@ def _build_binance_client_order_id(
     symbol: str,
     side: str,
     qty: float,
+    market: str,
+    intent_key: str | None = None,
 ) -> str:
-    # Prefix + stable components keeps retries idempotent for the same function call.
+    key = str(intent_key or "").strip()
+    if key:
+        qty_dec = Decimal(str(qty))
+        qty_canonical = format(qty_dec, "f")
+        if "." in qty_canonical:
+            qty_canonical = qty_canonical.rstrip("0").rstrip(".")
+        if not qty_canonical:
+            qty_canonical = "0"
+        canonical = "|".join(
+            [
+                "autopick_binance_live_v1",
+                str(user_id or "").strip().lower(),
+                str(symbol or "").strip().upper(),
+                str(side or "").strip().upper(),
+                qty_canonical,
+                str(market or "").strip().upper(),
+                key,
+            ]
+        )
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return f"csi{digest[:33]}"
+
+    # Legacy behavior outside hardened live auto-pick flow.
     seed = f"{user_id}|{symbol.upper()}|{side.upper()}|{qty}|{uuid.uuid4().hex[:10]}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
     return f"cs{digest}"
