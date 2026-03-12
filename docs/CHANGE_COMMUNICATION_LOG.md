@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening de `client_order_id` determinista en Binance auto-pick live endurecido
+
+- Commit: 5964cac hardening: make Binance client_order_id deterministic for live auto-pick intent
+- En el flujo Binance auto-pick live endurecido, cuando existe `intent_key`/`X-Idempotency-Key`, el `client_order_id` ahora se deriva de forma determinista desde material canónico del intento y deja de depender de un componente aleatorio.
+- Esto reduce el riesgo de duplicados broker-side en reprocesamientos del mismo intento material dentro de ese flujo, sin cambiar el comportamiento legacy fuera de él.
+- La mitigación depende de que exista `intent_key` y no resuelve por sí sola reconciliación broker vs estado interno.
+- Alcance mínimo: `apps/worker/app/engine/execution_runtime.py` y paso explícito desde `apps/api/app/api/ops.py` en auto-pick live endurecido.
+
+---
+
 ## Hardening de advisory lock semántico en auto-pick live usando conexión dedicada
 
 - Commit: 31176d6 hardening: add dedicated advisory lock connection for live auto-pick intent

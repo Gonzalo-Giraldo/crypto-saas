@@ -136,13 +136,14 @@ Existing protections:
 - signal lifecycle state transitions
 - advisory lock for scheduler
 - semantic intent advisory lock in live auto-pick path (PostgreSQL only, commit 31176d6)
+- deterministic Binance `client_order_id` in hardened live auto-pick when `intent_key` exists (commit 5964cac)
 - audit logging
 
 Remaining risks:
 
 - `open_from_signal` concurrency puede abrir posiciones duplicadas si las filas de señal no se bloquean; se agregó hardening con `SELECT ... FOR UPDATE` y check `Position.signal_id + status == OPEN` para mitigar este vector, pero sigue siendo un mecanismo de protección aditivo.
-- `client_order_id` in Binance execution uses random UUID
-- retries may create duplicate orders at broker level
+- Binance auto-pick live endurecido ya no usa `client_order_id` aleatorio cuando existe `intent_key`, pero fuera de ese flujo se mantiene comportamiento legacy
+- retries y reprocesamientos aún pueden crear duplicados broker-side fuera del flujo Binance auto-pick live endurecido o si no existe `intent_key`
 - dry_run paths do not enforce idempotency.
 
 Impact:
@@ -164,7 +165,7 @@ Strengths:
 
 Weaknesses:
 
-- broker order id generation not deterministic
+- broker order id determinism is only partially covered; hardened Binance live auto-pick uses deterministic `client_order_id` when `intent_key` exists, but legacy/manual flows remain unchanged
 - reconciliation logic not centralized
 - exposure checks do not validate broker balances directly.
 
@@ -258,9 +259,9 @@ may open duplicate positions without row-level locking.
 
 ### 2. Broker order idempotency
 
-Broker order identifiers are not deterministic.
+Broker order identifiers are only partially deterministic.
 
-Retries may generate multiple orders.
+Hardened Binance live auto-pick now derives `client_order_id` deterministically when `intent_key` exists, but retries outside that flow may still generate multiple broker orders.
 
 ---
 

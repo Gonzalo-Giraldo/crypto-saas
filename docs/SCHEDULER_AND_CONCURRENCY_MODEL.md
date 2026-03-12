@@ -401,13 +401,13 @@ execute_binance_test_order_for_user()
 Orders use:
 
 
-client_order_id = random UUID
+deterministic `client_order_id` only in hardened Binance live auto-pick when `intent_key` exists; legacy behavior outside that flow remains non-deterministic
 
 
 If retries occur:
 
-- a second request may generate a different order ID
-- the broker may treat it as a new order.
+- outside the hardened Binance live auto-pick flow, a second request may generate a different order ID
+- the broker may still treat it as a new order when `intent_key` is unavailable or the flow remains legacy.
 
 ---
 
@@ -433,7 +433,7 @@ However:
 The following concurrency risks remain possible:
 
 1. concurrent `open_from_signal` calls
-2. broker retries producing new orders
+2. broker retries producing new orders outside hardened Binance live auto-pick or when `intent_key` is unavailable
 3. scheduler competing with manual operations (partially mitigated for live `dry_run=false` auto-pick under PostgreSQL; residual for dry-run and non-Postgres paths)
 4. exposure limits calculated from stale state
 5. SQLite environments running overlapping schedulers

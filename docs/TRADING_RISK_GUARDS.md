@@ -239,6 +239,7 @@ Hardening reciente:
 
 - En auto-pick live, ahora se implementa una **reserva idempotente pre-dispatch** usando la tabla existente de `IdempotencyKey`. Esto bloquea una segunda ejecución concurrente equivalente antes del dispatch real al broker, devolviendo la respuesta previa o un error de conflicto si la intención está en progreso.
 - La intención idempotente se finaliza tanto en éxito como en errores controlados del dispatch, evitando dejar filas `in_progress` salvo en caso de crash abrupto o interrupción inesperada del proceso (limitación abierta).
+- En Binance auto-pick live endurecido, cuando existe `intent_key`/`X-Idempotency-Key`, el `client_order_id` broker-side ahora se deriva de forma determinista desde material canónico del intento. Esto reduce el riesgo de que un reprocesamiento del mismo intento material llegue al broker con un identificador externo distinto.
 
 Archivo y funciones relacionadas:
 
@@ -255,7 +256,7 @@ Riesgo mitigado:
 Limitación actual:
 
 - no todas las rutas dry_run parecen exigir idempotency key
-- el broker puede seguir viendo reintentos como nuevas órdenes si el identificador final no es estable
+- la mitigación broker-side del `client_order_id` determinista aplica al flujo Binance auto-pick live endurecido que sí dispone de `intent_key`; fuera de ese flujo se mantiene comportamiento legacy
 - filas `in_progress` pueden quedar stale si el proceso termina abruptamente antes de finalizar la intención
 
 8. Guardas de paper vs live
