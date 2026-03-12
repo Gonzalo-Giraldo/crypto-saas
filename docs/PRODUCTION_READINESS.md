@@ -139,7 +139,7 @@ Existing protections:
 
 Remaining risks:
 
-- `open_from_signal` concurrency may open duplicate positions
+- `open_from_signal` concurrency puede abrir posiciones duplicadas si las filas de señal no se bloquean; se agregó hardening con `SELECT ... FOR UPDATE` y check `Position.signal_id + status == OPEN` para mitigar este vector, pero sigue siendo un mecanismo de protección aditivo.
 - `client_order_id` in Binance execution uses random UUID
 - retries may create duplicate orders at broker level
 - dry_run paths do not enforce idempotency.

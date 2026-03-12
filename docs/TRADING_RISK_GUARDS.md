@@ -131,6 +131,11 @@ ejecución de una señal ya usada
 
 apertura de posición desde estado inválido
 
+Hardening reciente:
+
+- `open_from_signal` en `apps/api/app/api/positions.py` ahora bloquea transaccionalmente la fila de `Signal` (`SELECT ... FOR UPDATE`) antes de validaciones y apertura.
+- en `apps/api/app/api/positions.py` se verifica la existencia de una `Position` con `signal_id` y `status == OPEN` antes de crear una posición adicional.
+
 Archivo clave:
 
 apps/api/app/api/signals.py
@@ -156,7 +161,10 @@ notional abierto por exchange
 cantidad de posiciones abiertas
 
 límites máximos configurados
+Hardening reciente:
 
+- en el pipeline auto-pick, la validación final de exposición usa `normalized_qty` calculada para el broker via `execution_preview` (Binance normaliza, IBKR passthrough). 
+- el payload de auto-pick ahora expone `selected_qty_requested`, `selected_qty_sized`, `selected_qty_normalized`, `selected_price_estimate`, `selected_estimated_notional`, `selected_qty_normalization_source` en respuesta/auditoría.
 Se usa en:
 
 pretrade checks

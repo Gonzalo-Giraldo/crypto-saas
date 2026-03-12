@@ -230,6 +230,11 @@ Idempotency is mandatory when:
 
 dry_run = false
 
+Hardening reciente:
+
+- `open_from_signal` ahora usa un bloqueo transaccional de la fila `Signal` y comprueba la existencia de posiciones abiertas con el mismo `signal_id` antes de crear una nueva posición.
+- el flujo auto-pick valida la exposición final con la cantidad normalizada del broker (`execution_preview`), evitando discrepancia entre el cálculo preliminar y la ejecución final.
+
 
 ---
 
