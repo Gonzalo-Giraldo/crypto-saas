@@ -85,13 +85,32 @@ def open_from_signal(
         return cached
 
     profile = resolve_risk_profile(db, current_user.id, current_user.email)
-    s = db.execute(select(Signal).where(Signal.id == signal_id)).scalar_one_or_none()
+    # Lock signal row to prevent concurrent open_from_signal on same signal_id.
+    s = db.execute(
+        select(Signal).where(Signal.id == signal_id).with_for_update()
+    ).scalar_one_or_none()
     if not s:
         raise HTTPException(status_code=404, detail="Signal not found")
     if s.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Cannot open another user's signal")
     if s.status != "EXECUTING":
         raise HTTPException(status_code=409, detail=f"Signal status must be EXECUTING (got {s.status})")
+
+    existing_position = (
+        db.execute(
+            select(Position).where(
+                Position.signal_id == s.id,
+                Position.status == "OPEN",
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing_position is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Position already open for this signal",
+        )
 
     if s.entry_price is None:
         raise HTTPException(status_code=400, detail="Signal missing entry_price")
