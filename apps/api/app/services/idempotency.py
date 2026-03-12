@@ -111,6 +111,138 @@ def store_idempotent_response(
         raise
 
 
+def _parse_response_json(response_json: str) -> dict:
+    try:
+        return json.loads(response_json or "{}")
+    except Exception:
+        return {}
+
+
+def reserve_idempotent_intent(
+    db: Session,
+    *,
+    user_id: str,
+    endpoint: str,
+    idempotency_key: str,
+    request_payload: dict,
+) -> dict | None:
+    if not idempotency_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Idempotency-Key is required",
+        )
+    key = str(idempotency_key or "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Idempotency-Key is required",
+        )
+    if len(key) > 128:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency key too long (max 128 chars)",
+        )
+
+    key_hash = _sha256(key)
+    request_hash = _sha256(_canonical_payload(request_payload))
+
+    row = IdempotencyKey(
+        user_id=user_id,
+        endpoint=endpoint,
+        key_hash=key_hash,
+        request_hash=request_hash,
+        response_json=json.dumps({"status": "in_progress"}),
+        status_code=102,
+    )
+    db.add(row)
+    try:
+        db.commit()
+        return None
+    except IntegrityError:
+        db.rollback()
+        existing = (
+            db.execute(
+                select(IdempotencyKey).where(
+                    IdempotencyKey.user_id == user_id,
+                    IdempotencyKey.endpoint == endpoint,
+                    IdempotencyKey.key_hash == key_hash,
+                )
+            )
+            .scalar_one_or_none()
+        )
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Idempotency reservation conflict",
+            )
+        if existing.request_hash != request_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Idempotency key already used with different payload",
+            )
+
+        existing_data = _parse_response_json(existing.response_json)
+        if existing_data.get("status") == "in_progress":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Auto-pick execution already in progress",
+            )
+
+        return existing_data
+
+
+def finalize_idempotent_intent(
+    db: Session,
+    *,
+    user_id: str,
+    endpoint: str,
+    idempotency_key: str,
+    request_payload: dict,
+    response_payload: dict,
+    status_code: int = 200,
+):
+    if not idempotency_key:
+        return
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return
+
+    key_hash = _sha256(key)
+    request_hash = _sha256(_canonical_payload(request_payload))
+    row = (
+        db.execute(
+            select(IdempotencyKey).where(
+                IdempotencyKey.user_id == user_id,
+                IdempotencyKey.endpoint == endpoint,
+                IdempotencyKey.key_hash == key_hash,
+            )
+        )
+        .scalar_one_or_none()
+    )
+    if row is None:
+        row = IdempotencyKey(
+            user_id=user_id,
+            endpoint=endpoint,
+            key_hash=key_hash,
+            request_hash=request_hash,
+            response_json=json.dumps(response_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+            status_code=status_code,
+        )
+        db.add(row)
+        db.commit()
+        return
+
+    if row.request_hash != request_hash:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Idempotency key already used with different payload",
+        )
+
+    row.response_json = json.dumps(response_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    row.status_code = status_code
+    db.commit()
+
+
 def cleanup_old_idempotency_keys(db: Session) -> int:
     max_days = max(1, int(settings.IDEMPOTENCY_KEY_MAX_AGE_DAYS))
     cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)

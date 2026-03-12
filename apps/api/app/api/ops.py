@@ -115,6 +115,8 @@ from apps.api.app.services.risk_profiles import (
 from apps.api.app.services.idempotency import (
     cleanup_old_idempotency_keys,
     consume_idempotent_response,
+    reserve_idempotent_intent,
+    finalize_idempotent_intent,
     store_idempotent_response,
 )
 from apps.api.app.services.decision_engine import (
@@ -2401,6 +2403,9 @@ def _auto_pick_from_scan(
 
     execution = None
     decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
+    idempotency_reserved = False
+    idempotency_endpoint = None
+    idempotency_request_payload = None
     if not payload.dry_run:
         enforce_exit_plan = bool(
             settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN and settings.AUTO_PICK_REAL_GUARD_ENABLED
@@ -2495,6 +2500,27 @@ def _auto_pick_from_scan(
                     "execution": {"exit_plan": None},
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
+        # Reserve idempotency intent pre-dispatch for live auto-pick
+        idempotency_endpoint = f"/ops/execution/pretrade/{exchange.lower()}/auto-pick"
+        idempotency_request_payload = {
+            "user_id": current_user.id,
+            "endpoint": idempotency_endpoint,
+            "exchange": str(exchange).upper(),
+            "symbol": selected_symbol,
+            "side": selected_side,
+            "selected_qty_normalized": float(selected_qty),
+        }
+        cached_response = reserve_idempotent_intent(
+            db=db,
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key or "",
+            request_payload=idempotency_request_payload,
+        )
+        if cached_response is not None:
+            return cached_response
+        idempotency_reserved = True
+
         try:
             if exchange == "BINANCE":
                 execution = execute_binance_test_order_for_user(
@@ -2516,6 +2542,19 @@ def _auto_pick_from_scan(
         except HTTPException as exc:
             decision = "insufficient_resources_or_execution_error"
             execution = {"error": str(exc.detail)}
+            if idempotency_reserved:
+                try:
+                    finalize_idempotent_intent(
+                        db=db,
+                        user_id=current_user.id,
+                        endpoint=idempotency_endpoint,
+                        idempotency_key=idempotency_key,
+                        request_payload=idempotency_request_payload,
+                        response_payload={"decision": decision, "execution": execution},
+                        status_code=500,
+                    )
+                except Exception:
+                    pass
 
     (
         selected_trend_score,
@@ -2525,7 +2564,7 @@ def _auto_pick_from_scan(
         selected_micro_trend_15m,
     ) = _resolve_trend_fields(selected_symbol, candidate)
 
-    return _finalize({
+    out = _finalize({
         "exchange": exchange,
         "dry_run": bool(payload.dry_run),
         "requested_direction": payload.direction,
@@ -2578,6 +2617,23 @@ def _auto_pick_from_scan(
         "execution": execution,
         "scan": scan,
     }, max_spread=max_spread, max_slippage=max_slippage)
+
+    if idempotency_reserved:
+        try:
+            finalize_idempotent_intent(
+                db=db,
+                user_id=current_user.id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=idempotency_request_payload,
+                response_payload=out,
+                status_code=200,
+            )
+        except Exception:
+            # Keep the candidate result path operational; reservation finalization is best-effort.
+            pass
+
+    return out
 
 
 def _build_strategy_checks(
