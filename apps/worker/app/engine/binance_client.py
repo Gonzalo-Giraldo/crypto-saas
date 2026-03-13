@@ -292,6 +292,8 @@ def prepare_binance_market_order_quantity(
         price = _to_decimal(_fetch_symbol_price_for_market(sym, market="FUTURES"), "0")
     else:
         price = _to_decimal(_fetch_symbol_price(sym), "0")
+    if min_notional > 0 and price <= 0:
+        raise RuntimeError(f"notional_price_unavailable minNotional={min_notional} symbol={sym} market={market_norm}")
     notional = qty_norm * price if price > 0 else Decimal("0")
     if min_notional > 0 and price > 0 and notional < min_notional:
         raise RuntimeError(
