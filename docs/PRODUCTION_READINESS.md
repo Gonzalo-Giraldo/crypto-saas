@@ -138,12 +138,14 @@ Existing protections:
 - semantic intent advisory lock in live auto-pick path (PostgreSQL only, commit 31176d6)
 - deterministic Binance `client_order_id` in hardened live auto-pick when `intent_key` exists (commit 5964cac)
 - broker-side pre-dispatch USDT spot guard for Binance live auto-pick SPOT BUY (commit a32fb7a)
+- fail-closed guard in Binance dispatcher when `_send_binance_test_order` is invoked without `client_order_id` (commit 034c41e)
 - audit logging
 
 Remaining risks:
 
 - `open_from_signal` concurrency puede abrir posiciones duplicadas si las filas de señal no se bloquean; se agregó hardening con `SELECT ... FOR UPDATE` y check `Position.signal_id + status == OPEN` para mitigar este vector, pero sigue siendo un mecanismo de protección aditivo.
 - Binance auto-pick live endurecido ya no usa `client_order_id` aleatorio cuando existe `intent_key`, pero fuera de ese flujo se mantiene comportamiento legacy
+- el guard fail-closed del dispatcher Binance protege contra invocaciones directas sin `client_order_id`, pero depende del contrato del pipeline legítimo y no reemplaza idempotency, advisory lock ni broker-side guards
 - Binance auto-pick live SPOT BUY ahora incluye un guard broker-side por `can_trade` y `USDT free` vs `estimated_notional * 1.02`, pero su cobertura es intencionalmente acotada
 - retries y reprocesamientos aún pueden crear duplicados broker-side fuera del flujo Binance auto-pick live endurecido o si no existe `intent_key`
 - dry_run paths do not enforce idempotency.
@@ -168,6 +170,7 @@ Strengths:
 Weaknesses:
 
 - broker order id determinism is only partially covered; hardened Binance live auto-pick uses deterministic `client_order_id` when `intent_key` exists, but legacy/manual flows remain unchanged
+- dispatcher hardening is only a contract guard on `_send_binance_test_order`; it blocks direct non-conforming calls without `client_order_id`, but it is not a substitute for higher-level execution controls
 - broker-side balance/trading gating is only partially covered; current guard is limited to Binance live SPOT BUY eligible in USDT and is not a general reconciliation layer
 - reconciliation logic not centralized
 - exposure checks do not validate broker balances directly.

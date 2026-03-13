@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening de guard fail-closed en dispatcher Binance por `client_order_id`
+
+- Commit: 034c41e hardening: guard Binance dispatcher against direct calls without client_order_id
+- El dispatcher Binance `_send_binance_test_order` ahora falla en modo fail-closed si es invocado sin `client_order_id`.
+- Esto refuerza el contrato del pipeline legítimo del kernel: las rutas válidas construyen `client_order_id` antes del dispatch mediante `_build_binance_client_order_id`.
+- La mitigación es acotada: protege contra llamadas directas no conformes al dispatcher Binance, pero no sustituye idempotency, advisory lock, broker guards ni reconciliación broker vs estado interno.
+- Alcance mínimo: `apps/worker/app/engine/execution_runtime.py`.
+
+---
+
 ## Inventario de hardcodes y constantes de dominio/negocio — base de trabajo futura
 
 - Tipo de entrada: análisis documental (sin cambios de código)
