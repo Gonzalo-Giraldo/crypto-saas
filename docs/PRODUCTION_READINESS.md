@@ -141,6 +141,7 @@ Existing protections:
 - fail-closed guard in Binance dispatcher when `_send_binance_test_order` is invoked without `client_order_id` (commit 034c41e)
 - fail-closed guard in IBKR dispatcher path when `send_ibkr_test_order` is invoked without explicit `order_ref` (commit c531ef2)
 - fail-closed guard in Binance quantity preparation when `min_notional > 0` but no usable price is available (commit b16cade)
+- fail-closed guard in Binance quantity preparation when symbol metadata indicates non-trading status or MARKET order type not allowed (commit e3e418f)
 - audit logging
 
 Remaining risks:
@@ -150,6 +151,7 @@ Remaining risks:
 - el guard fail-closed del dispatcher Binance protege contra invocaciones directas sin `client_order_id`, pero depende del contrato del pipeline legítimo y no reemplaza idempotency, advisory lock ni broker-side guards
 - el guard fail-closed del path IBKR protege contra invocaciones directas sin `order_ref`, pero depende del contrato del pipeline legítimo y no reemplaza idempotency, advisory lock, broker-side guards ni reconciliación
 - el fail-closed Binance para `min_notional > 0` sin precio usable evita un rechazo broker-side evitable en ese caso puntual, pero no reemplaza validaciones adicionales del exchange
+- el fail-closed Binance para estado no operativo o sin permiso MARKET usa metadata ya disponible del símbolo; si la metadata no incluye `status`/`contractStatus` u `orderTypes`, la validación no se activa; no reemplaza otras validaciones del exchange ni broker-side guards superiores
 - Binance auto-pick live SPOT BUY ahora incluye un guard broker-side por `can_trade` y `USDT free` vs `estimated_notional * 1.02`, pero su cobertura es intencionalmente acotada
 - retries y reprocesamientos aún pueden crear duplicados broker-side fuera del flujo Binance auto-pick live endurecido o si no existe `intent_key`
 - dry_run paths do not enforce idempotency.
@@ -177,6 +179,7 @@ Weaknesses:
 - dispatcher hardening is only a contract guard on `_send_binance_test_order`; it blocks direct non-conforming calls without `client_order_id`, but it is not a substitute for higher-level execution controls
 - IBKR dispatcher hardening is only a contract guard on `send_ibkr_test_order`; it blocks direct non-conforming calls without `order_ref`, but it is not a substitute for higher-level execution controls
 - Binance min-notional hardening is only a fail-closed pre-dispatch guard for missing usable price in that specific case; it is not full exchange-filter coverage
+- Binance symbol status and MARKET permission hardening is only a fail-closed pre-dispatch guard using available exchangeInfo metadata; if that metadata is absent the check does not activate; it is not full exchange-filter coverage and does not substitute broker-side guards
 - broker-side balance/trading gating is only partially covered; current guard is limited to Binance live SPOT BUY eligible in USDT and is not a general reconciliation layer
 - reconciliation logic not centralized
 - exposure checks do not validate broker balances directly.

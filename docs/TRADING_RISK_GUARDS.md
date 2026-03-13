@@ -244,6 +244,7 @@ Hardening reciente:
 - El dispatcher Binance `_send_binance_test_order` ahora exige `client_order_id` y falla en modo fail-closed si es invocado sin ese valor, reforzando el contrato del pipeline legítimo antes del dispatch al broker.
 - El path IBKR ahora exige `order_ref` explícito antes del dispatch: `send_ibkr_test_order` falla en modo fail-closed si es invocado sin ese identificador, reforzando el contrato del pipeline legítimo del kernel.
 - En Binance, `prepare_binance_market_order_quantity` ahora bloquea fail-closed si `min_notional > 0` y no hay precio usable para calcular notional, evitando llegar al broker en ese caso puntual conocido de antemano.
+- En Binance, `prepare_binance_market_order_quantity` ahora bloquea fail-closed si la metadata ya disponible del símbolo (exchangeInfo) indica que no está en estado operativo/trading o que no permite órdenes MARKET, evitando depender del rechazo posterior del broker/gateway en esos casos conocidos de antemano. Aplica solo al path Binance; la validación es condicional a la presencia de esa metadata.
 
 Archivo y funciones relacionadas:
 
@@ -264,6 +265,7 @@ Limitación actual:
 - el guard del dispatcher Binance contra ausencia de `client_order_id` protege contra llamadas directas no conformes a `_send_binance_test_order`, pero no sustituye idempotency, advisory lock ni broker guards
 - el guard del path IBKR contra ausencia de `order_ref` protege contra llamadas directas no conformes a `send_ibkr_test_order`, pero depende del contrato del pipeline legítimo y no sustituye idempotency, advisory lock, broker guards ni reconciliación broker vs estado interno
 - el fail-closed de `min_notional` sin precio usable en Binance cubre solo ese caso puntual pre-dispatch y no sustituye validaciones adicionales del exchange ni broker-side guards superiores
+- la validación fail-closed de estado operativo (status/contractStatus) y permiso MARKET (orderTypes) en Binance es condicional a la disponibilidad de esa metadata en exchangeInfo; si la metadata no la incluye, la validación no se activa; no sustituye otras validaciones del exchange ni broker-side guards superiores
 - el guard broker-side por balance aplica solo a Binance live SPOT BUY elegible en USDT; no cubre IBKR, futures, SELL, dry-run ni reconciliación general broker vs estado interno
 - filas `in_progress` pueden quedar stale si el proceso termina abruptamente antes de finalizar la intención
 

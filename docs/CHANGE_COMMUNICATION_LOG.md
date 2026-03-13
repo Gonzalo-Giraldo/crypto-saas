@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening fail-closed en Binance por estado operativo y permiso MARKET del símbolo
+
+- Commit: e3e418f hardening: fail closed on non-trading or non-market Binance symbols
+- En `prepare_binance_market_order_quantity`, usando la metadata ya disponible del símbolo (exchangeInfo), el flujo ahora bloquea en modo fail-closed antes del dispatch si el símbolo no está en estado operativo/trading o si no permite órdenes MARKET.
+- Esto evita depender del rechazo posterior del broker/gateway en casos conocidos de antemano para el path Binance.
+- La mitigación es puntual: aplica al path Binance, usa metadata ya disponible del símbolo, y no sustituye otras validaciones del exchange ni broker-side guards superiores. Si la metadata no incluye `status`/`contractStatus` u `orderTypes`, la validación no se activa (comportamiento condicionado a disponibilidad de la metadata).
+- Alcance mínimo: `apps/worker/app/engine/binance_client.py`.
+
+---
+
 ## Hardening fail-closed en Binance para `min_notional` sin precio usable
 
 - Commit: b16cade hardening: fail closed on Binance min_notional without usable price
