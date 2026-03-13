@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening fail-closed en Binance para `min_notional` sin precio usable
+
+- Commit: b16cade hardening: fail closed on Binance min_notional without usable price
+- En `prepare_binance_market_order_quantity`, si `min_notional > 0` y no hay precio usable para calcular notional, el flujo ahora bloquea en modo fail-closed antes del dispatch.
+- Esto evita depender del rechazo posterior del broker en un caso conocido de antemano para el path Binance.
+- La mitigación es puntual: no sustituye otras validaciones de filtros del exchange ni broker-side guards superiores.
+- Alcance mínimo: `apps/worker/app/engine/binance_client.py`.
+
+---
+
 ## Hardening de `order_ref` explícito en path dispatcher IBKR
 
 - Commit: c531ef2 hardening: require explicit order_ref in IBKR dispatcher path
