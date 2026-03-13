@@ -263,6 +263,26 @@ def prepare_binance_market_order_quantity(
         info = _fetch_exchange_info_symbols([sym]).get(sym)
     if not info:
         raise RuntimeError(f"Binance exchangeInfo missing for {sym}")
+
+    status_raw = info.get("status")
+    if status_raw is None:
+        status_raw = info.get("contractStatus")
+    if status_raw is not None:
+        status = str(status_raw).upper().strip()
+        if status and status != "TRADING":
+            raise RuntimeError(f"symbol_not_trading status={status} symbol={sym} market={market_norm}")
+
+    order_types_raw = info.get("orderTypes")
+    if order_types_raw is None:
+        order_types_raw = info.get("orderType")
+    order_types: set[str] = set()
+    if isinstance(order_types_raw, (list, tuple, set)):
+        order_types = {str(x).upper().strip() for x in order_types_raw if str(x).strip()}
+    elif isinstance(order_types_raw, str):
+        order_types = {s.strip().upper() for s in order_types_raw.split(",") if s.strip()}
+    if order_types and "MARKET" not in order_types:
+        raise RuntimeError(f"market_order_not_allowed orderTypes={sorted(order_types)} symbol={sym} market={market_norm}")
+
     filters = {str(f.get("filterType") or ""): f for f in info.get("filters") or [] if isinstance(f, dict)}
     lot = filters.get("MARKET_LOT_SIZE") or filters.get("LOT_SIZE") or {}
     min_qty = _to_decimal(lot.get("minQty"), "0")
