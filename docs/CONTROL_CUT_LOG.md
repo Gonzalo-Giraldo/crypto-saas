@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-08] 2026-03-13 - Cierre retroactivo de validacion dirigida (commit c206c41)
+
+- Level: 2
+- Trigger: commit de modulacion realizado antes de completar revision formal final de diff
+- Scope: `apps/api/app/api/ops.py` (rama broker-side guard en auto-pick) y trazabilidad metodologica
+- Risk reviewed: posible desalineacion semantica del helper extraido y cierre incompleto del proceso de control
+- Evidence checked: verificacion dirigida de reason codes, decision `blocked_real_execution_guard`, `top_failed_checks=[broker_guard_reason]`, y payload de auditoria `execution.blocked.broker_spot_guard`
+- Decision: Continue with condition
+- Condition (if any): no abrir nuevo micro-paso hasta cerrar esta correccion encima con evidencia explicita y decision final
+- Next micro-step: cerrar iteracion c206c41 sin cambios de logica de producto
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-13-07] 2026-03-13 - Entorno habilitado + smoke subset prioritario ejecutado
 
 - Level: 2
