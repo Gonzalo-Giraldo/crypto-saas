@@ -44,6 +44,20 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-07] 2026-03-13 - Entorno habilitado + smoke subset prioritario ejecutado
+
+- Level: 2
+- Trigger: execute Priority 1 before any new kernel hardening
+- Scope: test runtime enablement and 5 prioritized kernel smoke checks
+- Risk reviewed: continuing kernel changes without executable evidence
+- Evidence checked: Docker daemon active, Python 3.11 container test run (pytest), manual smoke checks for 5 controls
+- Decision: Continue with condition
+- Condition (if any): keep kernel changes as single micro-hardening steps with smoke re-run after each change
+- Next micro-step: choose one kernel residual (priority-1) and execute one reversible micro-hardening only
+- Owner: engineering/codex session
+
+---
+
 ## [CUT-2026-03-13-06] 2026-03-13 - Priorización de fases: entorno / kernel / constantes
 
 - Level: 2
