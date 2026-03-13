@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-05] 2026-03-13 - Entorno de pruebas + smoke subset prioritario (habilitacion)
+
+- Level: 2
+- Trigger: need executable evidence before any new kernel hardening
+- Scope: test environment readiness and prioritized kernel smoke subset execution capability
+- Risk reviewed: inability to validate hardened behavior due runtime/tooling blockers
+- Evidence checked: local venv dependency install, pytest startup error under Python 3.9, container-based fallback attempt blocked by Docker daemon not running
+- Decision: Continue with condition
+- Condition (if any): no new kernel hardening until Python 3.11-capable test run is available and smoke subset is executed
+- Next micro-step: fix runtime layer first (use Python 3.11 interpreter or enable Docker daemon), then run prioritized smoke checks in order
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-13-04] 2026-03-13 - Consolidacion Kernel S3 (smoke evidence check)
 
 - Level: 2
