@@ -365,6 +365,9 @@ def _send_binance_test_order(
     client_order_id: str | None = None,
     market: str = "SPOT",
 ) -> None:
+    if not client_order_id:
+        raise RuntimeError("kernel_dispatch_guard: missing client_order_id")
+
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if not gateway_enabled:
         send_test_order(
