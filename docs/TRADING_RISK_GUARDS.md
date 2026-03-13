@@ -242,6 +242,7 @@ Hardening reciente:
 - En Binance auto-pick live endurecido, cuando existe `intent_key`/`X-Idempotency-Key`, el `client_order_id` broker-side ahora se deriva de forma determinista desde material canónico del intento. Esto reduce el riesgo de que un reprocesamiento del mismo intento material llegue al broker con un identificador externo distinto.
 - En Binance auto-pick live, se añadió un guard broker-side puntual pre-dispatch para SPOT BUY elegible en USDT: bloquea fail-closed si el estado broker no está usable, `can_trade=false`, `estimated_notional` no es usable, no hay `USDT free` usable o `USDT free` no alcanza `estimated_notional * 1.02`.
 - El dispatcher Binance `_send_binance_test_order` ahora exige `client_order_id` y falla en modo fail-closed si es invocado sin ese valor, reforzando el contrato del pipeline legítimo antes del dispatch al broker.
+- El path IBKR ahora exige `order_ref` explícito antes del dispatch: `send_ibkr_test_order` falla en modo fail-closed si es invocado sin ese identificador, reforzando el contrato del pipeline legítimo del kernel.
 
 Archivo y funciones relacionadas:
 
@@ -260,6 +261,7 @@ Limitación actual:
 - no todas las rutas dry_run parecen exigir idempotency key
 - la mitigación broker-side del `client_order_id` determinista aplica al flujo Binance auto-pick live endurecido que sí dispone de `intent_key`; fuera de ese flujo se mantiene comportamiento legacy
 - el guard del dispatcher Binance contra ausencia de `client_order_id` protege contra llamadas directas no conformes a `_send_binance_test_order`, pero no sustituye idempotency, advisory lock ni broker guards
+- el guard del path IBKR contra ausencia de `order_ref` protege contra llamadas directas no conformes a `send_ibkr_test_order`, pero depende del contrato del pipeline legítimo y no sustituye idempotency, advisory lock, broker guards ni reconciliación broker vs estado interno
 - el guard broker-side por balance aplica solo a Binance live SPOT BUY elegible en USDT; no cubre IBKR, futures, SELL, dry-run ni reconciliación general broker vs estado interno
 - filas `in_progress` pueden quedar stale si el proceso termina abruptamente antes de finalizar la intención
 

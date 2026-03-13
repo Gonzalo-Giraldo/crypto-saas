@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening de `order_ref` explícito en path dispatcher IBKR
+
+- Commit: c531ef2 hardening: require explicit order_ref in IBKR dispatcher path
+- El path IBKR ahora exige `order_ref` explícito antes del dispatch: `send_ibkr_test_order` falla en modo fail-closed si es invocado sin ese identificador.
+- Esto refuerza el contrato del pipeline legítimo del kernel: el flujo válido construye `order_ref` antes del dispatch y ya no depende de que el dispatcher/bridge path lo genere internamente.
+- La mitigación es acotada: protege contra llamadas directas no conformes al path IBKR, pero no sustituye idempotency, advisory lock, broker guards ni reconciliación broker vs estado interno.
+- Alcance mínimo: `apps/worker/app/engine/execution_runtime.py` y `apps/worker/app/engine/ibkr_client.py`.
+
+---
+
 ## Hardening de guard fail-closed en dispatcher Binance por `client_order_id`
 
 - Commit: 034c41e hardening: guard Binance dispatcher against direct calls without client_order_id
