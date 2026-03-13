@@ -391,8 +391,10 @@ def _send_binance_test_order(
             client_order_id=client_order_id,
             market=market,
         )
-    except Exception:
+    except Exception as exc:
         if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            raise
+        if "gateway_upstream_error status=" in str(exc or ""):
             raise
         send_test_order(
             api_key=api_key,
