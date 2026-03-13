@@ -44,6 +44,25 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-06] 2026-03-13 - Priorización de fases: entorno / kernel / constantes
+
+- Level: 2
+- Trigger: need explicit work-phase ordering to avoid dispersion across test environment, kernel hardening, and constants cleanup
+- Scope: project priorities and sequencing for next 3 weeks across three work streams (smoke subset, kernel modulación, constants audit)
+- Risk reviewed: risk of mixing incompatible work streams simultaneously; risk of deferring critical validation capability
+- Evidence checked: CONTROL_CUT_LOG.md (5 prior cuts complete), ENGINEERING_AUDIT_AND_CONTROL_POLICY.md (governance model exists), DOMAIN_CONSTANTS_AUDIT.md (analysis complete, no code changes ready), CHANGE_COMMUNICATION_LOG.md (8 hardenings documented, residuals mapped)
+- Decision: Continue with explicit phase ordering
+- Conditions:
+  1. Phase 1 (Prioridad 1): Entorno de pruebas / smoke subset — COMIENCE INMEDIATAMENTE. Blocker para fases 2 y 3. Acción: fix Python 3.11 environment (local OR Docker), ejecutar 5 smoke checks prioritarios, documentar en SMOKE_VALIDATION_RESULTS.md. Timeline: 1-2 horas
+  2. Phase 2 (Prioridad 2): Modulación del kernel — COMIENCE DESPUÉS QUE SMOKE ESTÉ VALIDADA. Continuidad lógica post-consolidación S3. Acción: 1 micro-hardening que cierre residual prioridad-1 (duplicado broker-side, error asymmetry, o partial exchange coverage). Timeline: 3-5 horas post-smoke
+  3. Phase 3 (Prioridad 3): Limpieza / constantes — BACKLOG CONTROLADO. Postergado a 1-2 semanas post-kernel. Acción: arquitectura decide sobre puntos C/D (no ready today), ejecutar Grupo B (simple) solo si arquitectura aprueba post-kernel. Timeline: decision + grouped execution post-kernel
+- Ordering rationale: Phase 1 is pure blocker (no validation capability without tests). Phase 2 follows logically (consolidation S3 done, residuals mapped, microhardening pattern proven). Phase 3 is orthogonal (analysis complete, points C/D not ready for code, can wait 2 weeks without context loss)
+- What NOT to mix: (a) do not mix smoke + kernel changes in parallel; (b) do not mix kernel + constants changes simultaneously; (c) do not treat constants{B,C,D} as single phase (are separate groups with different readiness levels)
+- Next micro-step: execute Phase 1 immediately (restore Python 3.11 test runtime and run smoke subset)
+- Owner: engineering/codex session
+
+---
+
 ## [CUT-2026-03-13-05] 2026-03-13 - Entorno de pruebas + smoke subset prioritario (habilitacion)
 
 - Level: 2
