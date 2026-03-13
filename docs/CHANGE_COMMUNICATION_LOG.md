@@ -1,5 +1,17 @@
 # CHANGE COMMUNICATION LOG
 
+## Inventario de hardcodes y constantes de dominio/negocio — base de trabajo futura
+
+- Tipo de entrada: análisis documental (sin cambios de código)
+- Documento generado: `docs/DOMAIN_CONSTANTS_AUDIT.md`
+- Contexto: se completó un análisis de las referencias a quote/funding asset (`USDT`, `BTCUSDT`, `endswith("USDT")`, etc.) y de constantes numéricas de negocio (buffers, multiplicadores, thresholds de scoring/sizing/execution) presentes en el código del sistema.
+- Resultado: inventario estructurado en categorías A/B/C/D para tipos textual (T) y numérico (N), separado por contexto Binance / IBKR / Config.
+- Los 4 puntos B de consolidación simple ya identificados (T2, T6, T7, N6) serán considerados como grupo de acción futura de bajo riesgo.
+- Los puntos C/D requieren revisión de contexto o modelo nuevo; no están planificados todavía.
+- **Este inventario NO implica cambio inmediato.** Las acciones se decidirán después, por grupos, en el momento adecuado.
+
+---
+
 ## Hardening de guard broker-side USDT spot en Binance auto-pick live
 
 - Commit: a32fb7a hardening: add broker-side USDT spot guard for Binance live auto-pick
