@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-04] 2026-03-13 - Consolidacion Kernel S3 (smoke evidence check)
+
+- Level: 2
+- Trigger: need minimal executable evidence before deciding whether to resume kernel hardening
+- Scope: kernel hardenings and related tests/docs evidence across test_critical_flows and operational docs
+- Risk reviewed: insufficient executable confirmation vs documented hardenings; first-line residuals still open
+- Evidence checked: existing targeted tests for gateway/bridge error sanitization and idempotency behavior; docs risk/limitations sections
+- Decision: Continue with condition
+- Condition (if any): do not add new kernel hardening until targeted smoke checks run in a ready test environment
+- Next micro-step: restore test environment dependencies (FastAPI/pytest stack) and run prioritized smoke subset before selecting one next kernel action
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-13-03] 2026-03-13 - Consolidacion Kernel S2 (operational validation)
 
 - Level: 2
