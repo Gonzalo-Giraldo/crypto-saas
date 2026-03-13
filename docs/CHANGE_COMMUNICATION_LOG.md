@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## Hardening en Binance: sin fallback directo tras rechazo determinístico del gateway
+
+- Commit: 330be57 hardening: avoid Binance direct fallback after deterministic gateway rejection
+- En el path Binance con gateway, cuando el gateway ya devuelve un rechazo determinístico del upstream clasificado, el runtime ahora evita el fallback al canal directo y falla en modo cerrado.
+- El fallback directo se mantiene para errores de transporte/unreachable.
+- La mitigación es acotada: no sustituye idempotency, locks, broker guards ni sanitización general de errores post-dispatch.
+- Alcance mínimo: apps/worker/app/engine/execution_runtime.py.
+
+---
+
 ## Hardening fail-closed en Binance por estado operativo y permiso MARKET del símbolo
 
 - Commit: e3e418f hardening: fail closed on non-trading or non-market Binance symbols
