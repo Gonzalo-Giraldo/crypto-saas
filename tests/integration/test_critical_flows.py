@@ -151,6 +151,12 @@ def test_ibkr_client_bridge_error_is_sanitized(client, monkeypatch):
             symbol="AAPL",
             side="BUY",
             quantity=1,
+            order_ref=iclient._build_order_ref(
+                api_key="12345678",
+                symbol="AAPL",
+                side="BUY",
+                quantity=1,
+            ),
         )
         assert False, "expected RuntimeError"
     except RuntimeError as exc:

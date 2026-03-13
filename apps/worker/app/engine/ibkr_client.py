@@ -57,9 +57,11 @@ def send_ibkr_test_order(
     symbol: str,
     side: str,
     quantity: float,
+    order_ref: str | None = None,
 ) -> dict[str, Any]:
     _validate_inputs(api_key=api_key, api_secret=api_secret, symbol=symbol, quantity=quantity)
-    order_ref = _build_order_ref(api_key=api_key, symbol=symbol, side=side, quantity=quantity)
+    if not str(order_ref or "").strip():
+        raise RuntimeError("kernel_dispatch_guard: missing order_ref")
 
     # Optional external bridge mode for teams that expose an IBKR paper gateway.
     if settings.IBKR_BRIDGE_BASE_URL:

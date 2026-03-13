@@ -17,7 +17,7 @@ from apps.worker.app.engine.binance_client import (
     get_account_status,
     prepare_binance_market_order_quantity,
 )
-from apps.worker.app.engine.ibkr_client import send_ibkr_test_order, get_ibkr_account_status
+from apps.worker.app.engine.ibkr_client import _build_order_ref, send_ibkr_test_order, get_ibkr_account_status
 
 
 def _mask_api_key(value: str) -> str:
@@ -500,6 +500,13 @@ def execute_ibkr_test_order_for_user(
                 detail="Missing credentials for IBKR",
             )
 
+        order_ref = _build_order_ref(
+            api_key=creds["api_key"],
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+        )
+
         try:
             result = send_ibkr_test_order(
                 api_key=creds["api_key"],
@@ -507,6 +514,7 @@ def execute_ibkr_test_order_for_user(
                 symbol=symbol,
                 side=side,
                 quantity=qty,
+                order_ref=order_ref,
             )
         except Exception as exc:
             err_detail = _sanitize_ibkr_error(exc)
