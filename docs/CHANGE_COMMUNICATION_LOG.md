@@ -1,5 +1,20 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion del guard broker-side USDT spot en auto-pick Binance live
+
+- Tipo: micro-modulacion de kernel (sin cambio funcional)
+- Scope minimo: `apps/api/app/api/ops.py`
+- Se extrajo la evaluacion del broker-side USDT spot guard a un helper privado `_evaluate_binance_spot_usdt_broker_guard(...)`.
+- El flujo orquestador `_auto_pick_from_scan(...)` conserva contratos, decisiones, razones de bloqueo y payloads de auditoria sin cambios.
+- Validacion posterior al cambio (Docker Python 3.11, subset critico): 5/5 PASS
+  - `test_binance_gateway_account_status_uses_spot_base`
+  - `test_binance_gateway_returns_502_on_upstream_unreachable`
+  - `test_binance_runtime_gateway_error_is_sanitized`
+  - `test_binance_client_gateway_error_is_sanitized`
+  - `test_ibkr_runtime_error_detail_is_sanitized`
+
+---
+
 ## Hardening en Binance: sin fallback directo tras rechazo determinístico del gateway
 
 - Commit: 330be57 hardening: avoid Binance direct fallback after deterministic gateway rejection

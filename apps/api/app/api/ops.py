@@ -536,6 +536,59 @@ def _build_auto_pick_exit_plan(
     return plan, None
 
 
+def _evaluate_binance_spot_usdt_broker_guard(
+    *,
+    user_id: str,
+    exchange: str,
+    side: str,
+    symbol: str,
+    execution_preview: dict,
+) -> tuple[Optional[str], Optional[float], Optional[float]]:
+    guard_exchange = str(exchange or "").upper()
+    guard_side = str(side or "").upper()
+    guard_market = str(execution_preview.get("market") or "").upper()
+    guard_symbol = str(symbol or "").upper()
+    is_usdt_spot_symbol = guard_symbol.endswith("USDT") or "/USDT" in guard_symbol
+    broker_guard_applies = (
+        guard_exchange == "BINANCE"
+        and guard_side == "BUY"
+        and guard_market == "SPOT"
+        and is_usdt_spot_symbol
+    )
+
+    if not broker_guard_applies:
+        return None, None, None
+
+    try:
+        estimated_notional = float(execution_preview.get("estimated_notional") or 0.0)
+    except Exception:
+        estimated_notional = 0.0
+
+    if estimated_notional <= 0.0:
+        return "broker_notional_unavailable", None, None
+
+    broker_guard_required_usdt = estimated_notional * 1.02
+    try:
+        broker_state = get_binance_spot_usdt_free_for_user(user_id)
+    except Exception:
+        return "broker_status_unavailable", broker_guard_required_usdt, None
+
+    if not bool(broker_state.get("can_trade", True)):
+        return "broker_trading_disabled", broker_guard_required_usdt, None
+
+    try:
+        broker_guard_usdt_free = float(broker_state.get("usdt_free"))
+    except Exception:
+        broker_guard_usdt_free = None
+
+    if broker_guard_usdt_free is None or broker_guard_usdt_free < 0.0:
+        return "broker_spot_usdt_unavailable", broker_guard_required_usdt, broker_guard_usdt_free
+    if broker_guard_usdt_free < float(broker_guard_required_usdt):
+        return "broker_spot_usdt_insufficient", broker_guard_required_usdt, broker_guard_usdt_free
+
+    return None, broker_guard_required_usdt, broker_guard_usdt_free
+
+
 def _binance_fallback_symbols() -> list[str]:
     return [
         "BTCUSDT",
@@ -2600,47 +2653,17 @@ def _auto_pick_from_scan(
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
 
-            guard_exchange = str(exchange or "").upper()
-            guard_side = str(selected_side or "").upper()
-            guard_market = str(execution_preview.get("market") or "").upper()
-            guard_symbol = str(selected_symbol or "").upper()
-            is_usdt_spot_symbol = guard_symbol.endswith("USDT") or "/USDT" in guard_symbol
-            broker_guard_applies = (
-                guard_exchange == "BINANCE"
-                and guard_side == "BUY"
-                and guard_market == "SPOT"
-                and is_usdt_spot_symbol
+            (
+                broker_guard_reason,
+                broker_guard_required_usdt,
+                broker_guard_usdt_free,
+            ) = _evaluate_binance_spot_usdt_broker_guard(
+                user_id=current_user.id,
+                exchange=exchange,
+                side=selected_side,
+                symbol=selected_symbol,
+                execution_preview=execution_preview,
             )
-
-            broker_guard_reason = None
-            broker_guard_required_usdt = None
-            broker_guard_usdt_free = None
-            if broker_guard_applies:
-                try:
-                    estimated_notional = float(execution_preview.get("estimated_notional") or 0.0)
-                except Exception:
-                    estimated_notional = 0.0
-
-                if estimated_notional <= 0.0:
-                    broker_guard_reason = "broker_notional_unavailable"
-                else:
-                    broker_guard_required_usdt = estimated_notional * 1.02
-                    try:
-                        broker_state = get_binance_spot_usdt_free_for_user(current_user.id)
-                    except Exception:
-                        broker_guard_reason = "broker_status_unavailable"
-                    else:
-                        if not bool(broker_state.get("can_trade", True)):
-                            broker_guard_reason = "broker_trading_disabled"
-                        else:
-                            try:
-                                broker_guard_usdt_free = float(broker_state.get("usdt_free"))
-                            except Exception:
-                                broker_guard_usdt_free = None
-                            if broker_guard_usdt_free is None or broker_guard_usdt_free < 0.0:
-                                broker_guard_reason = "broker_spot_usdt_unavailable"
-                            elif broker_guard_usdt_free < float(broker_guard_required_usdt):
-                                broker_guard_reason = "broker_spot_usdt_insufficient"
 
             if broker_guard_reason:
                 log_audit_event(
