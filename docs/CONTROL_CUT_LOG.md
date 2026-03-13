@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-03] 2026-03-13 - Consolidacion Kernel S2 (operational validation)
+
+- Level: 2
+- Trigger: need to validate whether current kernel hardenings are sufficiently settled before adding new hardening
+- Scope: evidence and residual-risk ordering across CHANGE_COMMUNICATION_LOG.md, TRADING_RISK_GUARDS.md, and PRODUCTION_READINESS.md
+- Risk reviewed: first-line residuals still open (duplicate risk outside hardened lane, post-dispatch error asymmetry, partial exchange-filter coverage)
+- Evidence checked: controls implemented list, explicit limitations, and remaining-risks sections in technical docs
+- Decision: Continue with condition
+- Condition (if any): pause new kernel hardening now; run targeted smoke/evidence check and residual map ordering first
+- Next micro-step: execute Consolidation Kernel S3 focused on targeted smoke checks and one ranked recommendation for next action
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-13-02] 2026-03-13 - Kernel Control Cut #1 (phase checkpoint)
 
 - Level: 2
