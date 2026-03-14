@@ -93,6 +93,13 @@ def _raise_upstream_http_error(response: requests.Response) -> None:
     raise HTTPException(status_code=502, detail=detail)
 
 
+def _request_upstream_json(method: str, url: str, timeout: int) -> object:
+    response = _request_upstream(method, url, timeout=timeout)
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+    return response.json()
+
+
 def _authorize_internal_request(x_internal_token: str) -> None:
     if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
         raise HTTPException(status_code=403, detail="forbidden")
@@ -180,10 +187,7 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
         url = f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/24hr"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/ticker/24hr"
-    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
-    if r.status_code >= 400:
-        _raise_upstream_http_error(r)
-    data = r.json()
+    data = _request_upstream_json("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if not isinstance(data, list):
         raise HTTPException(status_code=502, detail="invalid_ticker_payload")
 
@@ -218,10 +222,7 @@ def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(defa
         url = f"{BINANCE_FUTURES_BASE}/fapi/v1/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
-    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
-    if r.status_code >= 400:
-        _raise_upstream_http_error(r)
-    data = r.json()
+    data = _request_upstream_json("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if not isinstance(data, list):
         raise HTTPException(status_code=502, detail="invalid_klines_payload")
     rows = [x for x in data if isinstance(x, list)]
@@ -244,10 +245,7 @@ def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str 
             url = f"{BINANCE_FUTURES_BASE}/fapi/v1/exchangeInfo"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/exchangeInfo?{query}"
-    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
-    if r.status_code >= 400:
-        _raise_upstream_http_error(r)
-    data = r.json()
+    data = _request_upstream_json("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     rows = data.get("symbols") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         raise HTTPException(status_code=502, detail="invalid_exchange_info_payload")
@@ -270,10 +268,7 @@ def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = 
         url = f"{BINANCE_FUTURES_BASE}/fapi/v1/ticker/price?{query}"
     else:
         url = f"{BINANCE_SPOT_BASE}/api/v3/ticker/price?{query}"
-    r = _request_upstream("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
-    if r.status_code >= 400:
-        _raise_upstream_http_error(r)
-    data = r.json()
+    data = _request_upstream_json("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if not isinstance(data, dict):
         raise HTTPException(status_code=502, detail="invalid_ticker_price_payload")
     return {"row": data, "mode": f"gateway_ticker_price_{market.lower()}"}
