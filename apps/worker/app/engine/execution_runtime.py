@@ -61,6 +61,24 @@ def _build_gateway_runtime_error(status_code: int, body_text: str) -> str:
     return detail
 
 
+def _post_binance_gateway(endpoint: str, payload: dict) -> requests.Response:
+    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+    url = f"{base}{endpoint}"
+    headers = {"Content-Type": "application/json"}
+    if settings.BINANCE_GATEWAY_TOKEN:
+        headers["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+    )
+    if response.status_code >= 400:
+        detail = _build_gateway_runtime_error(response.status_code, response.text)
+        raise RuntimeError(detail)
+    return response
+
+
 def _sanitize_ibkr_error(exc: Exception) -> str:
     msg = str(exc or "").strip()
     if msg.startswith("ibkr_"):
@@ -416,12 +434,6 @@ def _send_binance_test_order_via_gateway(
     client_order_id: str | None = None,
     market: str = "SPOT",
 ) -> None:
-    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
-    url = f"{base}/binance/test-order"
-    headers = {"Content-Type": "application/json"}
-    if settings.BINANCE_GATEWAY_TOKEN:
-        headers["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
-
     payload = {
         "api_key": api_key,
         "api_secret": api_secret,
@@ -431,16 +443,7 @@ def _send_binance_test_order_via_gateway(
         "client_order_id": client_order_id,
         "market": str(market or "SPOT").upper(),
     }
-
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-    )
-    if response.status_code >= 400:
-        detail = _build_gateway_runtime_error(response.status_code, response.text)
-        raise RuntimeError(detail)
+    _post_binance_gateway("/binance/test-order", payload)
 
 
 def _get_binance_account_status(
@@ -465,21 +468,8 @@ def _get_binance_account_status_via_gateway(
     api_key: str,
     api_secret: str,
 ):
-    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
-    url = f"{base}/binance/account-status"
-    headers = {"Content-Type": "application/json"}
-    if settings.BINANCE_GATEWAY_TOKEN:
-        headers["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
     payload = {"api_key": api_key, "api_secret": api_secret}
-    response = requests.post(
-        url,
-        headers=headers,
-        json=payload,
-        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-    )
-    if response.status_code >= 400:
-        detail = _build_gateway_runtime_error(response.status_code, response.text)
-        raise RuntimeError(detail)
+    response = _post_binance_gateway("/binance/account-status", payload)
     return response.json()
 
 

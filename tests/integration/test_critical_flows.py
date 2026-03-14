@@ -103,6 +103,75 @@ def test_binance_runtime_gateway_error_is_sanitized(client, monkeypatch):
         assert "supersecret" not in msg
 
 
+def test_binance_runtime_send_path_executes_gateway_chain(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    calls = {"count": 0, "url": None, "json": None, "headers": None, "timeout": None}
+
+    class _FakeDB:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        @staticmethod
+        def json():
+            return {"ok": True}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        calls["count"] += 1
+        calls["url"] = url
+        calls["headers"] = headers
+        calls["json"] = json
+        calls["timeout"] = timeout
+        return _Resp()
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _FakeDB())
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(runtime, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {
+            "normalized_qty": float(requested_qty),
+            "market": market,
+        },
+    )
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_TOKEN", "tok")
+    monkeypatch.setattr(runtime.requests, "post", _fake_post)
+
+    out = runtime.execute_binance_test_order_for_user(
+        user_id="u1",
+        symbol="btcusdt",
+        side="buy",
+        qty=0.01,
+        intent_key="ik-1",
+    )
+    assert out["sent"] is True
+    assert calls["count"] == 1
+    assert calls["url"] == "https://gw.example.test/binance/test-order"
+    assert calls["headers"]["X-Internal-Token"] == "tok"
+    assert calls["headers"]["Content-Type"] == "application/json"
+    assert calls["timeout"] == max(3, int(runtime.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+    assert calls["json"]["symbol"] == "BTCUSDT"
+    assert calls["json"]["side"] == "BUY"
+    assert calls["json"]["market"] == "SPOT"
+    assert calls["json"]["client_order_id"] is not None
+
+
 def test_binance_client_gateway_error_is_sanitized(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.binance_client as bclient
