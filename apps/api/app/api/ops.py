@@ -13,6 +13,7 @@ from urllib import error as urllib_error, parse as urllib_parse, request as urll
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.deps import get_current_user, require_any_role, require_role
@@ -565,6 +566,47 @@ def _evaluate_real_execution_pre_dispatch_gate(
             atr_pct=atr_pct,
         )
     return None, plan_reason, exit_plan
+
+
+def _evaluate_semantic_intent_lock_acquire(
+    *,
+    current_user: User,
+    exchange: str,
+    symbol: str,
+    side: str,
+) -> tuple[Optional[str], Optional[int], bool, Optional[Connection]]:
+    intent_lock_reason = None
+    intent_lock_key = None
+    intent_lock_acquired = False
+    intent_lock_conn = None
+
+    if not str(settings.DATABASE_URL or "").lower().startswith("postgres"):
+        intent_lock_reason = "semantic_intent_lock_requires_postgres"
+        return intent_lock_reason, intent_lock_key, intent_lock_acquired, intent_lock_conn
+
+    lock_key = _semantic_intent_lock_key(
+        tenant_id=_tenant_id(current_user),
+        user_id=current_user.id,
+        exchange=exchange,
+        symbol=symbol,
+        side=side,
+    )
+    try:
+        intent_lock_conn = engine.connect()
+        got_intent_lock = bool(
+            intent_lock_conn.execute(
+                text("SELECT pg_try_advisory_lock(:k)"),
+                {"k": lock_key},
+            ).scalar()
+        )
+    except Exception:
+        got_intent_lock = False
+    if got_intent_lock:
+        intent_lock_key = lock_key
+        intent_lock_acquired = True
+    else:
+        intent_lock_reason = "semantic_intent_lock_contention"
+    return intent_lock_reason, intent_lock_key, intent_lock_acquired, intent_lock_conn
 
 
 def _evaluate_binance_spot_usdt_broker_guard(
@@ -2599,32 +2641,17 @@ def _auto_pick_from_scan(
                     "execution": {"exit_plan": None},
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
-            intent_lock_reason = None
-            if not str(settings.DATABASE_URL or "").lower().startswith("postgres"):
-                intent_lock_reason = "semantic_intent_lock_requires_postgres"
-            else:
-                lock_key = _semantic_intent_lock_key(
-                    tenant_id=_tenant_id(current_user),
-                    user_id=current_user.id,
-                    exchange=exchange,
-                    symbol=selected_symbol,
-                    side=selected_side,
-                )
-                try:
-                    intent_lock_conn = engine.connect()
-                    got_intent_lock = bool(
-                        intent_lock_conn.execute(
-                            text("SELECT pg_try_advisory_lock(:k)"),
-                            {"k": lock_key},
-                        ).scalar()
-                    )
-                except Exception:
-                    got_intent_lock = False
-                if got_intent_lock:
-                    intent_lock_key = lock_key
-                    intent_lock_acquired = True
-                else:
-                    intent_lock_reason = "semantic_intent_lock_contention"
+            (
+                intent_lock_reason,
+                intent_lock_key,
+                intent_lock_acquired,
+                intent_lock_conn,
+            ) = _evaluate_semantic_intent_lock_acquire(
+                current_user=current_user,
+                exchange=exchange,
+                symbol=selected_symbol,
+                side=selected_side,
+            )
 
             if intent_lock_reason:
                 log_audit_event(
