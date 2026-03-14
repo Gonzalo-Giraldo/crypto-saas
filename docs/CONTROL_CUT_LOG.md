@@ -268,3 +268,18 @@ Do not turn this into a long narrative.
 - Condition (if any): allow gateway->direct fallback only for transport/unreachable failures; fail-closed when deterministic gateway rejection is already classified
 - Next micro-step: apply minimal guard in `_send_binance_test_order` and re-check no unrelated behavior changes
 - Owner: engineering/codex session
+
+## 041d271 — tests: add gateway ticker-price coverage for 403 and 429 scenarios
+- Scope: direct gateway test coverage only.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added direct `GatewayClient(gw.app)` coverage for `POST /binance/ticker-price`
+  - Covered explicit gateway responses:
+    - `403 forbidden` for invalid internal token
+    - `429 rate_limit_exceeded` after limiter threshold
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_forbidden_without_valid_internal_token or ticker_price_rate_limit_exceeded"`
+- Validation result:
+  - PASS real: `2 passed, 65 deselected`
+- Notes:
+  - Local `pytest` binary was unavailable (`code 127`), so equivalent containerized validation was used.

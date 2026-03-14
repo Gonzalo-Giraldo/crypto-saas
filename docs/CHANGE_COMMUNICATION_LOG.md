@@ -341,3 +341,13 @@
 
 - Siguiente prioridad recomendada:
   Duplicate prevention / execution intent protection en auto-pick o frontera scheduler/manual, con alcance mínimo y sin rediseño grande.
+
+## 041d271 — gateway Binance ticker-price test coverage
+- Added two direct gateway tests for `POST /binance/ticker-price`.
+- Covered controlled negative scenarios already prioritized for gateway hardening:
+  - invalid internal token => `403 forbidden`
+  - gateway limiter exceeded => `429 rate_limit_exceeded`
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_forbidden_without_valid_internal_token or ticker_price_rate_limit_exceeded"`
+  - Result: `2 passed, 65 deselected`
