@@ -1,5 +1,18 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion gateway Binance: helper de lectura upstream JSON comun
+
+- Commit: `b2a654b gateway: extract upstream json request helper`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/binance_gateway/main.py`
+- Se extrajo un helper privado `_request_upstream_json(method: str, url: str, timeout: int) -> object` para centralizar exclusivamente el tramo comun de lectura upstream JSON: llamada a `_request_upstream(...)`, delegacion de `status_code >= 400` hacia `_raise_upstream_http_error(...)` y `return response.json()`.
+- Se actualizaron unicamente 4 endpoints de lectura Binance del gateway: `binance_ticker_24hr`, `binance_klines`, `binance_exchange_info`, `binance_ticker_price`.
+- Se preserva la semantica original: timeout efectivo `max(3, REQUEST_TIMEOUT_SECONDS)`, validaciones especificas `invalid_*_payload` fuera del helper, y filtros/armado final de respuesta fuera del helper.
+- Validacion posterior al cambio (Docker Python 3.11, subset relacionado): 7 tests ejecutados -> 7 PASS (`test_binance_client_gateway_error_is_sanitized`, `test_binance_client_ticker_price_spot_uses_gateway_row`, `test_binance_client_ticker_price_futures_fallbacks_to_direct`, `test_binance_client_ticker_price_futures_gateway_error_without_fallback_returns_none`, `test_binance_client_exchange_info_spot_uses_gateway_rows`, `test_binance_client_exchange_info_futures_fallbacks_to_direct_single_symbol`, `test_binance_client_exchange_info_futures_gateway_error_without_fallback_raises`).
+- Nota de cobertura: no hay prueba directa en este subset para invocacion `GatewayClient(gw.app)` de `/binance/ticker-24hr`, `/binance/klines`, `/binance/exchange-info` y `/binance/ticker-price`.
+
+---
+
 ## Micro-modulacion gateway Binance: helper de autorizacion interna + rate-limit preamble
 
 - Commit: `df18236 gateway: extract internal request authorization helper`

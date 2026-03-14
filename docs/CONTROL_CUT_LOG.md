@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-18] 2026-03-14 - Control de micro-modulacion gateway upstream JSON read helper (commit b2a654b)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en gateway Binance para centralizar el tramo comun de lectura JSON upstream en endpoints de lectura, manteniendo manejo de error upstream sin cambios
+- Scope: `apps/binance_gateway/main.py` (extraccion de helper privado `_request_upstream_json(method, url, timeout)` reutilizado por `binance_ticker_24hr`, `binance_klines`, `binance_exchange_info` y `binance_ticker_price`)
+- Risk reviewed: posible desviacion semantica en lectura upstream (delegacion de errores via `_raise_upstream_http_error(...)`, preservacion de timeout efectivo `max(3, REQUEST_TIMEOUT_SECONDS)`, y no mover validaciones `invalid_*_payload` ni armado final de respuesta)
+- Evidence checked: diff completo revisado; validacion smoke subset relacionado ejecutada (7 tests: `test_binance_client_gateway_error_is_sanitized`, `test_binance_client_ticker_price_spot_uses_gateway_row`, `test_binance_client_ticker_price_futures_fallbacks_to_direct`, `test_binance_client_ticker_price_futures_gateway_error_without_fallback_returns_none`, `test_binance_client_exchange_info_spot_uses_gateway_rows`, `test_binance_client_exchange_info_futures_fallbacks_to_direct_single_symbol`, `test_binance_client_exchange_info_futures_gateway_error_without_fallback_raises` -> 7 PASS)
+- Decision: Continue with validation
+- Condition (if any): preservar invariantes del contrato gateway (`_raise_upstream_http_error(...)` como unico path de error HTTP upstream, timeout efectivo sin cambios, auth/rate-limit fuera del helper, y validaciones/filtros de negocio en cada endpoint)
+- Next micro-step: registrar nota tecnica minima del commit `b2a654b` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-17] 2026-03-14 - Control de micro-modulacion gateway Binance auth/rate-limit preamble (commit df18236)
 
 - Level: 2
