@@ -351,3 +351,13 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_forbidden_without_valid_internal_token or ticker_price_rate_limit_exceeded"`
   - Result: `2 passed, 65 deselected`
+
+## 6b85bbf — gateway Binance exchange-info test coverage
+- Added two direct gateway tests for `POST /binance/exchange-info`.
+- Covered controlled gateway scenarios already prioritized for direct coverage:
+  - empty symbols => `400 symbols_required`
+  - invalid upstream payload => `502 invalid_exchange_info_payload`
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_symbols_required or exchange_info_invalid_payload"`
+  - Result: `2 passed, 67 deselected`

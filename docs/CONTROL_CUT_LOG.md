@@ -283,3 +283,16 @@ Do not turn this into a long narrative.
   - PASS real: `2 passed, 65 deselected`
 - Notes:
   - Local `pytest` binary was unavailable (`code 127`), so equivalent containerized validation was used.
+
+## 6b85bbf — tests: add gateway exchange-info coverage for 400 and 502 scenarios
+- Scope: direct gateway test coverage only.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added direct `GatewayClient(gw.app)` coverage for `POST /binance/exchange-info`
+  - Covered explicit gateway responses:
+    - `400 symbols_required`
+    - `502 invalid_exchange_info_payload`
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_symbols_required or exchange_info_invalid_payload"`
+- Validation result:
+  - PASS real: `2 passed, 67 deselected`
