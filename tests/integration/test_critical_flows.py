@@ -198,6 +198,109 @@ def test_binance_client_gateway_error_is_sanitized(client, monkeypatch):
         assert "secret=abc" not in msg
 
 
+def test_binance_client_ticker_price_spot_uses_gateway_row(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"post_gateway": 0, "get": 0, "post_timeout": None}
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["post_gateway"] += 1
+        calls["post_timeout"] = timeout
+        assert path == "/binance/ticker-price"
+        assert payload["market"] == "SPOT"
+        assert payload["symbol"] == "BTCUSDT"
+        return {"row": {"symbol": "BTCUSDT", "price": "42000.10"}}
+
+    def _fake_get(url, timeout=8):
+        calls["get"] += 1
+        raise AssertionError("requests.get should not be called when gateway returns row")
+
+    monkeypatch.setattr(bclient, "_price_by_symbol", {})
+    monkeypatch.setattr(bclient, "_price_cache_expiry", 0.0)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+    monkeypatch.setattr(bclient.requests, "get", _fake_get)
+
+    px = bclient._fetch_symbol_price("btcusdt")
+    assert px == 42000.10
+    assert calls["post_gateway"] == 1
+    assert calls["get"] == 0
+    assert calls["post_timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+
+
+def test_binance_client_ticker_price_futures_fallbacks_to_direct(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"post_gateway": 0, "post_timeout": None, "url": None, "get_timeout": None}
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        @staticmethod
+        def json():
+            return {"symbol": "BTCUSDT", "price": "41000.25"}
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["post_gateway"] += 1
+        calls["post_timeout"] = timeout
+        assert path == "/binance/ticker-price"
+        assert payload["market"] == "FUTURES"
+        assert payload["symbol"] == "BTCUSDT"
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    def _fake_get(url, timeout=8):
+        calls["url"] = url
+        calls["get_timeout"] = timeout
+        return _Resp()
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_FUTURES_BASE_URL", "https://futures.example.test")
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+    monkeypatch.setattr(bclient.requests, "get", _fake_get)
+
+    px = bclient._fetch_symbol_price_for_market("btcusdt", market="FUTURES")
+    assert px == 41000.25
+    assert calls["post_gateway"] == 1
+    assert calls["post_timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+    assert calls["url"] == "https://futures.example.test/fapi/v1/ticker/price?symbol=BTCUSDT"
+    assert calls["get_timeout"] == 8
+
+
+def test_binance_client_ticker_price_futures_gateway_error_without_fallback_returns_none(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"get": 0, "post_timeout": None}
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["post_timeout"] = timeout
+        assert path == "/binance/ticker-price"
+        assert payload["market"] == "FUTURES"
+        assert payload["symbol"] == "BTCUSDT"
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    def _fake_get(url, timeout=8):
+        calls["get"] += 1
+        raise AssertionError("requests.get should not be called when fallback is disabled")
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+    monkeypatch.setattr(bclient.requests, "get", _fake_get)
+
+    px = bclient._fetch_symbol_price_for_market("btcusdt", market="FUTURES")
+    assert px is None
+    assert calls["post_timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+    assert calls["get"] == 0
+
+
 def test_binance_client_exchange_info_spot_uses_gateway_rows(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.binance_client as bclient

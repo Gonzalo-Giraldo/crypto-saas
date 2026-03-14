@@ -198,6 +198,35 @@ def _fetch_exchange_info_symbols(symbols: list[str]) -> dict[str, dict]:
     return {s: parsed[s] for s in wanted if s in parsed}
 
 
+def _fetch_ticker_price_body_with_gateway_fallback(
+    *,
+    symbol: str,
+    market: str,
+    direct_url: str,
+) -> dict | None:
+    body = None
+    if _gateway_enabled():
+        try:
+            got = _post_gateway(
+                "/binance/ticker-price",
+                {"symbol": symbol, "market": market},
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
+            row = got.get("row") if isinstance(got, dict) else None
+            if isinstance(row, dict):
+                body = row
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                return None
+    if body is None:
+        response = requests.get(direct_url, timeout=8)
+        if response.status_code >= 400:
+            return None
+        got_direct = response.json()
+        body = got_direct if isinstance(got_direct, dict) else None
+    return body if isinstance(body, dict) else None
+
+
 def _fetch_symbol_price(symbol: str) -> float | None:
     global _price_cache_expiry
     sym = str(symbol or "").upper().strip()
@@ -209,29 +238,17 @@ def _fetch_symbol_price(symbol: str) -> float | None:
         if _price_by_symbol and now < _price_cache_expiry and sym in _price_by_symbol:
             return float(_price_by_symbol[sym])
 
-    body = None
-    if _gateway_enabled():
-        try:
-            got = _post_gateway(
-                "/binance/ticker-price",
-                {"symbol": sym, "market": "SPOT"},
-                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-            )
-            row = got.get("row") if isinstance(got, dict) else None
-            if isinstance(row, dict):
-                body = row
-        except Exception:
-            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                return None
+    endpoint = _ticker_price_endpoint_for_market("SPOT")
+    base_url = _base_url_for_market("SPOT")
+    query = urlencode({"symbol": sym})
+    url = f"{base_url}{endpoint}?{query}"
+    body = _fetch_ticker_price_body_with_gateway_fallback(
+        symbol=sym,
+        market="SPOT",
+        direct_url=url,
+    )
     if body is None:
-        endpoint = _ticker_price_endpoint_for_market("SPOT")
-        base_url = _base_url_for_market("SPOT")
-        query = urlencode({"symbol": sym})
-        url = f"{base_url}{endpoint}?{query}"
-        response = requests.get(url, timeout=8)
-        if response.status_code >= 400:
-            return None
-        body = response.json()
+        return None
     try:
         px = float(body.get("price") or 0.0)
     except Exception:
@@ -409,28 +426,17 @@ def _fetch_symbol_price_for_market(symbol: str, market: str = "SPOT") -> float |
     sym = str(symbol or "").upper().strip()
     if not sym:
         return None
-    body = None
-    if _gateway_enabled():
-        try:
-            got = _post_gateway(
-                "/binance/ticker-price",
-                {"symbol": sym, "market": market_norm},
-                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-            )
-            row = got.get("row") if isinstance(got, dict) else None
-            if isinstance(row, dict):
-                body = row
-        except Exception:
-            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                return None
+    endpoint = _ticker_price_endpoint_for_market(market_norm)
+    base_url = _base_url_for_market(market_norm)
+    query = urlencode({"symbol": sym})
+    url = f"{base_url}{endpoint}?{query}"
+    body = _fetch_ticker_price_body_with_gateway_fallback(
+        symbol=sym,
+        market=market_norm,
+        direct_url=url,
+    )
     if body is None:
-        endpoint = _ticker_price_endpoint_for_market(market_norm)
-        base_url = _base_url_for_market(market_norm)
-        query = urlencode({"symbol": sym})
-        response = requests.get(f"{base_url}{endpoint}?{query}", timeout=8)
-        if response.status_code >= 400:
-            return None
-        body = response.json()
+        return None
     try:
         px = float(body.get("price") or 0.0)
     except Exception:
