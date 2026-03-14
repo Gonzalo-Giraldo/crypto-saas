@@ -2231,6 +2231,55 @@ def _scan_pretrade_candidates(
     }
 
 
+def _resolve_auto_pick_mtf_trend_fields(
+    symbol: Optional[str],
+    candidate_obj: Optional[PretradeCheckRequest],
+    exchange: str,
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]:
+    trend = float(candidate_obj.market_trend_score) if candidate_obj else None
+    trend_1d = (
+        float(candidate_obj.market_trend_score_1d)
+        if candidate_obj and candidate_obj.market_trend_score_1d is not None
+        else None
+    )
+    trend_4h = (
+        float(candidate_obj.market_trend_score_4h)
+        if candidate_obj and candidate_obj.market_trend_score_4h is not None
+        else None
+    )
+    trend_1h = (
+        float(candidate_obj.market_trend_score_1h)
+        if candidate_obj and candidate_obj.market_trend_score_1h is not None
+        else None
+    )
+    micro_15m = (
+        float(candidate_obj.market_micro_trend_15m)
+        if candidate_obj and candidate_obj.market_micro_trend_15m is not None
+        else None
+    )
+    # For BINANCE, fill missing MTF fields directly from klines signal when snapshots
+    # only provided aggregate trend_score.
+    if (exchange or "").upper() == "BINANCE" and symbol and (
+        trend is None or trend_1d is None or trend_4h is None or trend_1h is None or micro_15m is None
+    ):
+        try:
+            mtf = _compute_binance_mtf_signal(str(symbol).upper())
+        except Exception:
+            mtf = None
+        if mtf:
+            if trend is None:
+                trend = float(mtf.get("trend_score") or 0.0)
+            if trend_1d is None and mtf.get("trend_1d") is not None:
+                trend_1d = float(mtf.get("trend_1d"))
+            if trend_4h is None and mtf.get("trend_4h") is not None:
+                trend_4h = float(mtf.get("trend_4h"))
+            if trend_1h is None and mtf.get("trend_1h") is not None:
+                trend_1h = float(mtf.get("trend_1h"))
+            if micro_15m is None and mtf.get("micro_trend_15m") is not None:
+                micro_15m = float(mtf.get("micro_trend_15m"))
+    return trend, trend_1d, trend_4h, trend_1h, micro_15m
+
+
 def _auto_pick_from_scan(
     db: Session,
     current_user: User,
@@ -2284,60 +2333,13 @@ def _auto_pick_from_scan(
         if top_candidate_symbol
         else None
     )
-    def _resolve_trend_fields(
-        symbol: Optional[str],
-        candidate_obj: Optional[PretradeCheckRequest],
-    ) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float], Optional[float]]:
-        trend = float(candidate_obj.market_trend_score) if candidate_obj else None
-        trend_1d = (
-            float(candidate_obj.market_trend_score_1d)
-            if candidate_obj and candidate_obj.market_trend_score_1d is not None
-            else None
-        )
-        trend_4h = (
-            float(candidate_obj.market_trend_score_4h)
-            if candidate_obj and candidate_obj.market_trend_score_4h is not None
-            else None
-        )
-        trend_1h = (
-            float(candidate_obj.market_trend_score_1h)
-            if candidate_obj and candidate_obj.market_trend_score_1h is not None
-            else None
-        )
-        micro_15m = (
-            float(candidate_obj.market_micro_trend_15m)
-            if candidate_obj and candidate_obj.market_micro_trend_15m is not None
-            else None
-        )
-        # For BINANCE, fill missing MTF fields directly from klines signal when snapshots
-        # only provided aggregate trend_score.
-        if (exchange or "").upper() == "BINANCE" and symbol and (
-            trend is None or trend_1d is None or trend_4h is None or trend_1h is None or micro_15m is None
-        ):
-            try:
-                mtf = _compute_binance_mtf_signal(str(symbol).upper())
-            except Exception:
-                mtf = None
-            if mtf:
-                if trend is None:
-                    trend = float(mtf.get("trend_score") or 0.0)
-                if trend_1d is None and mtf.get("trend_1d") is not None:
-                    trend_1d = float(mtf.get("trend_1d"))
-                if trend_4h is None and mtf.get("trend_4h") is not None:
-                    trend_4h = float(mtf.get("trend_4h"))
-                if trend_1h is None and mtf.get("trend_1h") is not None:
-                    trend_1h = float(mtf.get("trend_1h"))
-                if micro_15m is None and mtf.get("micro_trend_15m") is not None:
-                    micro_15m = float(mtf.get("micro_trend_15m"))
-        return trend, trend_1d, trend_4h, trend_1h, micro_15m
-
     (
         top_candidate_trend_score,
         top_candidate_trend_score_1d,
         top_candidate_trend_score_4h,
         top_candidate_trend_score_1h,
         top_candidate_micro_trend_15m,
-    ) = _resolve_trend_fields(top_candidate_symbol, top_candidate_obj)
+    ) = _resolve_auto_pick_mtf_trend_fields(top_candidate_symbol, top_candidate_obj, exchange)
     avg_score = None
     avg_score_base = None
     avg_score_rules = None
@@ -2872,7 +2874,7 @@ def _auto_pick_from_scan(
             selected_trend_score_4h,
             selected_trend_score_1h,
             selected_micro_trend_15m,
-        ) = _resolve_trend_fields(selected_symbol, candidate)
+        ) = _resolve_auto_pick_mtf_trend_fields(selected_symbol, candidate, exchange)
 
         out = _finalize({
             "exchange": exchange,
