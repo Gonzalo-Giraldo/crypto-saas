@@ -198,6 +198,119 @@ def test_binance_client_gateway_error_is_sanitized(client, monkeypatch):
         assert "secret=abc" not in msg
 
 
+def test_binance_client_exchange_info_spot_uses_gateway_rows(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"post_gateway": 0, "get": 0, "post_timeout": None}
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["post_gateway"] += 1
+        calls["post_timeout"] = timeout
+        assert path == "/binance/exchange-info"
+        assert payload["market"] == "SPOT"
+        assert payload["symbols"] == ["BTCUSDT"]
+        return {"symbols": [{"symbol": "BTCUSDT", "status": "TRADING"}]}
+
+    def _fake_get(url, timeout=10):
+        calls["get"] += 1
+        raise AssertionError("requests.get should not be called when gateway returns rows")
+
+    monkeypatch.setattr(bclient, "_exchange_info_by_symbol", {})
+    monkeypatch.setattr(bclient, "_exchange_info_cache_expiry", 0.0)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+    monkeypatch.setattr(bclient.requests, "get", _fake_get)
+
+    out = bclient._fetch_exchange_info_symbols(["btcusdt"])
+    assert "BTCUSDT" in out
+    assert out["BTCUSDT"]["symbol"] == "BTCUSDT"
+    assert calls["post_gateway"] == 1
+    assert calls["get"] == 0
+    assert calls["post_timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+
+
+def test_binance_client_exchange_info_futures_fallbacks_to_direct_single_symbol(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"post_gateway": 0, "url": None, "post_timeout": None, "get_timeout": None}
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        @staticmethod
+        def json():
+            return {
+                "symbols": [
+                    {"symbol": "BTCUSDT", "status": "TRADING"},
+                    {"symbol": "ETHUSDT", "status": "TRADING"},
+                ]
+            }
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["post_gateway"] += 1
+        calls["post_timeout"] = timeout
+        assert path == "/binance/exchange-info"
+        assert payload["market"] == "FUTURES"
+        assert payload["symbols"] == ["BTCUSDT"]
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    def _fake_get(url, timeout=10):
+        calls["url"] = url
+        calls["get_timeout"] = timeout
+        return _Resp()
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_FUTURES_BASE_URL", "https://futures.example.test")
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+    monkeypatch.setattr(bclient.requests, "get", _fake_get)
+
+    out = bclient._fetch_exchange_info_symbols_for_market(["btcusdt"], market="FUTURES")
+    assert calls["post_gateway"] == 1
+    assert calls["post_timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+    assert calls["url"] == "https://futures.example.test/fapi/v1/exchangeInfo?symbol=BTCUSDT"
+    assert calls["get_timeout"] == 10
+    assert set(out.keys()) == {"BTCUSDT"}
+    assert out["BTCUSDT"]["symbol"] == "BTCUSDT"
+
+
+def test_binance_client_exchange_info_futures_gateway_error_without_fallback_raises(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"get": 0, "post_timeout": None}
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["post_timeout"] = timeout
+        assert path == "/binance/exchange-info"
+        assert payload["market"] == "FUTURES"
+        assert payload["symbols"] == ["BTCUSDT"]
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    def _fake_get(url, timeout=10):
+        calls["get"] += 1
+        raise AssertionError("requests.get should not be called when fallback is disabled")
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+    monkeypatch.setattr(bclient.requests, "get", _fake_get)
+
+    try:
+        bclient._fetch_exchange_info_symbols_for_market(["btcusdt"], market="FUTURES")
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "gateway_upstream_error status=502" in str(exc)
+    assert calls["post_timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
+    assert calls["get"] == 0
+
+
 def test_ibkr_client_bridge_error_is_sanitized(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.ibkr_client as iclient

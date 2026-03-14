@@ -132,6 +132,36 @@ def send_test_order(
     return {"ok": True}
 
 
+def _fetch_exchange_info_rows_with_gateway_fallback(
+    *,
+    wanted: list[str],
+    market: str,
+    direct_url: str,
+) -> list | None:
+    rows = None
+    if _gateway_enabled():
+        try:
+            body = _post_gateway(
+                "/binance/exchange-info",
+                {"symbols": wanted, "market": market},
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
+            got = body.get("symbols") if isinstance(body, dict) else None
+            if isinstance(got, list):
+                rows = got
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                raise
+    if rows is None:
+        response = requests.get(direct_url, timeout=10)
+        if response.status_code >= 400:
+            detail = response.text
+            raise RuntimeError(f"Binance exchangeInfo error {response.status_code}: {detail}")
+        body = response.json()
+        rows = body.get("symbols") if isinstance(body, dict) else None
+    return rows if isinstance(rows, list) else None
+
+
 def _fetch_exchange_info_symbols(symbols: list[str]) -> dict[str, dict]:
     global _exchange_info_by_symbol, _exchange_info_cache_expiry
     wanted = sorted({str(s or "").upper().strip() for s in symbols if str(s or "").strip()})
@@ -143,31 +173,15 @@ def _fetch_exchange_info_symbols(symbols: list[str]) -> dict[str, dict]:
         if _exchange_info_by_symbol and now < _exchange_info_cache_expiry:
             return {s: _exchange_info_by_symbol[s] for s in wanted if s in _exchange_info_by_symbol}
 
-    rows = None
-    if _gateway_enabled():
-        try:
-            body = _post_gateway(
-                "/binance/exchange-info",
-                {"symbols": wanted, "market": "SPOT"},
-                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-            )
-            got = body.get("symbols") if isinstance(body, dict) else None
-            if isinstance(got, list):
-                rows = got
-        except Exception:
-            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                raise
-    if rows is None:
-        endpoint = _exchange_info_endpoint_for_market("SPOT")
-        base_url = _base_url_for_market("SPOT")
-        query = urlencode({"symbols": str(wanted).replace("'", '"')})
-        url = f"{base_url}{endpoint}?{query}"
-        response = requests.get(url, timeout=10)
-        if response.status_code >= 400:
-            detail = response.text
-            raise RuntimeError(f"Binance exchangeInfo error {response.status_code}: {detail}")
-        body = response.json()
-        rows = body.get("symbols") if isinstance(body, dict) else None
+    endpoint = _exchange_info_endpoint_for_market("SPOT")
+    base_url = _base_url_for_market("SPOT")
+    query = urlencode({"symbols": str(wanted).replace("'", '"')})
+    url = f"{base_url}{endpoint}?{query}"
+    rows = _fetch_exchange_info_rows_with_gateway_fallback(
+        wanted=wanted,
+        market="SPOT",
+        direct_url=url,
+    )
     if not isinstance(rows, list):
         return {}
     parsed: dict[str, dict] = {}
@@ -366,32 +380,16 @@ def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "S
     wanted = sorted({str(s or "").upper().strip() for s in symbols if str(s or "").strip()})
     if not wanted:
         return {}
-    rows = None
-    if _gateway_enabled():
-        try:
-            body = _post_gateway(
-                "/binance/exchange-info",
-                {"symbols": wanted, "market": market_norm},
-                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-            )
-            got = body.get("symbols") if isinstance(body, dict) else None
-            if isinstance(got, list):
-                rows = got
-        except Exception:
-            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                raise
-    if rows is None:
-        endpoint = _exchange_info_endpoint_for_market(market_norm)
-        base_url = _base_url_for_market(market_norm)
-        url = f"{base_url}{endpoint}"
-        if market_norm == "FUTURES" and len(wanted) == 1:
-            url = f"{url}?{urlencode({'symbol': wanted[0]})}"
-        response = requests.get(url, timeout=10)
-        if response.status_code >= 400:
-            detail = response.text
-            raise RuntimeError(f"Binance exchangeInfo error {response.status_code}: {detail}")
-        body = response.json()
-        rows = body.get("symbols") if isinstance(body, dict) else None
+    endpoint = _exchange_info_endpoint_for_market(market_norm)
+    base_url = _base_url_for_market(market_norm)
+    url = f"{base_url}{endpoint}"
+    if market_norm == "FUTURES" and len(wanted) == 1:
+        url = f"{url}?{urlencode({'symbol': wanted[0]})}"
+    rows = _fetch_exchange_info_rows_with_gateway_fallback(
+        wanted=wanted,
+        market=market_norm,
+        direct_url=url,
+    )
     if not isinstance(rows, list):
         return {}
     parsed: dict[str, dict] = {}
