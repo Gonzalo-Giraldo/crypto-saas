@@ -137,6 +137,51 @@ def test_binance_gateway_ticker_price_rate_limit_exceeded(client, monkeypatch):
     gw._rate_state.clear()
 
 
+def test_binance_gateway_exchange_info_symbols_required(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/exchange-info",
+            headers={"X-Internal-Token": "gw-token"},
+            json={"symbols": []},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "symbols_required"
+
+
+def test_binance_gateway_exchange_info_invalid_payload(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"unexpected": "payload"}
+
+    monkeypatch.setattr(gw.requests, "request", lambda *args, **kwargs: _Resp())
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/exchange-info",
+            headers={"X-Internal-Token": "gw-token"},
+            json={"symbols": ["BTCUSDT"]},
+        )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "invalid_exchange_info_payload"
+
+
 def test_binance_runtime_gateway_error_is_sanitized(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.execution_runtime as runtime
