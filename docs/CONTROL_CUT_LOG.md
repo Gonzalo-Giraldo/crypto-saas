@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-13-09] 2026-03-13 - Cierre retroactivo de control (commit ea9f3a1)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel aplicada antes del cierre final de review completa del diff
+- Scope: `apps/api/app/api/ops.py` (extraccion del helper `_evaluate_real_execution_pre_dispatch_gate(...)` en auto-pick Binance live) y trazabilidad metodologica asociada
+- Risk reviewed: riesgo procesal por aplicacion de cambio sensible antes del cierre formal de review; riesgo tecnico de desalineacion semantica en el gate pre-dispatch (`real_guard_reason` / `plan_reason`, `enforce_exit_plan`, y payloads bloqueantes)
+- Evidence checked: diff completo revisado; verificacion de preservacion de contratos en `_auto_pick_from_scan(...)`; smoke subset pertinente ejecutado (6 tests: 5 PASS, 1 FAIL preexistente `test_pretrade_auto_pick_dry_run_and_execute` en `tests/integration/test_critical_flows.py:674`, reproducido tambien contra el commit base)
+- Decision: Retroactive closure accepted
+- Condition (if any): incidencia de proceso cerrada retroactivamente; no repetir aplicacion de cambios sensibles antes de diff completo, review final y aprobacion explicita del usuario
+- Next micro-step: registrar nota tecnica minima del commit `ea9f3a1` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-13-08] 2026-03-13 - Cierre retroactivo de validacion dirigida (commit c206c41)
 
 - Level: 2

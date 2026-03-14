@@ -1,5 +1,16 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion del gate pre-dispatch de ejecucion real en auto-pick Binance live
+
+- Commit: ea9f3a1 modulation: extract real execution pre-dispatch gate helper in auto-pick
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/api/app/api/ops.py`
+- Se extrajo la evaluacion del gate pre-dispatch de ejecucion real a un helper privado `_evaluate_real_execution_pre_dispatch_gate(...)`.
+- El flujo orquestador `_auto_pick_from_scan(...)` se mantiene como orquestador principal y conserva contratos, decisiones bloqueantes y semantica de payloads (`execution: None` vs `execution: {"exit_plan": None}`) sin cambios.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 6 tests ejecutados -> 5 PASS, 1 FAIL preexistente (`test_pretrade_auto_pick_dry_run_and_execute`, `tests/integration/test_critical_flows.py:674`, reproducido tambien contra commit base).
+
+---
+
 ## Micro-modulacion del guard broker-side USDT spot en auto-pick Binance live
 
 - Tipo: micro-modulacion de kernel (sin cambio funcional)
