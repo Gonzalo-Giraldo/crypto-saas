@@ -1,5 +1,17 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion del semantic intent lock acquire en auto-pick Binance live
+
+- Commit: `621dab3 modulation: extract semantic intent lock acquire helper in auto-pick`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/api/app/api/ops.py`
+- Se extrajo la evaluacion/adquisicion del semantic intent lock a un helper privado `_evaluate_semantic_intent_lock_acquire(...)`.
+- El flujo orquestador `_auto_pick_from_scan(...)` conserva el control principal: `log_audit_event(...)`, returns bloqueantes, y ciclo `finally`/unlock de liberacion.
+- Se preserva la semantica fail-closed: excepcion durante adquisicion no produce bypass y se trata como no adquisicion.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 3 PASS, 1 FAIL preexistente (`test_pretrade_auto_pick_dry_run_and_execute`, `tests/integration/test_critical_flows.py:674`, reproducido contra baseline temporal).
+
+---
+
 ## Micro-modulacion del gate pre-dispatch de ejecucion real en auto-pick Binance live
 
 - Commit: ea9f3a1 modulation: extract real execution pre-dispatch gate helper in auto-pick

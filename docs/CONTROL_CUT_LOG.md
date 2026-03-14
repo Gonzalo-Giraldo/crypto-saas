@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-10] 2026-03-14 - Control de micro-modulacion semantic intent lock (commit 621dab3)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en flujo sensible de auto-pick live con extraccion de helper de adquisicion de semantic intent lock
+- Scope: `apps/api/app/api/ops.py` (bloque de evaluacion/adquisicion de semantic advisory lock en `_auto_pick_from_scan(...)`)
+- Risk reviewed: posible desalineacion semantica en acquire/release del lock (reason codes, fail-closed ante excepcion, preservacion de finally/unlock en caller)
+- Evidence checked: diff completo revisado; validacion smoke subset de auto-pick live ejecutada (4 tests: 3 PASS, 1 FAIL preexistente `test_pretrade_auto_pick_dry_run_and_execute` en `tests/integration/test_critical_flows.py:674`, reproducido contra baseline temporal)
+- Decision: Continue with validation
+- Condition (if any): mantener patron de micro-pasos con diff completo y validacion dirigida antes de siguiente cambio sensible
+- Next micro-step: registrar nota tecnica minima del commit `621dab3` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-13-09] 2026-03-13 - Cierre retroactivo de control (commit ea9f3a1)
 
 - Level: 2
