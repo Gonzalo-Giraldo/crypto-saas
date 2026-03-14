@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-15] 2026-03-14 - Control de micro-modulacion exchange-info Binance client + cobertura SPOT/FUTURES (commit c84aa5a)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en cliente Binance para centralizar el tramo comun gateway/fallback/direct de exchange-info y cerrar brecha de cobertura directa del flujo SPOT/FUTURES
+- Scope: `apps/worker/app/engine/binance_client.py` (extraccion de helper privado `_fetch_exchange_info_rows_with_gateway_fallback(...)` reutilizado por `_fetch_exchange_info_symbols(...)` y `_fetch_exchange_info_symbols_for_market(...)`) y `tests/integration/test_critical_flows.py` (3 tests nuevos de exchange-info)
+- Risk reviewed: posible desviacion semantica en el flujo exchange-info (politica de fallback, preservacion de URL/query SPOT/FUTURES, propagacion de timeout y preservacion de parseado/caching fuera del helper)
+- Evidence checked: diff completo revisado; validacion smoke subset pertinente ejecutada (4 tests: `test_binance_client_exchange_info_spot_uses_gateway_rows`, `test_binance_client_exchange_info_futures_fallbacks_to_direct_single_symbol`, `test_binance_client_exchange_info_futures_gateway_error_without_fallback_raises`, `test_binance_client_gateway_error_is_sanitized` -> 4 PASS)
+- Decision: Continue with validation
+- Condition (if any): preservar invariantes del contrato exchange-info (URL/query construida por caller, mensaje de error direct sin cambios, cache/TTL/lock SPOT fuera del helper y parseado/filtrado final fuera del helper)
+- Next micro-step: registrar nota tecnica minima del commit `c84aa5a` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-14] 2026-03-14 - Control de micro-modulacion runtime Binance gateway + cobertura de send path (commit 26f36a4)
 
 - Level: 2

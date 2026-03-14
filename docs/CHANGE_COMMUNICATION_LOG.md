@@ -1,5 +1,18 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion exchange-info Binance client: helper gateway/fallback + cobertura SPOT/FUTURES
+
+- Commit: `c84aa5a client: extract exchange info gateway fallback helper and add coverage`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/worker/app/engine/binance_client.py` y `tests/integration/test_critical_flows.py`
+- Se extrajo un helper privado `_fetch_exchange_info_rows_with_gateway_fallback(...)` para centralizar exclusivamente el tramo comun de exchange-info: intento por gateway, politica de fallback, fetch direct y obtencion de `rows`.
+- Se actualizaron unicamente los dos call sites de exchange-info en cliente Binance: `_fetch_exchange_info_symbols(...)` (SPOT) y `_fetch_exchange_info_symbols_for_market(...)` (FUTURES).
+- Se preserva la semantica original SPOT/FUTURES: la construccion de URL/query queda en cada caller; cache/TTL/lock SPOT y parseado/filtrado final permanecen fuera del helper.
+- Se añadió cobertura minima directa del flujo exchange-info con 3 tests: `test_binance_client_exchange_info_spot_uses_gateway_rows`, `test_binance_client_exchange_info_futures_fallbacks_to_direct_single_symbol`, `test_binance_client_exchange_info_futures_gateway_error_without_fallback_raises`.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 4 PASS (`test_binance_client_exchange_info_spot_uses_gateway_rows`, `test_binance_client_exchange_info_futures_fallbacks_to_direct_single_symbol`, `test_binance_client_exchange_info_futures_gateway_error_without_fallback_raises`, `test_binance_client_gateway_error_is_sanitized`).
+
+---
+
 ## Micro-modulacion runtime Binance gateway: helper POST comun + cobertura del path de envio
 
 - Commit: `26f36a4 runtime: extract Binance gateway post helper and add send path coverage`
