@@ -536,6 +536,37 @@ def _build_auto_pick_exit_plan(
     return plan, None
 
 
+def _evaluate_real_execution_pre_dispatch_gate(
+    *,
+    current_user: User,
+    exchange: str,
+    symbol: str,
+    side: str,
+    candidate: Optional[PretradeCheckRequest],
+    enforce_exit_plan: bool,
+) -> tuple[Optional[str], Optional[str], Optional[dict]]:
+    real_guard_reason = _auto_pick_real_guard_reason(
+        current_user=current_user,
+        exchange=exchange,
+        symbol=symbol,
+    )
+    if real_guard_reason:
+        return real_guard_reason, None, None
+    exit_plan = None
+    plan_reason = None
+    if enforce_exit_plan:
+        rr_estimate = float(candidate.rr_estimate) if candidate else None
+        atr_pct = float(candidate.atr_pct) if candidate else None
+        exit_plan, plan_reason = _build_auto_pick_exit_plan(
+            exchange=exchange,
+            symbol=symbol,
+            side=side,
+            rr_estimate=rr_estimate,
+            atr_pct=atr_pct,
+        )
+    return None, plan_reason, exit_plan
+
+
 def _evaluate_binance_spot_usdt_broker_guard(
     *,
     user_id: str,
@@ -2486,10 +2517,13 @@ def _auto_pick_from_scan(
             enforce_exit_plan = bool(
                 settings.AUTO_PICK_REAL_REQUIRE_EXIT_PLAN and settings.AUTO_PICK_REAL_GUARD_ENABLED
             )
-            real_guard_reason = _auto_pick_real_guard_reason(
+            real_guard_reason, plan_reason, exit_plan = _evaluate_real_execution_pre_dispatch_gate(
                 current_user=current_user,
                 exchange=exchange,
                 symbol=selected_symbol,
+                side=selected_side,
+                candidate=candidate,
+                enforce_exit_plan=enforce_exit_plan,
             )
             if real_guard_reason:
                 return _finalize({
@@ -2528,54 +2562,43 @@ def _auto_pick_from_scan(
                     "execution": None,
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
-            exit_plan = None
-            if enforce_exit_plan:
-                rr_estimate = float(candidate.rr_estimate) if candidate else None
-                atr_pct = float(candidate.atr_pct) if candidate else None
-                exit_plan, plan_reason = _build_auto_pick_exit_plan(
-                    exchange=exchange,
-                    symbol=selected_symbol,
-                    side=selected_side,
-                    rr_estimate=rr_estimate,
-                    atr_pct=atr_pct,
-                )
-                if plan_reason:
-                    return _finalize({
-                        "exchange": exchange,
-                        "dry_run": bool(payload.dry_run),
-                        "requested_direction": payload.direction,
-                        "selected": False,
-                        "selected_symbol": None,
-                        "selected_side": None,
-                        "selected_qty": None,
-                        "selected_score": None,
-                        "selected_score_rules": None,
-                        "selected_score_market": None,
-                        "selected_trend_score": None,
-                        "selected_trend_score_1d": None,
-                        "selected_trend_score_4h": None,
-                        "selected_trend_score_1h": None,
-                        "selected_micro_trend_15m": None,
-                        "selected_market_regime": None,
-                        "selected_liquidity_state": liquidity_state,
-                        "selected_size_multiplier": round(float(size_multiplier), 4),
-                        "top_candidate_symbol": top_candidate_symbol,
-                        "top_candidate_score": (top_candidate or {}).get("score"),
-                        "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
-                        "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-                        "top_candidate_trend_score": top_candidate_trend_score,
-                        "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
-                        "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
-                        "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
-                        "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
-                        "avg_score": avg_score,
-                        "avg_score_rules": avg_score_rules,
-                        "avg_score_market": avg_score_market,
-                        "decision": "blocked_real_execution_guard",
-                        "top_failed_checks": [plan_reason],
-                        "execution": {"exit_plan": None},
-                        "scan": scan,
-                    }, max_spread=max_spread, max_slippage=max_slippage)
+            if plan_reason:
+                return _finalize({
+                    "exchange": exchange,
+                    "dry_run": bool(payload.dry_run),
+                    "requested_direction": payload.direction,
+                    "selected": False,
+                    "selected_symbol": None,
+                    "selected_side": None,
+                    "selected_qty": None,
+                    "selected_score": None,
+                    "selected_score_rules": None,
+                    "selected_score_market": None,
+                    "selected_trend_score": None,
+                    "selected_trend_score_1d": None,
+                    "selected_trend_score_4h": None,
+                    "selected_trend_score_1h": None,
+                    "selected_micro_trend_15m": None,
+                    "selected_market_regime": None,
+                    "selected_liquidity_state": liquidity_state,
+                    "selected_size_multiplier": round(float(size_multiplier), 4),
+                    "top_candidate_symbol": top_candidate_symbol,
+                    "top_candidate_score": (top_candidate or {}).get("score"),
+                    "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                    "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                    "top_candidate_trend_score": top_candidate_trend_score,
+                    "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                    "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                    "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                    "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                    "avg_score": avg_score,
+                    "avg_score_rules": avg_score_rules,
+                    "avg_score_market": avg_score_market,
+                    "decision": "blocked_real_execution_guard",
+                    "top_failed_checks": [plan_reason],
+                    "execution": {"exit_plan": None},
+                    "scan": scan,
+                }, max_spread=max_spread, max_slippage=max_slippage)
             intent_lock_reason = None
             if not str(settings.DATABASE_URL or "").lower().startswith("postgres"):
                 intent_lock_reason = "semantic_intent_lock_requires_postgres"
