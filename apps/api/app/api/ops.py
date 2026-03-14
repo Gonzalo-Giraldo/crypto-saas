@@ -609,6 +609,35 @@ def _evaluate_semantic_intent_lock_acquire(
     return intent_lock_reason, intent_lock_key, intent_lock_acquired, intent_lock_conn
 
 
+def _reserve_auto_pick_pre_dispatch_idempotency(
+    *,
+    db: Session,
+    user_id: str,
+    exchange: str,
+    symbol: str,
+    side: str,
+    selected_qty: float,
+    idempotency_key: Optional[str],
+) -> tuple[Optional[dict], str, dict]:
+    idempotency_endpoint = f"/ops/execution/pretrade/{exchange.lower()}/auto-pick"
+    idempotency_request_payload = {
+        "user_id": user_id,
+        "endpoint": idempotency_endpoint,
+        "exchange": str(exchange).upper(),
+        "symbol": symbol,
+        "side": side,
+        "selected_qty_normalized": float(selected_qty),
+    }
+    cached_response = reserve_idempotent_intent(
+        db=db,
+        user_id=user_id,
+        endpoint=idempotency_endpoint,
+        idempotency_key=idempotency_key or "",
+        request_payload=idempotency_request_payload,
+    )
+    return cached_response, idempotency_endpoint, idempotency_request_payload
+
+
 def _evaluate_binance_spot_usdt_broker_guard(
     *,
     user_id: str,
@@ -2767,22 +2796,14 @@ def _auto_pick_from_scan(
                     "execution": None,
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
-            # Reserve idempotency intent pre-dispatch for live auto-pick
-            idempotency_endpoint = f"/ops/execution/pretrade/{exchange.lower()}/auto-pick"
-            idempotency_request_payload = {
-                "user_id": current_user.id,
-                "endpoint": idempotency_endpoint,
-                "exchange": str(exchange).upper(),
-                "symbol": selected_symbol,
-                "side": selected_side,
-                "selected_qty_normalized": float(selected_qty),
-            }
-            cached_response = reserve_idempotent_intent(
+            cached_response, idempotency_endpoint, idempotency_request_payload = _reserve_auto_pick_pre_dispatch_idempotency(
                 db=db,
                 user_id=current_user.id,
-                endpoint=idempotency_endpoint,
-                idempotency_key=idempotency_key or "",
-                request_payload=idempotency_request_payload,
+                exchange=exchange,
+                symbol=selected_symbol,
+                side=selected_side,
+                selected_qty=selected_qty,
+                idempotency_key=idempotency_key,
             )
             if cached_response is not None:
                 return cached_response
