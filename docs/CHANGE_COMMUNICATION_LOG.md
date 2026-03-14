@@ -1,5 +1,18 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion runtime Binance gateway: helper POST comun + cobertura del path de envio
+
+- Commit: `26f36a4 runtime: extract Binance gateway post helper and add send path coverage`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/worker/app/engine/execution_runtime.py` y `tests/integration/test_critical_flows.py`
+- Se extrajo un helper privado `_post_binance_gateway(...)` para centralizar base URL + endpoint, headers con `X-Internal-Token`, `requests.post(...)`, timeout y manejo homogéneo de `status_code >= 400` con `_build_gateway_runtime_error(...)`.
+- Se actualizaron unicamente los dos call sites runtime Binance: `_send_binance_test_order_via_gateway(...)` y `_get_binance_account_status_via_gateway(...)`.
+- Se preserva la semantica original: `_send_binance_test_order_via_gateway(...)` no parsea JSON en exito; `_get_binance_account_status_via_gateway(...)` mantiene `return response.json()`.
+- Se añadió cobertura minima para el path real de envio gateway con `test_binance_runtime_send_path_executes_gateway_chain`.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 4 PASS (`test_binance_runtime_send_path_executes_gateway_chain`, `test_binance_gateway_account_status_uses_spot_base`, `test_binance_gateway_returns_502_on_upstream_unreachable`, `test_binance_runtime_gateway_error_is_sanitized`).
+
+---
+
 ## Micro-modulacion del helper MTF trend fields en auto-pick Binance live
 
 - Commit: `8ad5028 modulation: extract auto-pick mtf trend field helper`

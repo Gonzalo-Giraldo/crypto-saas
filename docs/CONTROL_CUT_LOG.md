@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-14] 2026-03-14 - Control de micro-modulacion runtime Binance gateway + cobertura de send path (commit 26f36a4)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en runtime Binance para eliminar duplicacion del POST a gateway y cerrar brecha de cobertura del path real de envio
+- Scope: `apps/worker/app/engine/execution_runtime.py` (helper privado `_post_binance_gateway(...)` reutilizado por `_send_binance_test_order_via_gateway(...)` y `_get_binance_account_status_via_gateway(...)`) y `tests/integration/test_critical_flows.py` (nuevo test `test_binance_runtime_send_path_executes_gateway_chain`)
+- Risk reviewed: posible desviacion semantica en el path gateway (headers/token, timeout, formato de error runtime, y parseo JSON solo en account-status)
+- Evidence checked: diff completo revisado; validacion smoke subset pertinente ejecutada (4 tests: `test_binance_runtime_send_path_executes_gateway_chain`, `test_binance_gateway_account_status_uses_spot_base`, `test_binance_gateway_returns_502_on_upstream_unreachable`, `test_binance_runtime_gateway_error_is_sanitized` -> 4 PASS)
+- Decision: Continue with validation
+- Condition (if any): preservar invariantes del contrato runtime (`_send_binance_test_order_via_gateway(...)` sin parseo JSON en exito; `_get_binance_account_status_via_gateway(...)` retornando `response.json()`), manteniendo timeout y sanitizacion de error sin cambios funcionales
+- Next micro-step: registrar nota tecnica minima del commit `26f36a4` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-13] 2026-03-14 - Control de micro-modulacion de helper MTF trend fields (commit 8ad5028)
 
 - Level: 2
