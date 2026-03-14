@@ -1,5 +1,18 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion gateway Binance: helper de autorizacion interna + rate-limit preamble
+
+- Commit: `df18236 gateway: extract internal request authorization helper`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/binance_gateway/main.py`
+- Se extrajo un helper privado `_authorize_internal_request(x_internal_token: str) -> None` para centralizar exclusivamente el preambulo comun de seguridad en endpoints Binance del gateway.
+- Se actualizaron unicamente 6 endpoints Binance (`/binance/test-order`, `/binance/account-status`, `/binance/ticker-24hr`, `/binance/klines`, `/binance/exchange-info`, `/binance/ticker-price`) reemplazando el bloque repetido por el helper.
+- Se preserva la semantica original: validacion de token interno con `403/forbidden`, orden auth->rate-limit, y uso de `x_internal_token` como clave de `_enforce_rate_limit(...)`.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 2 tests ejecutados -> 2 PASS (`test_binance_gateway_account_status_uses_spot_base`, `test_binance_gateway_returns_502_on_upstream_unreachable`).
+- Nota de cobertura: no hay prueba directa en este subset para los escenarios explicitos `403 forbidden` y `429 rate_limit_exceeded`.
+
+---
+
 ## Micro-modulacion ticker-price Binance client: helper gateway/fallback + cobertura SPOT/FUTURES
 
 - Commit: `543c57b client: extract ticker price gateway fallback helper and add coverage`

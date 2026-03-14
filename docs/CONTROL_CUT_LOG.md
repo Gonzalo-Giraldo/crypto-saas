@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-17] 2026-03-14 - Control de micro-modulacion gateway Binance auth/rate-limit preamble (commit df18236)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en gateway Binance para centralizar el preambulo comun de autorizacion interna y rate-limit en endpoints `/binance/*`
+- Scope: `apps/binance_gateway/main.py` (extraccion de helper privado `_authorize_internal_request(...)` reutilizado por 6 endpoints Binance: `test-order`, `account-status`, `ticker-24hr`, `klines`, `exchange-info`, `ticker-price`)
+- Risk reviewed: posible desviacion semantica en autorizacion/rate-limit (preservacion de `status_code=403`, `detail="forbidden"`, orden auth->rate-limit y clave `x_internal_token`)
+- Evidence checked: diff completo revisado; validacion smoke subset pertinente ejecutada (2 tests: `test_binance_gateway_account_status_uses_spot_base`, `test_binance_gateway_returns_502_on_upstream_unreachable` -> 2 PASS)
+- Decision: Continue with validation
+- Condition (if any): preservar invariantes del contrato gateway (`403/forbidden`, orden auth->rate-limit, clave `x_internal_token`, sin cambios de payload ni logica de negocio en rutas)
+- Next micro-step: registrar nota tecnica minima del commit `df18236` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-16] 2026-03-14 - Control de micro-modulacion ticker-price Binance client + cobertura SPOT/FUTURES (commit 543c57b)
 
 - Level: 2
