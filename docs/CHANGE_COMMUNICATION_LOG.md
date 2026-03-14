@@ -1,5 +1,17 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion de reserva idempotente pre-dispatch en auto-pick Binance live
+
+- Commit: `5cb9297 modulation: extract auto-pick pre-dispatch idempotency helper`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/api/app/api/ops.py`
+- Se extrajo la reserva idempotente pre-dispatch a un helper privado `_reserve_auto_pick_pre_dispatch_idempotency(...)`.
+- El flujo orquestador `_auto_pick_from_scan(...)` conserva el control principal: `return cached_response` y `idempotency_reserved = True` permanecen en el caller.
+- Se preserva el material idempotente y la simetria posterior con `finalize_idempotent_intent(...)` sin cambios funcionales.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 3 PASS, 1 FAIL preexistente (`test_pretrade_auto_pick_dry_run_and_execute`, `tests/integration/test_critical_flows.py:674`, reproducido contra baseline temporal).
+
+---
+
 ## Micro-modulacion del semantic intent lock acquire en auto-pick Binance live
 
 - Commit: `621dab3 modulation: extract semantic intent lock acquire helper in auto-pick`

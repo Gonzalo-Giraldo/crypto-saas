@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-11] 2026-03-14 - Control de micro-modulacion de reserva idempotente pre-dispatch (commit 5cb9297)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en auto-pick live con extraccion del bloque de reserva idempotente pre-dispatch a helper privado minimo
+- Scope: `apps/api/app/api/ops.py` (reserva idempotente pre-dispatch en `_auto_pick_from_scan(...)`)
+- Risk reviewed: posible desalineacion del material idempotente (`endpoint`, `request_payload`) y de la simetria posterior con `finalize_idempotent_intent(...)`
+- Evidence checked: diff completo revisado; validacion smoke subset de auto-pick live ejecutada (4 tests: 3 PASS, 1 FAIL preexistente `test_pretrade_auto_pick_dry_run_and_execute` en `tests/integration/test_critical_flows.py:674`, reproducido contra baseline temporal)
+- Decision: Continue with validation
+- Condition (if any): mantener invariantes idempotentes (material canonico, early return por replay, `idempotency_reserved=True` solo sin replay, y finalize con el mismo payload reservado)
+- Next micro-step: registrar nota tecnica minima del commit `5cb9297` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-10] 2026-03-14 - Control de micro-modulacion semantic intent lock (commit 621dab3)
 
 - Level: 2
