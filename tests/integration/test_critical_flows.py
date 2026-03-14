@@ -81,6 +81,62 @@ def test_binance_gateway_returns_502_on_upstream_unreachable(client, monkeypatch
     assert resp.json()["detail"] == "binance_upstream_unreachable"
 
 
+def test_binance_gateway_ticker_price_forbidden_without_valid_internal_token(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+    monkeypatch.setattr(gw, "RATE_LIMIT_PER_MIN", 9999)
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/ticker-price",
+            headers={"X-Internal-Token": "wrong-token"},
+            json={"symbol": "BTCUSDT"},
+        )
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "forbidden"
+
+
+def test_binance_gateway_ticker_price_rate_limit_exceeded(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+    monkeypatch.setattr(gw, "RATE_LIMIT_PER_MIN", 1)
+    gw._rate_state.clear()
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"symbol": "BTCUSDT", "price": "50000.00"}
+
+    monkeypatch.setattr(gw.requests, "request", lambda *args, **kwargs: _Resp())
+
+    with GatewayClient(gw.app) as gc:
+        first = gc.post(
+            "/binance/ticker-price",
+            headers={"X-Internal-Token": "gw-token"},
+            json={"symbol": "BTCUSDT"},
+        )
+        second = gc.post(
+            "/binance/ticker-price",
+            headers={"X-Internal-Token": "gw-token"},
+            json={"symbol": "BTCUSDT"},
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 429
+    assert second.json()["detail"] == "rate_limit_exceeded"
+
+    gw._rate_state.clear()
+
+
 def test_binance_runtime_gateway_error_is_sanitized(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.execution_runtime as runtime
