@@ -1,5 +1,17 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion del finalize idempotente best-effort en auto-pick Binance live
+
+- Commit: `6652c94 modulation: extract auto-pick idempotent finalize helper`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/api/app/api/ops.py`
+- Se extrajo el bloque de finalizacion idempotente best-effort a un helper privado `_finalize_auto_pick_idempotent_intent_best_effort(...)`.
+- El helper encapsula `finalize_idempotent_intent(...)` bajo `try/except Exception: pass`, preservando la semantica best-effort original para ambas ramas.
+- El flujo orquestador `_auto_pick_from_scan(...)` conserva el control principal: call al helper con `status_code=500` en la rama de error y con `status_code=200` en la rama de exito; el comentario aclaratorio de la rama de exito se preserva en el call site del caller.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 3 PASS, 1 FAIL preexistente (`test_pretrade_auto_pick_dry_run_and_execute`, `tests/integration/test_critical_flows.py:674`, reproducido contra baseline temporal).
+
+---
+
 ## Micro-modulacion de reserva idempotente pre-dispatch en auto-pick Binance live
 
 - Commit: `5cb9297 modulation: extract auto-pick pre-dispatch idempotency helper`

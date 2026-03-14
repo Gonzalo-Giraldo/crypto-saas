@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-12] 2026-03-14 - Control de micro-modulacion de finalize idempotente best-effort (commit 6652c94)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en auto-pick live con extraccion del bloque de finalizacion idempotente best-effort a helper privado minimo
+- Scope: `apps/api/app/api/ops.py` (bloque de finalizacion idempotente en las dos ramas —error (status_code=500) y exito (status_code=200)— dentro de `_auto_pick_from_scan(...)`)
+- Risk reviewed: posible perdida de semantica best-effort o de diferenciacion de status_code entre la rama de error y la rama de exito; preservacion del comentario aclaratorio en el call site de exito
+- Evidence checked: diff completo revisado; validacion smoke subset de auto-pick live ejecutada (4 tests: 3 PASS, 1 FAIL preexistente `test_pretrade_auto_pick_dry_run_and_execute` en `tests/integration/test_critical_flows.py:674`, reproducido contra baseline temporal)
+- Decision: Continue with validation
+- Condition (if any): mantener invariantes de finalizacion best-effort (`try/except Exception: pass` dentro del helper) y que el `status_code` correcto sea pasado desde cada call site del caller
+- Next micro-step: registrar nota tecnica minima del commit `6652c94` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-11] 2026-03-14 - Control de micro-modulacion de reserva idempotente pre-dispatch (commit 5cb9297)
 
 - Level: 2
