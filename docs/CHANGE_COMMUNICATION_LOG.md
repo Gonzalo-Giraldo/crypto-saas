@@ -1,5 +1,18 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion ticker-price Binance client: helper gateway/fallback + cobertura SPOT/FUTURES
+
+- Commit: `543c57b client: extract ticker price gateway fallback helper and add coverage`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/worker/app/engine/binance_client.py` y `tests/integration/test_critical_flows.py`
+- Se extrajo un helper privado `_fetch_ticker_price_body_with_gateway_fallback(...)` para centralizar exclusivamente el tramo comun de ticker-price: intento por gateway, politica de fallback, fetch direct y obtencion de `body`.
+- Se actualizaron unicamente los dos call sites de ticker-price en cliente Binance: `_fetch_symbol_price(...)` (SPOT) y `_fetch_symbol_price_for_market(...)` (FUTURES).
+- Se preserva la semantica original SPOT/FUTURES: la construccion de URL/query queda en cada caller; cache/TTL/lock SPOT y regla final `px > 0` permanecen fuera del helper.
+- Se añadió cobertura minima directa del flujo ticker-price con 3 tests: `test_binance_client_ticker_price_spot_uses_gateway_row`, `test_binance_client_ticker_price_futures_fallbacks_to_direct`, `test_binance_client_ticker_price_futures_gateway_error_without_fallback_returns_none`.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 4 PASS (`test_binance_client_ticker_price_spot_uses_gateway_row`, `test_binance_client_ticker_price_futures_fallbacks_to_direct`, `test_binance_client_ticker_price_futures_gateway_error_without_fallback_returns_none`, `test_binance_client_gateway_error_is_sanitized`).
+
+---
+
 ## Micro-modulacion exchange-info Binance client: helper gateway/fallback + cobertura SPOT/FUTURES
 
 - Commit: `c84aa5a client: extract exchange info gateway fallback helper and add coverage`
