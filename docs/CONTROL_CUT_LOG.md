@@ -44,6 +44,18 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## [CUT-2026-03-14-13] 2026-03-14 - Control de micro-modulacion de helper MTF trend fields (commit 8ad5028)
+
+- Level: 2
+- Trigger: micro-modulacion de kernel en auto-pick live con extraccion de la funcion anidada de resolucion de trend fields MTF a helper privado de modulo
+- Scope: `apps/api/app/api/ops.py` (extraccion de `_resolve_trend_fields` fuera de `_auto_pick_from_scan(...)` como `_resolve_auto_pick_mtf_trend_fields(...)`, con `exchange` como parametro explicito y actualizacion de 2 call sites)
+- Risk reviewed: posible desalineacion de resolucion de trend fields (`trend_score`, `trend_1d`, `trend_4h`, `trend_1h`, `micro_trend_15m`), incluyendo fallback MTF para BINANCE cuando faltan campos
+- Evidence checked: diff completo revisado; validacion smoke subset de auto-pick live ejecutada (4 tests: 3 PASS, 1 FAIL preexistente `test_pretrade_auto_pick_dry_run_and_execute` en `tests/integration/test_critical_flows.py:674`)
+- Decision: Continue with validation
+- Condition (if any): mantener invariantes de no cambio semantico (misma logica de calculo/fallback, firma posicional conservadora, y solo 2 call sites actualizados)
+- Next micro-step: registrar nota tecnica minima del commit `8ad5028` en `docs/CHANGE_COMMUNICATION_LOG.md`
+- Owner: engineering/codex session
+
 ## [CUT-2026-03-14-12] 2026-03-14 - Control de micro-modulacion de finalize idempotente best-effort (commit 6652c94)
 
 - Level: 2

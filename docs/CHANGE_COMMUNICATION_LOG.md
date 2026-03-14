@@ -1,5 +1,18 @@
 # CHANGE COMMUNICATION LOG
 
+## Micro-modulacion del helper MTF trend fields en auto-pick Binance live
+
+- Commit: `8ad5028 modulation: extract auto-pick mtf trend field helper`
+- Tipo: micro-modulacion de kernel (sin cambio funcional intencional)
+- Scope minimo: `apps/api/app/api/ops.py`
+- Se extrajo la funcion anidada `_resolve_trend_fields` fuera de `_auto_pick_from_scan(...)` a un helper privado de modulo `_resolve_auto_pick_mtf_trend_fields(...)`.
+- Se hizo explicito `exchange` como parametro del helper y se actualizaron unicamente los dos call sites existentes en `_auto_pick_from_scan(...)`, manteniendo invocacion posicional conservadora.
+- Se preserva la semantica de resolucion de trend fields y del fallback MTF para BINANCE cuando faltan campos.
+- `_auto_pick_from_scan(...)` se mantiene como orquestador principal del flujo.
+- Validacion posterior al cambio (Docker Python 3.11, subset pertinente): 4 tests ejecutados -> 3 PASS, 1 FAIL preexistente (`test_pretrade_auto_pick_dry_run_and_execute`, `tests/integration/test_critical_flows.py:674`).
+
+---
+
 ## Micro-modulacion del finalize idempotente best-effort en auto-pick Binance live
 
 - Commit: `6652c94 modulation: extract auto-pick idempotent finalize helper`
