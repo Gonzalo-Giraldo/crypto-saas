@@ -638,6 +638,30 @@ def _reserve_auto_pick_pre_dispatch_idempotency(
     return cached_response, idempotency_endpoint, idempotency_request_payload
 
 
+def _finalize_auto_pick_idempotent_intent_best_effort(
+    *,
+    db: Session,
+    user_id: str,
+    endpoint: str,
+    idempotency_key: Optional[str],
+    request_payload: dict,
+    response_payload: dict,
+    status_code: int,
+) -> None:
+    try:
+        finalize_idempotent_intent(
+            db=db,
+            user_id=user_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            request_payload=request_payload,
+            response_payload=response_payload,
+            status_code=status_code,
+        )
+    except Exception:
+        pass
+
+
 def _evaluate_binance_spot_usdt_broker_guard(
     *,
     user_id: str,
@@ -2832,18 +2856,15 @@ def _auto_pick_from_scan(
                 decision = "insufficient_resources_or_execution_error"
                 execution = {"error": str(exc.detail)}
                 if idempotency_reserved:
-                    try:
-                        finalize_idempotent_intent(
-                            db=db,
-                            user_id=current_user.id,
-                            endpoint=idempotency_endpoint,
-                            idempotency_key=idempotency_key,
-                            request_payload=idempotency_request_payload,
-                            response_payload={"decision": decision, "execution": execution},
-                            status_code=500,
-                        )
-                    except Exception:
-                        pass
+                    _finalize_auto_pick_idempotent_intent_best_effort(
+                        db=db,
+                        user_id=current_user.id,
+                        endpoint=idempotency_endpoint,
+                        idempotency_key=idempotency_key,
+                        request_payload=idempotency_request_payload,
+                        response_payload={"decision": decision, "execution": execution},
+                        status_code=500,
+                    )
 
         (
             selected_trend_score,
@@ -2908,19 +2929,16 @@ def _auto_pick_from_scan(
         }, max_spread=max_spread, max_slippage=max_slippage)
 
         if idempotency_reserved:
-            try:
-                finalize_idempotent_intent(
-                    db=db,
-                    user_id=current_user.id,
-                    endpoint=idempotency_endpoint,
-                    idempotency_key=idempotency_key,
-                    request_payload=idempotency_request_payload,
-                    response_payload=out,
-                    status_code=200,
-                )
-            except Exception:
-                # Keep the candidate result path operational; reservation finalization is best-effort.
-                pass
+            # Keep the candidate result path operational; reservation finalization is best-effort.
+            _finalize_auto_pick_idempotent_intent_best_effort(
+                db=db,
+                user_id=current_user.id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=idempotency_request_payload,
+                response_payload=out,
+                status_code=200,
+            )
 
         return out
     finally:
