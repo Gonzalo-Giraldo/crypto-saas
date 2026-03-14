@@ -93,6 +93,12 @@ def _raise_upstream_http_error(response: requests.Response) -> None:
     raise HTTPException(status_code=502, detail=detail)
 
 
+def _authorize_internal_request(x_internal_token: str) -> None:
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=403, detail="forbidden")
+    _enforce_rate_limit(x_internal_token)
+
+
 @app.get("/healthz")
 def healthz():
     if not HEALTHZ_CHECK_BINANCE:
@@ -108,9 +114,7 @@ def healthz():
 
 @app.post("/binance/test-order")
 def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
-    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _authorize_internal_request(x_internal_token)
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
@@ -147,9 +151,7 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
 
 @app.post("/binance/account-status")
 def binance_account_status(payload: BinanceAccountStatusIn, x_internal_token: str = Header(default="")):
-    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _authorize_internal_request(x_internal_token)
 
     params = {
         "timestamp": int(time.time() * 1000),
@@ -171,9 +173,7 @@ def binance_account_status(payload: BinanceAccountStatusIn, x_internal_token: st
 
 @app.post("/binance/ticker-24hr")
 def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Header(default="")):
-    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _authorize_internal_request(x_internal_token)
 
     market = _resolve_market(payload.market)
     if market == "FUTURES":
@@ -206,9 +206,7 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
 
 @app.post("/binance/klines")
 def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(default="")):
-    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _authorize_internal_request(x_internal_token)
 
     market = _resolve_market(payload.market)
     symbol = str(payload.symbol or "").upper().strip()
@@ -232,9 +230,7 @@ def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(defa
 
 @app.post("/binance/exchange-info")
 def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str = Header(default="")):
-    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _authorize_internal_request(x_internal_token)
 
     market = _resolve_market(payload.market)
     symbols = sorted({str(s).upper().strip() for s in (payload.symbols or []) if str(s).strip()})
@@ -263,9 +259,7 @@ def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str 
 
 @app.post("/binance/ticker-price")
 def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = Header(default="")):
-    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
-        raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _authorize_internal_request(x_internal_token)
 
     market = _resolve_market(payload.market)
     symbol = str(payload.symbol or "").upper().strip()
