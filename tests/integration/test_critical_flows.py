@@ -1153,6 +1153,23 @@ def test_binance_client_exchange_info_gateway_failure_with_direct_fallback_retur
     assert out["BTCUSDT"]["filters"][0]["filterType"] == "LOT_SIZE"
 
 
+def test_binance_runtime_strict_mode_rejects_direct_fallback_enabled(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_STRICT_MODE", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+
+    try:
+        runtime._assert_binance_gateway_policy()
+        assert False, "expected HTTPException"
+    except runtime.HTTPException as exc:
+        assert exc.status_code == 500
+        assert exc.detail == "Binance strict mode requires BINANCE_GATEWAY_FALLBACK_DIRECT=false"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
