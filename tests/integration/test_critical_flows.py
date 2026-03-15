@@ -1196,6 +1196,38 @@ def test_binance_runtime_account_status_gateway_failure_with_direct_fallback_ret
     assert out["balances"][0]["asset"] == "USDT"
 
 
+def test_binance_runtime_send_test_order_gateway_upstream_error_does_not_fallback_direct(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+
+    def _via_gateway(**kwargs):
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    def _direct(**kwargs):
+        raise AssertionError("direct fallback should not be used for sanitized gateway upstream errors")
+
+    monkeypatch.setattr(runtime, "_send_binance_test_order_via_gateway", _via_gateway)
+    monkeypatch.setattr(runtime, "send_test_order", _direct)
+
+    try:
+        runtime._send_binance_test_order(
+            api_key="k",
+            api_secret="s",
+            symbol="BTCUSDT",
+            side="BUY",
+            qty=1.0,
+            client_order_id="cid-1",
+            market="SPOT",
+        )
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert str(exc) == "gateway_upstream_error status=502"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
