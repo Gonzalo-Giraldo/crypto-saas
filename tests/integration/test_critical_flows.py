@@ -1334,6 +1334,24 @@ def test_binance_runtime_test_order_entrypoint_maps_internal_failure_to_http_502
         assert exc.detail == "Binance test order failed: gateway_upstream_error status=502"
 
 
+def test_auto_pick_execution_requires_idempotency_key_only_when_not_dry_run(client):
+    _ = client
+    import apps.api.app.api.ops as ops_api
+    from apps.api.app.schemas.strategy import PretradeAutoPickRequest
+
+    live_payload = PretradeAutoPickRequest(top_n=5, dry_run=False, direction="LONG")
+    dry_payload = PretradeAutoPickRequest(top_n=5, dry_run=True, direction="LONG")
+
+    try:
+        ops_api._require_idempotency_for_auto_pick_execution(payload=live_payload, idempotency_key=None)
+        assert False, "expected HTTPException for live auto-pick without idempotency key"
+    except ops_api.HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail == "X-Idempotency-Key is required when dry_run=false"
+
+    ops_api._require_idempotency_for_auto_pick_execution(payload=dry_payload, idempotency_key=None)
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
