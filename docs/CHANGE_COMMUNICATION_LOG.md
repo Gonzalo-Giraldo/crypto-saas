@@ -462,3 +462,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "strict_mode_rejects_direct_fallback_enabled"`
   - Result: `1 passed, 81 deselected`
+
+## db00a39 — binance runtime account-status gateway fallback test coverage
+- Added one isolated fallback-path test for Binance runtime account-status flow.
+- Covered behavior when gateway request fails and runtime falls back to direct account-status retrieval.
+- Confirmed returned payload preserves direct `canTrade` and `balances` data.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "account_status_gateway_failure_with_direct_fallback_returns_direct_payload"`
+  - Result: `1 passed, 82 deselected`
