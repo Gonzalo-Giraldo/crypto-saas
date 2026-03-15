@@ -1228,6 +1228,44 @@ def test_binance_runtime_send_test_order_gateway_upstream_error_does_not_fallbac
         assert str(exc) == "gateway_upstream_error status=502"
 
 
+def test_binance_runtime_send_test_order_unsanitized_gateway_error_uses_direct_fallback(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+
+    def _via_gateway(**kwargs):
+        raise RuntimeError("temporary network failure")
+
+    called = {}
+
+    def _direct(**kwargs):
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr(runtime, "_send_binance_test_order_via_gateway", _via_gateway)
+    monkeypatch.setattr(runtime, "send_test_order", _direct)
+
+    runtime._send_binance_test_order(
+        api_key="k",
+        api_secret="s",
+        symbol="BTCUSDT",
+        side="BUY",
+        qty=1.0,
+        client_order_id="cid-1",
+        market="SPOT",
+    )
+
+    assert called["kwargs"]["api_key"] == "k"
+    assert called["kwargs"]["api_secret"] == "s"
+    assert called["kwargs"]["symbol"] == "BTCUSDT"
+    assert called["kwargs"]["side"] == "BUY"
+    assert called["kwargs"]["quantity"] == 1.0
+    assert called["kwargs"]["client_order_id"] == "cid-1"
+    assert called["kwargs"]["market"] == "SPOT"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
