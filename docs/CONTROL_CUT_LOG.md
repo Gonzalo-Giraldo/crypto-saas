@@ -574,3 +574,30 @@ finalization.
 Deferred follow-up (not in this iteration):
 - Evaluate stable client_order_id propagation toward broker/exchange.
 - Evaluate post-error reconciliation against broker/exchange status.
+
+
+## c359b25 — fix: prevent double finalize for reserved auto-pick idempotent intent
+
+Date: 2026-03-15
+Scope:
+- apps/api/app/api/ops.py
+- tests/integration/test_critical_flows.py
+
+Summary:
+Applied a minimal control-flow fix so a reserved auto-pick idempotent
+intent is finalized at most once within the same request flow.
+
+Behavior captured:
+- error-path finalize(status_code=500) now marks the reserved intent as
+  already finalized
+- later success-path finalize(status_code=200) is skipped when that
+  earlier error finalize already occurred
+
+Validation:
+- docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "double_finalize or live_http_error"
+- Result: 2 passed, 88 deselected
+
+Classification:
+- PASS real
+- behavior aligned with prior policy clarification
+- coverage targeted only; no broader runtime validation performed

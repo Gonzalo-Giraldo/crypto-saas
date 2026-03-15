@@ -548,3 +548,27 @@ This entry records the architectural decision before any code change.
 Deferred follow-up (not part of this iteration):
 - stable client_order_id toward broker/exchange
 - post-error broker/exchange reconciliation
+
+
+### c359b25 — reserved auto-pick idempotent intent now finalizes once
+
+Implemented the follow-up to the prior policy clarification on auto-pick
+live idempotent finalize semantics.
+
+Change:
+A reserved intent now tracks whether finalize already occurred in the
+current request flow. After an error-path finalize(status_code=500), the
+later finalize(status_code=200) closure path is skipped.
+
+Files:
+- apps/api/app/api/ops.py
+- tests/integration/test_critical_flows.py
+
+Validation executed:
+- docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "double_finalize or live_http_error"
+- Result: 2 passed, 88 deselected
+
+Notes:
+- This validates the targeted branch-contract only.
+- No broader integration or broker reconciliation coverage was added in
+  this iteration.
