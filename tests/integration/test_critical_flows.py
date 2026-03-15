@@ -1783,6 +1783,98 @@ def test_pretrade_auto_pick_live_http_error_finalizes_reserved_idempotent_intent
     assert error_finalize["response_payload"]["execution"]["error"] == "gateway_upstream_error status=502"
 
 
+def test_pretrade_auto_pick_live_http_error_does_not_finalize_reserved_intent_twice(client, monkeypatch):
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    saved = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert saved.status_code == 201, saved.text
+
+    import apps.api.app.api.ops as ops_api
+
+    finalize_calls = []
+
+    monkeypatch.setattr(
+        ops_api,
+        "_evaluate_real_execution_pre_dispatch_gate",
+        lambda **kwargs: (None, None, None),
+    )
+    monkeypatch.setattr(
+        ops_api,
+        "_evaluate_semantic_intent_lock_acquire",
+        lambda **kwargs: (None, None, False, None),
+    )
+    monkeypatch.setattr(
+        ops_api,
+        "_evaluate_binance_spot_usdt_broker_guard",
+        lambda **kwargs: (None, None, None),
+    )
+
+    monkeypatch.setattr(
+        ops_api,
+        "_reserve_auto_pick_pre_dispatch_idempotency",
+        lambda **kwargs: (
+            None,
+            "/ops/execution/pretrade/binance/auto-pick",
+            {
+                "user_id": kwargs["user_id"],
+                "endpoint": "/ops/execution/pretrade/binance/auto-pick",
+                "exchange": "BINANCE",
+                "symbol": kwargs["symbol"],
+                "side": kwargs["side"],
+                "selected_qty_normalized": float(kwargs["selected_qty"]),
+            },
+        ),
+    )
+
+    def _finalize(**kwargs):
+        finalize_calls.append(dict(kwargs))
+
+    monkeypatch.setattr(ops_api, "_finalize_auto_pick_idempotent_intent_best_effort", _finalize)
+
+    def _boom(**kwargs):
+        raise ops_api.HTTPException(status_code=502, detail="gateway_upstream_error status=502")
+
+    monkeypatch.setattr(ops_api, "execute_binance_test_order_for_user", _boom)
+
+    resp = client.post(
+        "/ops/execution/pretrade/binance/auto-pick",
+        headers={**_auth(token), "X-Idempotency-Key": "autopick-finalize-single-1"},
+        json={
+            "top_n": 10,
+            "dry_run": False,
+            "direction": "LONG",
+            "candidates": [
+                {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "qty": 0.01,
+                    "rr_estimate": 1.7,
+                    "trend_tf": "4H",
+                    "signal_tf": "1H",
+                    "timing_tf": "15M",
+                    "spread_bps": 6,
+                    "slippage_bps": 9,
+                    "volume_24h_usdt": 95000000,
+                    "market_trend_score": 0.6,
+                    "atr_pct": 3.0,
+                    "momentum_score": 0.4,
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["decision"] == "insufficient_resources_or_execution_error"
+    assert data["execution"]["error"] == "gateway_upstream_error status=502"
+
+    assert any(call.get("status_code") == 500 for call in finalize_calls), finalize_calls
+    assert not any(call.get("status_code") == 200 for call in finalize_calls), finalize_calls
+
+
 def test_pretrade_auto_pick_idempotency_deduplicates_processing(client, monkeypatch):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(

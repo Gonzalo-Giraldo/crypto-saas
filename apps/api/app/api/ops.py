@@ -2604,6 +2604,7 @@ def _auto_pick_from_scan(
     execution = None
     decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
     idempotency_reserved = False
+    idempotency_finalized = False
     idempotency_endpoint = None
     idempotency_request_payload = None
     intent_lock_key = None
@@ -2867,6 +2868,7 @@ def _auto_pick_from_scan(
                         response_payload={"decision": decision, "execution": execution},
                         status_code=500,
                     )
+                    idempotency_finalized = True
 
         (
             selected_trend_score,
@@ -2930,7 +2932,7 @@ def _auto_pick_from_scan(
             "scan": scan,
         }, max_spread=max_spread, max_slippage=max_slippage)
 
-        if idempotency_reserved:
+        if idempotency_reserved and not idempotency_finalized:
             # Keep the candidate result path operational; reservation finalization is best-effort.
             _finalize_auto_pick_idempotent_intent_best_effort(
                 db=db,
