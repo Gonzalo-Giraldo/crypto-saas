@@ -1,5 +1,14 @@
 # CHANGE COMMUNICATION LOG
 
+## 8fa06ff — auto-pick live idempotent finalize error-path test coverage
+- Added one isolated coverage test for the reserved-idempotency live auto-pick error path.
+- Covered the path where live execution fails with `HTTPException 502` and finalize best-effort is invoked with error payload.
+- Confirmed there is a finalize call with `status_code=500` and preserved execution error detail.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "auto_pick_live_http_error_finalizes_reserved_idempotent_intent"`
+  - Result: `1 passed, 88 deselected`
+
 ## f35863c — auto-pick idempotency guard dry_run vs live test coverage
 - Added one isolated policy test for the auto-pick idempotency guard.
 - Covered the divergence between live and dry-run paths:

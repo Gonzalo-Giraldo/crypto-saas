@@ -200,3 +200,49 @@ Use CONTROL_CUT_LOG.md as the concise trace of cut decisions.
 - Do not block delivery with ceremony
 - Escalate control depth only when risk requires it
 - Favor clarity, reversibility, and operational safety
+
+## Operational discipline updates for all participants
+
+These rules apply to all participants in this development workflow, including ChatGPT, Codex, Continue, and any operator following the same review loop.
+
+### 1. Stop immediately on suspected context drift
+- If a participant detects a possible context drift, stop immediately.
+- Do not propose changes.
+- Do not modify files.
+- Do not run additional system-affecting commands.
+- Report the drift to the operator first and wait for direction.
+
+### 2. Treat terminal instability as an operational fault
+- If the terminal shows heredoc hangs, truncation, or incomplete command execution, stop using long heredoc command blocks.
+- Switch to smaller commands, direct patches, and temporary-file based verification.
+- Do not continue trusting the unstable command pattern after the first confirmed failure.
+
+### 3. Separate branch-contract tests from end-to-end integration tests
+- If a test neutralizes several guards or internal branches with monkeypatching, treat it as branch-contract coverage even if it lives inside an integration test file.
+- Do not describe such a test as full end-to-end integration coverage.
+- Document the actual level of isolation when relevant.
+
+### 4. Pause on semantic anomalies before changing policy assumptions
+- If a test reveals behavior that weakens the original hypothesis, stop and classify the behavior before proceeding.
+- Use one of these labels:
+	- expected behavior
+	- tolerated but unusual behavior
+	- policy pending
+	- probable bug
+- Do not silently convert a policy-verification test into a weaker existence test without explicitly documenting that decision.
+
+### 5. Add an iteration-close label
+At the end of each micro-step, classify the result with one of:
+- coverage only
+- behavior documented
+- policy clarified
+- policy pending
+
+### 6. Preserve the existing controlled workflow
+Keep using the current controlled workflow:
+1. small reversible micro-step
+2. real validation
+3. stop and classify if semantic ambiguity appears
+4. manual commit
+5. documentation update
+6. clean-tree confirmation
