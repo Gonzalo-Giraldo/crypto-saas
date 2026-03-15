@@ -471,3 +471,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "account_status_gateway_failure_with_direct_fallback_returns_direct_payload"`
   - Result: `1 passed, 82 deselected`
+
+## 12a2cd3 — binance runtime send-test-order upstream error policy test coverage
+- Added one isolated policy test for Binance runtime send-test-order flow.
+- Covered the path where gateway returns a sanitized upstream error and direct fallback remains enabled.
+- Confirmed runtime relaunches `gateway_upstream_error status=502` and does not call direct `send_test_order(...)`.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "send_test_order_gateway_upstream_error_does_not_fallback_direct"`
+  - Result: `1 passed, 83 deselected`
