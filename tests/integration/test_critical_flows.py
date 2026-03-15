@@ -1783,6 +1783,124 @@ def test_pretrade_auto_pick_live_http_error_finalizes_reserved_idempotent_intent
     assert error_finalize["response_payload"]["execution"]["error"] == "gateway_upstream_error status=502"
 
 
+def test_pretrade_auto_pick_same_key_concurrent_requests_are_not_both_executed(
+    monkeypatch,
+    client,
+):
+    import threading
+    import time
+    from fastapi.testclient import TestClient
+    from apps.api.app.api import ops as ops_module
+
+    monkeypatch.setattr(
+        ops_module,
+        "_evaluate_real_execution_pre_dispatch_gate",
+        lambda **kwargs: (None, None, None),
+    )
+    monkeypatch.setattr(
+        ops_module,
+        "_evaluate_semantic_intent_lock_acquire",
+        lambda **kwargs: (None, None, False, None),
+    )
+    monkeypatch.setattr(
+        ops_module,
+        "_evaluate_binance_spot_usdt_broker_guard",
+        lambda **kwargs: (None, None, None),
+    )
+
+    calls = {"count": 0}
+
+    def _fake_execute_binance_test_order_for_user(**kwargs):
+        calls["count"] += 1
+        time.sleep(0.05)
+        return {
+            "status": "ok",
+            "provider": "binance",
+            "symbol": kwargs.get("symbol", "BTCUSDT"),
+            "side": kwargs.get("side", "BUY"),
+            "qty": kwargs.get("qty", 0.0),
+        }
+
+    monkeypatch.setattr(
+        ops_module,
+        "execute_binance_test_order_for_user",
+        _fake_execute_binance_test_order_for_user,
+    )
+
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    saved = client.post(
+        "/users/exchange-secrets",
+        headers=_auth(token),
+        json={"exchange": "BINANCE", "api_key": "k1", "api_secret": "s1"},
+    )
+    assert saved.status_code == 201, saved.text
+
+    payload = {
+        "top_n": 10,
+        "dry_run": False,
+        "direction": "LONG",
+        "candidates": [
+            {
+                "symbol": "BTCUSDT",
+                "side": "BUY",
+                "qty": 0.01,
+                "rr_estimate": 1.7,
+                "trend_tf": "4H",
+                "signal_tf": "1H",
+                "timing_tf": "15M",
+                "spread_bps": 6,
+                "slippage_bps": 9,
+                "volume_24h_usdt": 95000000,
+                "market_trend_score": 0.6,
+                "atr_pct": 3.0,
+                "momentum_score": 0.4,
+            }
+        ],
+    }
+    headers = {**_auth(token), "X-Idempotency-Key": "same-key-concurrent-test"}
+
+    responses = []
+    errors = []
+    app = client.app
+    start_gate = threading.Barrier(2)
+
+    def _call():
+        try:
+            start_gate.wait(timeout=5)
+            with TestClient(app, raise_server_exceptions=False) as local_client:
+                response = local_client.post(
+                    "/ops/execution/pretrade/binance/auto-pick",
+                    json=payload,
+                    headers=headers,
+                )
+                responses.append(response)
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=_call)
+    t2 = threading.Thread(target=_call)
+
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not errors, errors
+    assert len(responses) == 2
+
+    bodies = []
+    for resp in responses:
+        try:
+            bodies.append(resp.json())
+        except Exception:
+            bodies.append({"text": resp.text})
+    status_codes = sorted(resp.status_code for resp in responses)
+    assert set(status_codes).issubset({200, 409, 500}), bodies
+    assert sum(1 for code in status_codes if code == 200) <= 1, bodies
+    assert any(code in {409, 500} for code in status_codes), bodies
+    assert calls["count"] <= 1, bodies
+
+
 def test_pretrade_auto_pick_live_http_error_does_not_finalize_reserved_intent_twice(client, monkeypatch):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
