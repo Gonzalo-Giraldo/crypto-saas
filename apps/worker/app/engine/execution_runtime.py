@@ -101,17 +101,53 @@ def _reconcile_binance_test_order_best_effort(
     symbol: str,
     client_order_id: str,
     market: str,
-) -> dict | None:
+) -> dict:
     try:
-        return query_order_status(
-            api_key=api_key,
-            api_secret=api_secret,
-            symbol=symbol,
-            orig_client_order_id=client_order_id,
-            market=market,
-        )
-    except Exception:
-        return None
+        return {
+            "result": query_order_status(
+                api_key=api_key,
+                api_secret=api_secret,
+                symbol=symbol,
+                orig_client_order_id=client_order_id,
+                market=market,
+            ),
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "result": None,
+            "error": str(exc),
+        }
+
+
+def _classify_binance_reconciliation(*, result: dict | None, error: str | None) -> str:
+    msg = str(error or "").lower()
+    not_sent_markers = [
+        "unknown order",
+        "unknown client order",
+        "order does not exist",
+        "not found",
+        "code=-2013",
+        "code=-2011",
+    ]
+    if any(marker in msg for marker in not_sent_markers):
+        return "NOT_SENT"
+
+    payload = result if isinstance(result, dict) else None
+    if payload is None:
+        return "SENT_UNKNOWN"
+
+    code = str(payload.get("code") or "").strip()
+    payload_msg = str(payload.get("msg") or payload.get("message") or "").lower()
+    if code in {"-2013", "-2011"} or any(marker in payload_msg for marker in not_sent_markers):
+        return "NOT_SENT"
+
+    status_value = str(payload.get("status") or payload.get("orderStatus") or "").upper().strip()
+    if status_value in {"NEW", "PARTIALLY_FILLED", "FILLED", "PENDING_NEW"}:
+        return "EXECUTED"
+    if status_value in {"REJECTED", "EXPIRED", "EXPIRED_IN_MATCH", "CANCELED", "CANCELLED"}:
+        return "FAILED"
+    return "SENT_UNKNOWN"
 
 
 def prepare_execution_for_user(
@@ -272,9 +308,9 @@ def execute_binance_test_order_for_user(
                 "error": str(exc),
             }
             if locals().get("client_order_id") and _is_uncertain_binance_timeout_error(exc):
-                details["reconciliation_attempt"] = {
+                reconciliation_attempt = {
                     "client_order_id": client_order_id,
-                    "result": _reconcile_binance_test_order_best_effort(
+                    **_reconcile_binance_test_order_best_effort(
                         api_key=creds["api_key"],
                         api_secret=creds["api_secret"],
                         symbol=symbol,
@@ -282,6 +318,11 @@ def execute_binance_test_order_for_user(
                         market=market,
                     ),
                 }
+                details["reconciliation_attempt"] = reconciliation_attempt
+                details["reconciliation_classification"] = _classify_binance_reconciliation(
+                    result=reconciliation_attempt.get("result"),
+                    error=reconciliation_attempt.get("error"),
+                )
             log_audit_event(
                 db,
                 action="execution.binance.test_order.error",

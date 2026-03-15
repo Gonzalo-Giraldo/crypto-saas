@@ -1487,6 +1487,56 @@ def test_binance_runtime_timeout_error_triggers_best_effort_reconciliation(clien
     assert audit["details"]["reconciliation_attempt"]["result"]["status"] == "FILLED"
 
 
+def test_binance_runtime_timeout_reconciliation_classification_records_executed(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    class _DB:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    audit = {"details": None}
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {"normalized_qty": 1.0},
+    )
+    monkeypatch.setattr(runtime, "_build_binance_client_order_id", lambda **kwargs: "cid-timeout-2")
+    monkeypatch.setattr(
+        runtime,
+        "_send_binance_test_order_with_retry",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("request timed out")),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "query_order_status",
+        lambda **kwargs: {"status": "PARTIALLY_FILLED", "clientOrderId": kwargs["orig_client_order_id"]},
+    )
+    monkeypatch.setattr(runtime, "log_audit_event", lambda db, action, user_id, entity_type, details: audit.__setitem__("details", details))
+
+    try:
+        runtime.execute_binance_test_order_for_user("user-1", "BTCUSDT", "BUY", 1.0)
+        assert False, "expected HTTPException"
+    except runtime.HTTPException as exc:
+        assert exc.status_code == 502
+        assert exc.detail == "Binance test order failed: request timed out"
+
+    assert audit["details"] is not None
+    assert audit["details"]["reconciliation_classification"] == "EXECUTED"
+    assert audit["details"]["reconciliation_attempt"]["result"]["status"] == "PARTIALLY_FILLED"
+
+
 def test_auto_pick_execution_requires_idempotency_key_only_when_not_dry_run(client):
     _ = client
     import apps.api.app.api.ops as ops_api
