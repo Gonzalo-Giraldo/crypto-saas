@@ -475,3 +475,16 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "send_test_order_unsanitized_gateway_error_uses_direct_fallback"`
 - Validation result:
   - PASS real: `1 passed, 84 deselected`
+
+## d531017 — tests: add binance runtime account-status entrypoint error mapping coverage
+- Scope: runtime entrypoint error-mapping coverage for Binance account status.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for `get_binance_account_status_for_user(...)`
+  - Simulated internal `_get_binance_account_status(...)` failure with `gateway_upstream_error status=502`
+  - Confirmed runtime maps the internal failure to `HTTPException` with status `502`
+  - Verified the returned detail is `Binance account status failed: gateway_upstream_error status=502`
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "account_status_entrypoint_maps_internal_failure_to_http_502"`
+- Validation result:
+  - PASS real: `1 passed, 85 deselected`
