@@ -536,3 +536,41 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "test_order_entrypoint_maps_internal_failure_to_http_502"`
 - Validation result:
   - PASS real: `1 passed, 86 deselected`
+
+
+## Policy clarification — auto-pick idempotent finalize semantics
+
+Decision taken during idempotency/concurrency audit.
+
+Observation:
+Auto-pick live execution path may emit two finalize calls for the same
+reserved idempotent intent:
+
+    finalize(status_code=500)   # error path
+    finalize(status_code=200)   # later closure path
+
+This creates a semantic inconsistency risk where a failed execution may
+later appear finalized as success depending on idempotency storage
+overwrite behavior.
+
+Policy decision:
+A reserved idempotent intent MUST be finalized exactly once.
+
+Operational rule:
+- If finalize(status_code=500) occurs, that finalize is terminal.
+- The execution flow MUST NOT emit a later finalize(status_code=200)
+  for the same idempotent intent.
+
+Status:
+policy pending implementation.
+
+Scope:
+apps/api/app/api/ops.py auto-pick live execution path.
+
+Rationale:
+Preserve idempotency semantics and prevent success-overwrite of error
+finalization.
+
+Deferred follow-up (not in this iteration):
+- Evaluate stable client_order_id propagation toward broker/exchange.
+- Evaluate post-error reconciliation against broker/exchange status.
