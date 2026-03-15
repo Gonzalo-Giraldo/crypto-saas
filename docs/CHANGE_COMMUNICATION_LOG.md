@@ -371,3 +371,13 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_24hr_invalid_payload or ticker_24hr_symbol_filtering"`
   - Result: `2 passed, 69 deselected`
+
+## 04ee422 — gateway Binance klines test coverage
+- Added two direct gateway tests for `POST /binance/klines`.
+- Covered controlled gateway scenarios already prioritized for direct coverage:
+  - empty symbol => `400 symbol_required`
+  - invalid upstream payload => `502 invalid_klines_payload`
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "klines_symbol_required or klines_invalid_payload"`
+  - Result: `2 passed, 71 deselected`

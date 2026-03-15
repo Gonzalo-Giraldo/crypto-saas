@@ -311,3 +311,16 @@ Do not turn this into a long narrative.
   - PASS real: `2 passed, 69 deselected`
 - Notes:
   - Endpoint returns an envelope structure `{mode, count, rows}` rather than a raw list.
+
+## 04ee422 — tests: add gateway klines coverage for 400 and 502 scenarios
+- Scope: direct gateway test coverage only.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added direct `GatewayClient(gw.app)` coverage for `POST /binance/klines`
+  - Covered explicit gateway responses:
+    - `400 symbol_required`
+    - `502 invalid_klines_payload`
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "klines_symbol_required or klines_invalid_payload"`
+- Validation result:
+  - PASS real: `2 passed, 71 deselected`
