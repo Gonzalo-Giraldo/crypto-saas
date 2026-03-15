@@ -424,3 +424,15 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_gateway_failure_with_direct_fallback_returns_direct_symbols"`
 - Validation result:
   - PASS real: `1 passed, 80 deselected`
+
+## 6a6a96e — tests: add binance runtime strict-mode fallback policy coverage
+- Scope: policy coverage for Binance runtime strict mode gateway configuration.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for `_assert_binance_gateway_policy()`
+  - Validated strict mode rejection when gateway is enabled and `BINANCE_GATEWAY_FALLBACK_DIRECT=true`
+  - Confirmed raised `HTTPException` uses status `500` and strict-mode policy detail
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "strict_mode_rejects_direct_fallback_enabled"`
+- Validation result:
+  - PASS real: `1 passed, 81 deselected`

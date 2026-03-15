@@ -453,3 +453,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_gateway_failure_with_direct_fallback_returns_direct_symbols"`
   - Result: `1 passed, 80 deselected`
+
+## 6a6a96e — binance runtime strict-mode fallback policy test coverage
+- Added one isolated policy test for Binance runtime strict mode.
+- Covered the invalid configuration path where direct fallback remains enabled while strict mode is active.
+- Confirmed runtime rejects the configuration with the expected `HTTPException`.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "strict_mode_rejects_direct_fallback_enabled"`
+  - Result: `1 passed, 81 deselected`
