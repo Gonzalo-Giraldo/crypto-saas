@@ -426,3 +426,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_gateway_failure_without_direct_fallback_returns_none"`
   - Result: `1 passed, 77 deselected`
+
+## 81dcf4f — binance client exchange-info gateway failure no-fallback test coverage
+- Added one isolated failure-path test for Binance client exchange-info helper.
+- Covered behavior when gateway request fails and direct fallback is disabled.
+- Confirmed helper propagates `gateway_upstream_error status=502` instead of falling back.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_gateway_failure_without_direct_fallback_raises"`
+  - Result: `1 passed, 78 deselected`
