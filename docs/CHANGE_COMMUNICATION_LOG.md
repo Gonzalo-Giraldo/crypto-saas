@@ -632,3 +632,19 @@ Do not change production code or broaden the test harness yet.
 Pending follow-up:
 A future micro-step may evaluate whether a controlled concurrent test can
 reproduce or dismiss this theoretical window safely.
+
+
+### Backlog classification — simplify local Binance auto-pick live pipeline seam
+
+A technical review after the recent idempotency/concurrency work suggests
+a future local extraction candidate in ops.py.
+
+Why this may help:
+- reduce inline mixing of guards, idempotency, dispatch, and finalize
+- make the live execution seam more explicit
+- reduce future context drift in tests
+- improve local testability without changing runtime behavior
+
+Decision in this iteration:
+Record the idea only.
+Do not refactor production code now.

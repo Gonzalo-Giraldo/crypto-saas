@@ -687,3 +687,36 @@ Current status:
 Classification:
 - policy pending
 - coverage gap remains for real concurrent same-key validation
+
+
+## Backlog note — local extraction candidate for binance auto-pick live flow
+
+Date: 2026-03-15
+Scope:
+- apps/api/app/api/ops.py
+
+Observation:
+After several idempotency/concurrency hardening iterations, the Binance
+auto-pick live path appears functionally safer but still structurally
+distributed across multiple inline responsibilities inside ops.py.
+
+Responsibilities currently intermixed:
+- live policy / guard evaluation
+- idempotency lifecycle handling
+- live dispatch / execution
+- finalize/store result behavior
+
+Architectural opportunity:
+A future local extraction may improve readability, seam clarity, and
+testability by grouping the live auto-pick pipeline into a single
+internal flow unit without changing product behavior.
+
+Current status:
+- maintainability/testability note only
+- no bug classified from this observation
+- no refactor applied in this iteration
+
+Classification:
+- backlog candidate
+- non-urgent
+- policy neutral
