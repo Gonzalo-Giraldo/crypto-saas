@@ -572,3 +572,22 @@ Notes:
 - This validates the targeted branch-contract only.
 - No broader integration or broker reconciliation coverage was added in
   this iteration.
+
+
+### Coverage classification — auto-pick same-key dedup is verified sequentially
+
+A targeted audit confirmed that the current auto-pick deduplication test
+covers same-key sequential replay, not real concurrent same-key racing.
+
+What is verified now:
+- repeated same-key request returns deduplicated behavior
+- internal processing is not repeated in the tested sequential path
+
+What is not yet verified by test:
+- two simultaneous requests with the same idempotency key competing in
+  real time through the current integration harness
+
+Current decision:
+Record this as a coverage gap only.
+Do not expand the harness or introduce concurrency primitives in this
+iteration.

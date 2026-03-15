@@ -601,3 +601,33 @@ Classification:
 - PASS real
 - behavior aligned with prior policy clarification
 - coverage targeted only; no broader runtime validation performed
+
+
+## Coverage note — auto-pick idempotency dedup test is sequential, not real concurrency
+
+Date: 2026-03-15
+Scope:
+- tests/integration/test_critical_flows.py
+- tests/integration/conftest.py
+- apps/api/app/api/ops.py
+- docs/SCHEDULER_AND_CONCURRENCY_MODEL.md
+
+Observation:
+The current auto-pick idempotency deduplication test validates repeated
+same-key behavior through sequential requests, not through simultaneous
+concurrent requests.
+
+Evidence:
+- Existing dedup test performs two sequential requests with the same
+  idempotency key and asserts response deduplication / single execution.
+- No concurrency primitives are present in the current integration test
+  harness (no threading, concurrent.futures, asyncio.gather, Barrier,
+  Lock, Semaphore, or equivalent patterns).
+- Runtime documentation continues to describe partial mitigation for real
+  concurrency through advisory lock semantics plus pre-dispatch
+  idempotent reservation.
+
+Classification:
+- PASS real for sequential same-key deduplication
+- Coverage gap for real concurrent same-key race validation
+- No code or test harness changes applied in this iteration
