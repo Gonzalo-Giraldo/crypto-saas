@@ -1034,6 +1034,28 @@ def test_binance_client_exchange_info_reads_gateway_symbols_envelope(client, mon
     assert out["BTCUSDT"]["filters"][0]["filterType"] == "LOT_SIZE"
 
 
+def test_binance_client_ticker_price_gateway_failure_without_direct_fallback_returns_none(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+
+    with bclient._price_cache_lock:
+        bclient._price_by_symbol.clear()
+        bclient._price_cache_expiry = 0.0
+
+    def _boom(path, payload, timeout=10):
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    monkeypatch.setattr(bclient, "_post_gateway", _boom)
+
+    out = bclient._fetch_symbol_price("BTCUSDT")
+
+    assert out is None
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
