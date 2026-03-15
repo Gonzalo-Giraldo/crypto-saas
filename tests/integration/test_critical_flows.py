@@ -1081,6 +1081,36 @@ def test_binance_client_exchange_info_gateway_failure_without_direct_fallback_ra
         assert str(exc) == "gateway_upstream_error status=502"
 
 
+def test_binance_client_ticker_price_gateway_failure_with_direct_fallback_returns_direct_price(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+
+    with bclient._price_cache_lock:
+        bclient._price_by_symbol.clear()
+        bclient._price_cache_expiry = 0.0
+
+    def _boom(path, payload, timeout=10):
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"symbol": "BTCUSDT", "price": "50123.45"}
+
+    monkeypatch.setattr(bclient, "_post_gateway", _boom)
+    monkeypatch.setattr(bclient.requests, "get", lambda *args, **kwargs: _Resp())
+
+    out = bclient._fetch_symbol_price("BTCUSDT")
+
+    assert out == 50123.45
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
