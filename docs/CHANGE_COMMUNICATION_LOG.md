@@ -480,3 +480,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "send_test_order_gateway_upstream_error_does_not_fallback_direct"`
   - Result: `1 passed, 83 deselected`
+
+## 8b317c5 — binance runtime send-test-order unsanitized fallback test coverage
+- Added one isolated fallback-path test for Binance runtime send-test-order flow.
+- Covered the path where gateway fails with an unsanitized error and runtime uses direct `send_test_order(...)`.
+- Confirmed forwarded arguments are preserved in the direct fallback path.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "send_test_order_unsanitized_gateway_error_uses_direct_fallback"`
+  - Result: `1 passed, 84 deselected`
