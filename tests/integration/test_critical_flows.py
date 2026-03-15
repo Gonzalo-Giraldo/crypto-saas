@@ -998,6 +998,42 @@ def test_binance_client_ticker_price_reads_gateway_row_envelope(client, monkeypa
     assert out == 50000.0
 
 
+def test_binance_client_exchange_info_reads_gateway_symbols_envelope(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_EXCHANGE_INFO_CACHE_SECONDS", 600)
+
+    with bclient._exchange_info_cache_lock:
+        bclient._exchange_info_by_symbol.clear()
+        bclient._exchange_info_cache_expiry = 0.0
+
+    monkeypatch.setattr(
+        bclient,
+        "_post_gateway",
+        lambda path, payload, timeout=10: {
+            "symbols": [
+                {
+                    "symbol": "BTCUSDT",
+                    "filters": [
+                        {"filterType": "LOT_SIZE", "minQty": "0.001", "maxQty": "100.000", "stepSize": "0.001"}
+                    ],
+                }
+            ],
+            "count": 1,
+            "mode": "gateway_exchange_info_spot",
+        },
+    )
+
+    out = bclient._fetch_exchange_info_symbols(["BTCUSDT"])
+
+    assert "BTCUSDT" in out
+    assert out["BTCUSDT"]["symbol"] == "BTCUSDT"
+    assert out["BTCUSDT"]["filters"][0]["filterType"] == "LOT_SIZE"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
