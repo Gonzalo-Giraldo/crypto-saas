@@ -444,3 +444,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_gateway_failure_with_direct_fallback_returns_direct_price"`
   - Result: `1 passed, 79 deselected`
+
+## 5624817 — binance client exchange-info gateway failure with direct fallback test coverage
+- Added one isolated failure-path test for Binance client exchange-info helper with direct fallback enabled.
+- Covered behavior when gateway request fails and helper falls back to direct exchangeInfo request.
+- Confirmed helper rebuilds per-symbol mapping correctly from direct `symbols` payload.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_gateway_failure_with_direct_fallback_returns_direct_symbols"`
+  - Result: `1 passed, 80 deselected`
