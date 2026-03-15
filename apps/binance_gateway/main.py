@@ -38,6 +38,14 @@ class BinanceAccountStatusIn(BaseModel):
     api_secret: str
 
 
+class BinanceOrderStatusIn(BaseModel):
+    api_key: str
+    api_secret: str
+    symbol: str
+    orig_client_order_id: str
+    market: str | None = None
+
+
 class BinanceTicker24hIn(BaseModel):
     symbols: list[str] | None = None
     limit: int = 200
@@ -154,6 +162,37 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
         _raise_upstream_http_error(r)
 
     return {"ok": True, "mode": f"gateway_test_order_{market.lower()}"}
+
+
+@app.post("/binance/order-status")
+def binance_order_status(payload: BinanceOrderStatusIn, x_internal_token: str = Header(default="")):
+    _authorize_internal_request(x_internal_token)
+
+    market = _resolve_market(payload.market)
+    base_url = _base_url_for_market(market)
+    endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
+
+    params = {
+        "symbol": payload.symbol.upper(),
+        "origClientOrderId": payload.orig_client_order_id,
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": payload.api_key}
+    response = _request_upstream("GET", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+    data = response.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="invalid_order_status_payload")
+    return {"ok": True, "data": data, "mode": f"gateway_order_status_{market.lower()}"}
 
 
 @app.post("/binance/account-status")

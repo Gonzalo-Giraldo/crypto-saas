@@ -58,6 +58,57 @@ def test_binance_gateway_account_status_uses_spot_base(client, monkeypatch):
     assert str(observed["url"]).startswith("https://spot.example.test/api/v3/account?")
 
 
+def test_binance_gateway_order_status_maps_orig_client_order_id(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+    monkeypatch.setattr(gw, "BINANCE_SPOT_BASE", "https://spot.example.test")
+    monkeypatch.setattr(gw, "RATE_LIMIT_PER_MIN", 9999)
+
+    captured = {"method": None, "url": None}
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"symbol": "BTCUSDT", "status": "FILLED"}
+
+    def _fake_request(method: str, url: str, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        return _Resp()
+
+    monkeypatch.setattr(gw.requests, "request", _fake_request)
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/order-status",
+            headers={"X-Internal-Token": "gw-token"},
+            json={
+                "api_key": "k",
+                "api_secret": "s",
+                "symbol": "BTCUSDT",
+                "orig_client_order_id": "cid-123",
+                "market": "spot",
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["data"]["status"] == "FILLED"
+    assert body["mode"] == "gateway_order_status_spot"
+    assert captured["method"] == "GET"
+    assert str(captured["url"]).startswith("https://spot.example.test/api/v3/order?")
+    parsed = parse_qs(urlparse(str(captured["url"])).query)
+    assert parsed.get("symbol") == ["BTCUSDT"]
+    assert parsed.get("origClientOrderId") == ["cid-123"]
+
+
 def test_binance_gateway_returns_502_on_upstream_unreachable(client, monkeypatch):
     _ = client
     import apps.binance_gateway.main as gw
@@ -404,6 +455,48 @@ def test_binance_client_gateway_error_is_sanitized(client, monkeypatch):
         assert "gateway_upstream_error status=503" in msg
         assert "code=-1003" in msg
         assert "secret=abc" not in msg
+
+
+def test_binance_client_query_order_status_gateway_envelope(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    calls = {"path": None, "payload": None, "timeout": None}
+
+    def _fake_post_gateway(path, payload, timeout=10):
+        calls["path"] = path
+        calls["payload"] = dict(payload)
+        calls["timeout"] = timeout
+        return {
+            "ok": True,
+            "data": {
+                "symbol": "BTCUSDT",
+                "status": "NEW",
+                "clientOrderId": "cid-123",
+            },
+            "mode": "gateway_order_status_spot",
+        }
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(bclient, "_post_gateway", _fake_post_gateway)
+
+    out = bclient.query_order_status(
+        api_key="k",
+        api_secret="s",
+        symbol="btcusdt",
+        orig_client_order_id="cid-123",
+        market="spot",
+    )
+
+    assert out["status"] == "NEW"
+    assert out["symbol"] == "BTCUSDT"
+    assert calls["path"] == "/binance/order-status"
+    assert calls["payload"]["symbol"] == "BTCUSDT"
+    assert calls["payload"]["orig_client_order_id"] == "cid-123"
+    assert calls["payload"]["market"] == "SPOT"
+    assert calls["timeout"] == max(3, int(bclient.settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))
 
 
 def test_binance_client_ticker_price_spot_uses_gateway_row(client, monkeypatch):

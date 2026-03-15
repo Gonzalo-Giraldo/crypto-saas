@@ -132,6 +132,68 @@ def send_test_order(
     return {"ok": True}
 
 
+def query_order_status(
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    orig_client_order_id: str,
+    market: str = "SPOT",
+) -> dict:
+    market_norm = _normalize_market(market)
+    symbol_norm = str(symbol or "").upper().strip()
+    order_id = str(orig_client_order_id or "").strip()
+    if not symbol_norm:
+        raise RuntimeError("symbol_required")
+    if not order_id:
+        raise RuntimeError("orig_client_order_id_required")
+
+    if _gateway_enabled():
+        try:
+            body = _post_gateway(
+                "/binance/order-status",
+                {
+                    "api_key": api_key,
+                    "api_secret": api_secret,
+                    "symbol": symbol_norm,
+                    "orig_client_order_id": order_id,
+                    "market": market_norm,
+                },
+                timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+            )
+            data = body.get("data") if isinstance(body, dict) else None
+            if isinstance(data, dict):
+                return data
+            raise RuntimeError("invalid_binance_order_status_response")
+        except Exception:
+            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+                raise
+
+    endpoint = "/fapi/v1/order" if market_norm == "FUTURES" else "/api/v3/order"
+    base_url = _base_url_for_market(market_norm)
+    params = {
+        "symbol": symbol_norm,
+        "origClientOrderId": order_id,
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(
+        api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": api_key}
+
+    response = requests.get(url, headers=headers, timeout=10)
+    if response.status_code >= 400:
+        detail = response.text
+        raise RuntimeError(f"Binance order status error {response.status_code}: {detail}")
+    body = response.json()
+    if not isinstance(body, dict):
+        raise RuntimeError("invalid_binance_order_status_response")
+    return body
+
+
 def _fetch_exchange_info_rows_with_gateway_fallback(
     *,
     wanted: list[str],
