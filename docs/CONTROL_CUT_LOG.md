@@ -631,3 +631,33 @@ Classification:
 - PASS real for sequential same-key deduplication
 - Coverage gap for real concurrent same-key race validation
 - No code or test harness changes applied in this iteration
+
+
+## Risk note — theoretical race window between semantic lock and idempotent reservation
+
+Date: 2026-03-15
+Scope:
+- apps/api/app/api/ops.py
+- docs/SCHEDULER_AND_CONCURRENCY_MODEL.md
+
+Observation:
+A theoretical race window may exist between semantic advisory-lock
+acquisition and durable pre-dispatch idempotent reservation for
+auto-pick live execution.
+
+Meaning:
+One protection layer limits overlapping execution intent, while the
+second protection layer records the reserved idempotent intent. If those
+two protections are not observed as one atomic state transition, a small
+theoretical interval may exist where another actor cannot yet observe
+the reserved intent.
+
+Current status:
+- theoretical risk only
+- not reproduced in this iteration
+- no concurrent race test added in this iteration
+- no production code changes applied for this note
+
+Classification:
+- policy pending
+- coverage gap remains for real concurrent same-key validation

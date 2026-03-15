@@ -591,3 +591,24 @@ Current decision:
 Record this as a coverage gap only.
 Do not expand the harness or introduce concurrency primitives in this
 iteration.
+
+
+### Risk classification — theoretical lock-to-reservation race window
+
+A follow-up architectural review identified a theoretical race window
+between semantic lock acquisition and durable idempotent reservation in
+auto-pick live execution.
+
+Interpretation:
+This is not a reproduced defect. It is a theoretical ordering risk
+between two protection layers:
+- semantic/advisory lock
+- pre-dispatch idempotent reservation
+
+Decision in this iteration:
+Record the risk only.
+Do not change production code or broaden the test harness yet.
+
+Pending follow-up:
+A future micro-step may evaluate whether a controlled concurrent test can
+reproduce or dismiss this theoretical window safely.
