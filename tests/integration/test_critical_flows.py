@@ -977,6 +977,27 @@ def test_fetch_binance_klines_reads_gateway_envelope(client, monkeypatch):
     assert rows[1][4] == "109"
 
 
+def test_binance_client_ticker_price_reads_gateway_row_envelope(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+
+    monkeypatch.setattr(
+        bclient,
+        "_post_gateway",
+        lambda path, payload, timeout=10: {
+            "row": {"symbol": "BTCUSDT", "price": "50000.00"},
+            "mode": "gateway_ticker_price_spot",
+        },
+    )
+
+    out = bclient._fetch_symbol_price("BTCUSDT")
+
+    assert out == 50000.0
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
