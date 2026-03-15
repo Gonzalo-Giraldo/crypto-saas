@@ -1111,6 +1111,48 @@ def test_binance_client_ticker_price_gateway_failure_with_direct_fallback_return
     assert out == 50123.45
 
 
+def test_binance_client_exchange_info_gateway_failure_with_direct_fallback_returns_direct_symbols(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.binance_client as bclient
+
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(bclient.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+    monkeypatch.setattr(bclient.settings, "BINANCE_EXCHANGE_INFO_CACHE_SECONDS", 600)
+
+    with bclient._exchange_info_cache_lock:
+        bclient._exchange_info_by_symbol.clear()
+        bclient._exchange_info_cache_expiry = 0.0
+
+    def _boom(path, payload, timeout=10):
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "symbols": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "filters": [
+                            {"filterType": "LOT_SIZE", "minQty": "0.001", "maxQty": "100.000", "stepSize": "0.001"}
+                        ],
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(bclient, "_post_gateway", _boom)
+    monkeypatch.setattr(bclient.requests, "get", lambda *args, **kwargs: _Resp())
+
+    out = bclient._fetch_exchange_info_symbols(["BTCUSDT"])
+
+    assert "BTCUSDT" in out
+    assert out["BTCUSDT"]["symbol"] == "BTCUSDT"
+    assert out["BTCUSDT"]["filters"][0]["filterType"] == "LOT_SIZE"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
