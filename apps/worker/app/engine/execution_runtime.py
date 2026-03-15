@@ -16,6 +16,7 @@ from apps.worker.app.engine.binance_client import (
     send_test_order,
     get_account_status,
     prepare_binance_market_order_quantity,
+    query_order_status,
 )
 from apps.worker.app.engine.ibkr_client import _build_order_ref, send_ibkr_test_order, get_ibkr_account_status
 
@@ -84,6 +85,33 @@ def _sanitize_ibkr_error(exc: Exception) -> str:
     if msg.startswith("ibkr_"):
         return msg
     return "ibkr_runtime_error"
+
+
+def _is_uncertain_binance_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, requests.Timeout):
+        return True
+    msg = str(exc or "").lower()
+    return "timeout" in msg or "timed out" in msg
+
+
+def _reconcile_binance_test_order_best_effort(
+    *,
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    client_order_id: str,
+    market: str,
+) -> dict | None:
+    try:
+        return query_order_status(
+            api_key=api_key,
+            api_secret=api_secret,
+            symbol=symbol,
+            orig_client_order_id=client_order_id,
+            market=market,
+        )
+    except Exception:
+        return None
 
 
 def prepare_execution_for_user(
@@ -234,20 +262,32 @@ def execute_binance_test_order_for_user(
                 market=market,
             )
         except Exception as exc:
+            details = {
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "client_order_id": locals().get("client_order_id"),
+                "normalized_qty": (locals().get("qty_meta") or {}).get("normalized_qty"),
+                "market": market,
+                "error": str(exc),
+            }
+            if locals().get("client_order_id") and _is_uncertain_binance_timeout_error(exc):
+                details["reconciliation_attempt"] = {
+                    "client_order_id": client_order_id,
+                    "result": _reconcile_binance_test_order_best_effort(
+                        api_key=creds["api_key"],
+                        api_secret=creds["api_secret"],
+                        symbol=symbol,
+                        client_order_id=client_order_id,
+                        market=market,
+                    ),
+                }
             log_audit_event(
                 db,
                 action="execution.binance.test_order.error",
                 user_id=user_id,
                 entity_type="execution",
-                details={
-                    "symbol": symbol,
-                    "side": side,
-                    "qty": qty,
-                    "client_order_id": locals().get("client_order_id"),
-                    "normalized_qty": (locals().get("qty_meta") or {}).get("normalized_qty"),
-                    "market": market,
-                    "error": str(exc),
-                },
+                details=details,
             )
             db.commit()
             raise HTTPException(
