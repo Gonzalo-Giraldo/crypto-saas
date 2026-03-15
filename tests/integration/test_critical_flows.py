@@ -1170,6 +1170,32 @@ def test_binance_runtime_strict_mode_rejects_direct_fallback_enabled(client, mon
         assert exc.detail == "Binance strict mode requires BINANCE_GATEWAY_FALLBACK_DIRECT=false"
 
 
+def test_binance_runtime_account_status_gateway_failure_with_direct_fallback_returns_direct_payload(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", True)
+
+    def _boom(api_key, api_secret):
+        raise RuntimeError("gateway_upstream_error status=502")
+
+    def _direct(api_key, api_secret):
+        return {
+            "canTrade": True,
+            "balances": [{"asset": "USDT", "free": "100.0", "locked": "0.0"}],
+        }
+
+    monkeypatch.setattr(runtime, "_get_binance_account_status_via_gateway", _boom)
+    monkeypatch.setattr(runtime, "get_account_status", _direct)
+
+    out = runtime._get_binance_account_status(api_key="k", api_secret="s")
+
+    assert out["canTrade"] is True
+    assert out["balances"][0]["asset"] == "USDT"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
