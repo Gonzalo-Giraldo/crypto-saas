@@ -1266,6 +1266,35 @@ def test_binance_runtime_send_test_order_unsanitized_gateway_error_uses_direct_f
     assert called["kwargs"]["market"] == "SPOT"
 
 
+def test_binance_runtime_account_status_entrypoint_maps_internal_failure_to_http_502(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    class _DB:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(runtime, "_get_binance_account_status", lambda api_key, api_secret: (_ for _ in ()).throw(RuntimeError("gateway_upstream_error status=502")))
+    monkeypatch.setattr(runtime, "log_audit_event", lambda *args, **kwargs: None)
+
+    try:
+        runtime.get_binance_account_status_for_user("user-1")
+        assert False, "expected HTTPException"
+    except runtime.HTTPException as exc:
+        assert exc.status_code == 502
+        assert exc.detail == "Binance account status failed: gateway_upstream_error status=502"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
