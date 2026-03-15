@@ -44,6 +44,32 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## 311a2ef — tests: add concurrent same-key auto-pick idempotency coverage
+
+Date: 2026-03-15
+Scope:
+- tests/integration/test_critical_flows.py
+
+Summary:
+Added concurrent same-key characterization coverage for auto-pick live
+idempotency behavior using the current integration harness.
+
+Behavior captured:
+- two concurrent requests with the same X-Idempotency-Key do not both
+  reach live execution
+- the test is aligned to the current runtime seam used by live dispatch
+- assertions are based on the concurrency invariant rather than on both
+  requests returning 200
+
+Validation:
+- docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "same_key_concurrent_requests_are_not_both_executed or idempotency_deduplicates_processing or live_http_error"
+- Result: 5 passed, 86 deselected, 13 warnings
+
+Classification:
+- PASS real
+- coverage only
+- no production code changes applied in this iteration
+
 ## 8fa06ff — tests: add auto-pick live idempotent finalize error-path coverage
 - Scope: coverage for live auto-pick idempotent finalize behavior on HTTP error path.
 - File changed: `tests/integration/test_critical_flows.py`

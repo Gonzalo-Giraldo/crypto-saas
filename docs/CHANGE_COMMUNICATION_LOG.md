@@ -1,5 +1,25 @@
 # CHANGE COMMUNICATION LOG
 
+### 311a2ef — concurrent same-key auto-pick coverage added
+
+Added a concurrent same-key integration test for auto-pick live
+idempotency behavior.
+
+What it verifies:
+- two concurrent requests using the same idempotency key do not both
+  trigger live execution
+- the test uses the actual runtime live-dispatch seam currently present
+  in ops.py
+- the invariant is enforced without requiring both responses to be 200
+
+Validation executed:
+- docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "same_key_concurrent_requests_are_not_both_executed or idempotency_deduplicates_processing or live_http_error"
+- Result: 5 passed, 86 deselected, 13 warnings
+
+Notes:
+- This is coverage expansion only.
+- No production/runtime behavior was changed in this iteration.
+
 ## 8fa06ff — auto-pick live idempotent finalize error-path test coverage
 - Added one isolated coverage test for the reserved-idempotency live auto-pick error path.
 - Covered the path where live execution fails with `HTTPException 502` and finalize best-effort is invoked with error payload.
