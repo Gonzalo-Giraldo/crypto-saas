@@ -1,5 +1,15 @@
 # CHANGE COMMUNICATION LOG
 
+## f35863c — auto-pick idempotency guard dry_run vs live test coverage
+- Added one isolated policy test for the auto-pick idempotency guard.
+- Covered the divergence between live and dry-run paths:
+  - live without `X-Idempotency-Key` => rejected
+  - dry_run without `X-Idempotency-Key` => allowed
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "auto_pick_execution_requires_idempotency_key_only_when_not_dry_run"`
+  - Result: `1 passed, 87 deselected`
+
 ## Micro-modulacion gateway Binance: helper de lectura upstream JSON comun
 
 - Commit: `b2a654b gateway: extract upstream json request helper`

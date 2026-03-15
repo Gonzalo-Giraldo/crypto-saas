@@ -44,6 +44,22 @@ Do not turn this into a long narrative.
 
 ## 4. Entries
 
+## f35863c — tests: add auto-pick idempotency guard coverage for dry_run vs live
+- Scope: policy coverage for auto-pick idempotency guard across dry_run and live execution paths.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for `_require_idempotency_for_auto_pick_execution(...)`
+  - Confirmed `dry_run=False` without `X-Idempotency-Key` raises `HTTPException 400`
+  - Confirmed `dry_run=True` without `X-Idempotency-Key` is allowed
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "auto_pick_execution_requires_idempotency_key_only_when_not_dry_run"`
+- Validation result:
+  - PASS real: `1 passed, 87 deselected`
+- Notes:
+  - During test insertion, two mechanical adjustments were required:
+    - `PretradeAutoPickRequest` is imported from `apps.api.app.schemas.strategy`
+    - `_require_idempotency_for_auto_pick_execution(...)` requires keyword arguments
+
 ## [CUT-2026-03-14-18] 2026-03-14 - Control de micro-modulacion gateway upstream JSON read helper (commit b2a654b)
 
 - Level: 2
