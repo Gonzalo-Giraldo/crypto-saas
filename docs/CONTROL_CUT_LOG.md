@@ -488,3 +488,16 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "account_status_entrypoint_maps_internal_failure_to_http_502"`
 - Validation result:
   - PASS real: `1 passed, 85 deselected`
+
+## 4384915 — tests: add binance runtime test-order entrypoint error mapping coverage
+- Scope: runtime entrypoint error-mapping coverage for Binance test-order flow.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for `execute_binance_test_order_for_user(...)`
+  - Simulated internal `_send_binance_test_order_with_retry(...)` failure with `gateway_upstream_error status=502`
+  - Confirmed runtime maps the internal failure to `HTTPException` with status `502`
+  - Verified the returned detail is `Binance test order failed: gateway_upstream_error status=502`
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "test_order_entrypoint_maps_internal_failure_to_http_502"`
+- Validation result:
+  - PASS real: `1 passed, 86 deselected`
