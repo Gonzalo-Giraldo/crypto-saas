@@ -362,3 +362,15 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "binance_client_ticker_price_reads_gateway_row_envelope"`
 - Validation result:
   - PASS real: `1 passed, 75 deselected`
+
+## f4d12d4 — tests: add binance client exchange-info gateway symbols envelope contract coverage
+- Scope: contract coverage between gateway response and binance client helper consumption.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for Binance client exchange-info helper consuming gateway envelope
+  - Validated extraction of `symbols` from gateway payload shape `{symbols, count, mode}`
+  - Verified returned mapping contains `BTCUSDT` with expected filter payload
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "binance_client_exchange_info_reads_gateway_symbols_envelope"`
+- Validation result:
+  - PASS real: `1 passed, 76 deselected`

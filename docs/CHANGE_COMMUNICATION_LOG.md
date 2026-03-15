@@ -408,3 +408,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "binance_client_ticker_price_reads_gateway_row_envelope"`
   - Result: `1 passed, 75 deselected`
+
+## f4d12d4 — binance client exchange-info gateway symbols envelope contract test coverage
+- Added one isolated contract test for Binance client exchange-info helper.
+- Covered gateway envelope consumption for payload shape `{symbols, count, mode}`.
+- Confirmed helper extracts `symbols` and returns per-symbol mapping correctly.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "binance_client_exchange_info_reads_gateway_symbols_envelope"`
+  - Result: `1 passed, 76 deselected`
