@@ -390,3 +390,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "fetch_binance_ticker_24hr_reads_gateway_envelope"`
   - Result: `1 passed, 73 deselected`
+
+## 9c5554d — ops klines gateway envelope contract test coverage
+- Added one isolated contract test for the ops Binance klines helper.
+- Covered gateway envelope consumption via `urllib_request.urlopen`.
+- Confirmed ops helper reads gateway payload shape `{rows, count, mode}` and returns row arrays correctly.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "fetch_binance_klines_reads_gateway_envelope"`
+  - Result: `1 passed, 74 deselected`
