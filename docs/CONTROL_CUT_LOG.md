@@ -324,3 +324,17 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "klines_symbol_required or klines_invalid_payload"`
 - Validation result:
   - PASS real: `2 passed, 71 deselected`
+
+## ade846a — tests: add ops ticker gateway envelope contract coverage
+- Scope: contract coverage between gateway response and ops helper consumption.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for ops ticker helper consuming gateway envelope via `urllib_request.urlopen`
+  - Validated extraction of `rows` from gateway payload shape `{rows, count, mode}`
+  - Final helper under test is module-level `_fetch_binance_ticker_rows`
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "fetch_binance_ticker_24hr_reads_gateway_envelope"`
+- Validation result:
+  - PASS real: `1 passed, 73 deselected`
+- Notes:
+  - Initial hypothesis used `_fetch_binance_ticker_24hr`, but local audit confirmed the module-level helper name is `_fetch_binance_ticker_rows`.
