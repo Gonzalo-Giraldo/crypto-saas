@@ -182,6 +182,68 @@ def test_binance_gateway_exchange_info_invalid_payload(client, monkeypatch):
     assert resp.json()["detail"] == "invalid_exchange_info_payload"
 
 
+def test_binance_gateway_ticker_24hr_invalid_payload(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"unexpected": "payload"}
+
+    monkeypatch.setattr(gw.requests, "request", lambda *args, **kwargs: _Resp())
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/ticker-24hr",
+            headers={"X-Internal-Token": "gw-token"},
+            json={"symbols": ["BTCUSDT"]},
+        )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "invalid_ticker_payload"
+
+
+def test_binance_gateway_ticker_24hr_symbol_filtering(client, monkeypatch):
+    _ = client
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return [
+                {"symbol": "BTCUSDT", "priceChangePercent": "1.2"},
+                {"symbol": "ETHUSDT", "priceChangePercent": "0.5"},
+            ]
+
+    monkeypatch.setattr(gw.requests, "request", lambda *args, **kwargs: _Resp())
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/ticker-24hr",
+            headers={"X-Internal-Token": "gw-token"},
+            json={"symbols": ["BTCUSDT"]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, dict)
+    assert data["mode"] == "gateway_ticker_24hr_spot"
+    assert data["count"] == 1
+    assert len(data["rows"]) == 1
+    assert data["rows"][0]["symbol"] == "BTCUSDT"
+
+
 def test_binance_runtime_gateway_error_is_sanitized(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.execution_runtime as runtime
