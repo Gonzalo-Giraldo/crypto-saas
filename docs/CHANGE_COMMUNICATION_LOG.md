@@ -399,3 +399,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "fetch_binance_klines_reads_gateway_envelope"`
   - Result: `1 passed, 74 deselected`
+
+## 27376f6 — binance client ticker-price gateway row envelope contract test coverage
+- Added one isolated contract test for Binance client ticker-price helper.
+- Covered gateway envelope consumption for payload shape `{row, mode}`.
+- Confirmed helper extracts `row.price` and returns float value correctly.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "binance_client_ticker_price_reads_gateway_row_envelope"`
+  - Result: `1 passed, 75 deselected`
