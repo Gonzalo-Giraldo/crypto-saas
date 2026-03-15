@@ -361,3 +361,13 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_symbols_required or exchange_info_invalid_payload"`
   - Result: `2 passed, 67 deselected`
+
+## c6579db — gateway Binance ticker-24hr test coverage
+- Added two direct gateway tests for `POST /binance/ticker-24hr`.
+- Covered scenarios:
+  - invalid upstream payload => `502 invalid_ticker_payload`
+  - symbol filtering logic returning envelope `{mode,count,rows}`
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_24hr_invalid_payload or ticker_24hr_symbol_filtering"`
+  - Result: `2 passed, 69 deselected`

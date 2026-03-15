@@ -296,3 +296,18 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_symbols_required or exchange_info_invalid_payload"`
 - Validation result:
   - PASS real: `2 passed, 67 deselected`
+
+## c6579db — tests: add gateway ticker-24hr coverage and validate response envelope contract
+- Scope: direct gateway test coverage only.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added direct `GatewayClient(gw.app)` coverage for `POST /binance/ticker-24hr`
+  - Covered explicit gateway scenarios:
+    - `502 invalid_ticker_payload`
+    - symbol filtering behaviour
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_24hr_invalid_payload or ticker_24hr_symbol_filtering"`
+- Validation result:
+  - PASS real: `2 passed, 69 deselected`
+- Notes:
+  - Endpoint returns an envelope structure `{mode, count, rows}` rather than a raw list.
