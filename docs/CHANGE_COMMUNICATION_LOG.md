@@ -417,3 +417,12 @@
 - Validation evidence:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "binance_client_exchange_info_reads_gateway_symbols_envelope"`
   - Result: `1 passed, 76 deselected`
+
+## dbe5812 — binance client ticker-price gateway failure no-fallback test coverage
+- Added one isolated failure-path test for Binance client ticker-price helper.
+- Covered behavior when gateway request fails and direct fallback is disabled.
+- Confirmed helper returns `None` instead of falling back or raising in this path.
+- No production logic changed.
+- Validation evidence:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_gateway_failure_without_direct_fallback_returns_none"`
+  - Result: `1 passed, 77 deselected`
