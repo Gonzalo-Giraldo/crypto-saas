@@ -398,3 +398,16 @@ Do not turn this into a long narrative.
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "exchange_info_gateway_failure_without_direct_fallback_raises"`
 - Validation result:
   - PASS real: `1 passed, 78 deselected`
+
+## 37bca4a — tests: add binance client ticker-price gateway failure with direct fallback coverage
+- Scope: contract/policy coverage for Binance client ticker-price helper when gateway fails and direct fallback is enabled.
+- File changed: `tests/integration/test_critical_flows.py`
+- Evidence:
+  - Added isolated test for `_fetch_symbol_price("BTCUSDT")`
+  - Simulated `_post_gateway(...)` failure with `gateway_upstream_error status=502`
+  - Confirmed helper falls back to direct `requests.get(...)` path when `BINANCE_GATEWAY_FALLBACK_DIRECT=true`
+  - Verified returned direct price is `50123.45`
+- Validation executed:
+  - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "ticker_price_gateway_failure_with_direct_fallback_returns_direct_price"`
+- Validation result:
+  - PASS real: `1 passed, 79 deselected`
