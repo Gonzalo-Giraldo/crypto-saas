@@ -927,6 +927,56 @@ def test_fetch_binance_ticker_24hr_reads_gateway_envelope(client, monkeypatch):
     assert rows[1]["symbol"] == "ETHUSDT"
 
 
+def test_fetch_binance_klines_reads_gateway_envelope(client, monkeypatch):
+    _ = client
+    import json
+    import apps.api.app.api.ops as ops_api
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(req, timeout=0):
+        assert req.full_url == "https://gw.example.test/binance/klines"
+        assert req.get_method() == "POST"
+        assert req.headers.get("X-internal-token") == "tok"
+        body = json.loads(req.data.decode("utf-8"))
+        assert body == {"symbol": "BTCUSDT", "interval": "1h", "limit": 120}
+        return _Resp(
+            {
+                "rows": [
+                    [1, "100", "110", "95", "105", "1000"],
+                    [2, "105", "112", "101", "109", "1200"],
+                ],
+                "count": 2,
+                "mode": "gateway_klines_spot",
+            }
+        )
+
+    monkeypatch.setattr(ops_api.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(ops_api.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(ops_api.settings, "BINANCE_GATEWAY_TOKEN", "tok")
+    monkeypatch.setattr(ops_api.settings, "BINANCE_GATEWAY_TIMEOUT_SECONDS", 12)
+    monkeypatch.setattr(ops_api.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(ops_api.urllib_request, "urlopen", _fake_urlopen)
+
+    rows = ops_api._fetch_binance_klines(symbol="BTCUSDT", interval="1h", limit=120)
+
+    assert isinstance(rows, list)
+    assert len(rows) == 2
+    assert rows[0][4] == "105"
+    assert rows[1][4] == "109"
+
+
 def test_pretrade_scan_ranking_and_timing(client):
     token = _token(client, "trader@test.com", "TraderPass123!")
     saved = client.post(
