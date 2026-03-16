@@ -1,43 +1,31 @@
-import hashlib
-import hmac
-import json
-import re
-from typing import Any
+"""
+IBKR Client Transport Module
+---------------------------
+This module provides the explicit client seam for Interactive Brokers (IBKR) lifecycle operations.
+Unlike Binance, there is no gateway abstraction for IBKR in this project. All transport and protocol
+handling for IBKR order operations will be implemented directly in this module.
 
-import requests
+This groundwork provides placeholder functions for the main IBKR order lifecycle actions. These are
+not yet implemented or wired to any adapter or runtime logic.
+"""
 
-from apps.api.app.core.config import settings
+def send_order(*, api_key: str, api_secret: str, symbol: str, side: str, quantity: float, order_ref: str, **kwargs):
+    """
+    Send an order to IBKR. This is a placeholder for the future transport implementation.
+    """
+    raise NotImplementedError("IBKR send_order is not yet implemented.")
 
+def query_order_status(*, api_key: str, api_secret: str, symbol: str, client_order_id: str, **kwargs):
+    """
+    Query the status of an order from IBKR. This is a placeholder for the future transport implementation.
+    """
+    raise NotImplementedError("IBKR query_order_status is not yet implemented.")
 
-def _validate_inputs(api_key: str, api_secret: str, symbol: str, quantity: float):
-    if len(api_key or "") < 8:
-        raise RuntimeError("ibkr_input_error field=api_key reason=too_short")
-    if len(api_secret or "") < 8:
-        raise RuntimeError("ibkr_input_error field=api_secret reason=too_short")
-    if not symbol or not symbol.isalnum():
-        raise RuntimeError("ibkr_input_error field=symbol reason=non_alnum")
-    if quantity <= 0:
-        raise RuntimeError("ibkr_input_error field=quantity reason=non_positive")
-
-
-def _build_order_ref(api_key: str, symbol: str, side: str, quantity: float) -> str:
-    material = f"{api_key}|{symbol.upper()}|{side.upper()}|{quantity}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
-
-
-def _extract_bridge_code(text: str) -> str | None:
-    msg = str(text or "")
-    m = re.search(r"\bcode=([A-Za-z0-9_\-]+)", msg)
-    if m:
-        return m.group(1)
-    m = re.search(r'"code"\s*:\s*"?([A-Za-z0-9_\-]+)"?', msg)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _format_bridge_error(status_code: int, body_text: str) -> str:
-    detail = f"ibkr_upstream_error status={int(status_code)}"
+def cancel_order(*, api_key: str, api_secret: str, symbol: str, client_order_id: str, **kwargs):
+    """
+    Cancel an order on IBKR. This is a placeholder for the future transport implementation.
+    """
+    raise NotImplementedError("IBKR cancel_order is not yet implemented.")
     code = _extract_bridge_code(body_text)
     if code:
         detail += f" code={code}"
