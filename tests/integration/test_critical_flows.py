@@ -1,3 +1,52 @@
+def test_binance_runtime_gateway_502_retry_succeeds(client, monkeypatch):
+    """
+    Proves runtime retries once for gateway_upstream_error status=502, succeeds on second attempt, no reconciliation.
+    """
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    call_state = {"count": 0}
+
+    class _FakeDB:
+        def commit(self): return None
+        def close(self): return None
+
+    def fake_send_order(**kwargs):
+        call_state["count"] += 1
+        if call_state["count"] == 1:
+            raise RuntimeError("gateway_upstream_error status=502")
+        return True
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _FakeDB())
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(runtime, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {
+            "normalized_qty": float(requested_qty),
+            "market": market,
+        },
+    )
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_TOKEN", "tok")
+    monkeypatch.setattr(runtime, "_build_binance_broker_adapter", lambda **kwargs: type("FakeAdapter", (), {"send_order": staticmethod(fake_send_order)})())
+
+    out = runtime.execute_binance_test_order_for_user(
+        user_id="u-retry-502",
+        symbol="BTCUSDT",
+        side="buy",
+        qty=0.01,
+        intent_key="ik-retry-502",
+    )
+    assert out["sent"] is True
+    assert call_state["count"] == 2
+    # No reconciliation attempted, so no reconciliation_attempt key in audit details.
 import pyotp
 from typing import Optional
 from datetime import datetime, timedelta, timezone
