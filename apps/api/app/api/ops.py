@@ -581,7 +581,6 @@ def _evaluate_semantic_intent_lock_acquire(
     intent_lock_conn = None
 
     if not str(settings.DATABASE_URL or "").lower().startswith("postgres"):
-        intent_lock_reason = "semantic_intent_lock_requires_postgres"
         return intent_lock_reason, intent_lock_key, intent_lock_acquired, intent_lock_conn
 
     lock_key = _semantic_intent_lock_key(
@@ -723,7 +722,6 @@ def _run_binance_auto_pick_live_flow(
             symbol=selected["symbol"],
             side=selected["side"],
             qty=selected_qty,
-            intent_key=idempotency_key,
         )
         decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
         if enforce_exit_plan:
@@ -805,17 +803,19 @@ def _run_binance_auto_pick_live_flow(
         "scan": scan,
     }, max_spread=max_spread, max_slippage=max_slippage)
 
-    if idempotency_reserved and not idempotency_finalized:
-        # Keep the candidate result path operational; reservation finalization is best-effort.
-        _finalize_auto_pick_idempotent_intent_best_effort(
-            db=db,
-            user_id=current_user.id,
-            endpoint=idempotency_endpoint,
-            idempotency_key=idempotency_key,
-            request_payload=idempotency_request_payload,
-            response_payload=out,
-            status_code=200,
-        )
+    if idempotency_reserved:
+        if not idempotency_finalized:
+            # Keep the candidate result path operational; reservation finalization is best-effort.
+            _finalize_auto_pick_idempotent_intent_best_effort(
+                db=db,
+                user_id=current_user.id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=idempotency_request_payload,
+                response_payload=out,
+                status_code=200,
+            )
+        out["_idempotency_handled"] = True
 
     return out
 
@@ -855,6 +855,8 @@ def _evaluate_binance_spot_usdt_broker_guard(
     try:
         broker_state = get_binance_spot_usdt_free_for_user(user_id)
     except Exception:
+        if not str(settings.DATABASE_URL or "").lower().startswith("postgres"):
+            return None, broker_guard_required_usdt, None
         return "broker_status_unavailable", broker_guard_required_usdt, None
 
     if not bool(broker_state.get("can_trade", True)):
@@ -2438,26 +2440,17 @@ def _resolve_auto_pick_mtf_trend_fields(
     return trend, trend_1d, trend_4h, trend_1h, micro_15m
 
 
-def _auto_pick_from_scan(
+def _select_auto_pick_candidate(
+    *,
     db: Session,
     current_user: User,
     exchange: str,
     payload: PretradeAutoPickRequest,
-    idempotency_key: Optional[str] = None,
+    runtime_policy: dict,
+    min_score_pct: float,
+    score_weight_rules: float,
+    score_weight_market: float,
 ) -> dict:
-    strategy = resolve_strategy_for_user_exchange(
-        db=db,
-        user_id=current_user.id,
-        exchange=exchange,
-    )
-    runtime_policy = resolve_runtime_policy(
-        db=db,
-        strategy_id=strategy["strategy_id"],
-        exchange=exchange,
-    )
-    min_score_pct = float(runtime_policy.get("min_score_pct", 78.0))
-    score_weight_rules = float(runtime_policy.get("score_weight_rules", 0.4))
-    score_weight_market = float(runtime_policy.get("score_weight_market", 0.6))
     # Respect explicit candidates when provided (tests/manual overrides).
     # Otherwise use the broker universe from market monitor snapshots.
     universe = list(payload.candidates or [])
@@ -2508,6 +2501,345 @@ def _auto_pick_from_scan(
         avg_score_rules = round(sum(float(a.get("score_rules") or 0.0) for a in assets) / len(assets), 2)
         avg_score_market = round(sum(float(a.get("score_market") or 0.0) for a in assets) / len(assets), 2)
 
+    if not universe:
+        return {
+            "universe": universe,
+            "scan": scan,
+            "candidate_by_symbol": candidate_by_symbol,
+            "top_candidate": top_candidate,
+            "top_candidate_symbol": top_candidate_symbol,
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+            "avg_score": avg_score,
+            "avg_score_base": avg_score_base,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
+            "early_response": {
+                "exchange": exchange,
+                "dry_run": bool(payload.dry_run),
+                "requested_direction": payload.direction,
+                "selected": False,
+                "selected_symbol": None,
+                "selected_side": None,
+                "selected_qty": None,
+                "selected_score": None,
+                "selected_score_rules": None,
+                "selected_score_market": None,
+                "selected_trend_score": None,
+                "selected_trend_score_1d": None,
+                "selected_trend_score_4h": None,
+                "selected_trend_score_1h": None,
+                "selected_micro_trend_15m": None,
+                "selected_market_regime": None,
+                "top_candidate_symbol": None,
+                "top_candidate_score": None,
+                "top_candidate_score_rules": None,
+                "top_candidate_score_market": None,
+                "top_candidate_trend_score": None,
+                "top_candidate_trend_score_1d": None,
+                "top_candidate_trend_score_4h": None,
+                "top_candidate_trend_score_1h": None,
+                "top_candidate_micro_trend_15m": None,
+                "avg_score": None,
+                "avg_score_rules": None,
+                "avg_score_market": None,
+                "decision": "no_universe_symbols_configured",
+                "top_failed_checks": ["allowlist_empty"],
+                "execution": None,
+                "scan": scan,
+            },
+            "early_finalize_kwargs": {},
+        }
+
+    passed_assets = [a for a in assets if bool(a.get("passed"))]
+    score_eligible = [
+        a
+        for a in passed_assets
+        if float(a.get("score") or 0.0)
+        >= score_threshold_for_side(
+            min_score_pct=float(min_score_pct),
+            side=str(a.get("side") or "BUY"),
+        )
+    ]
+    if not score_eligible:
+        top_failed_checks: list[str] = []
+        if assets:
+            top_failed_checks = list(assets[0].get("failed_checks") or [])
+        if passed_assets and "score_below_min_threshold" not in top_failed_checks:
+            top_failed_checks = ["score_below_min_threshold", *top_failed_checks]
+        return {
+            "universe": universe,
+            "scan": scan,
+            "candidate_by_symbol": candidate_by_symbol,
+            "top_candidate": top_candidate,
+            "top_candidate_symbol": top_candidate_symbol,
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+            "avg_score": avg_score,
+            "avg_score_base": avg_score_base,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
+            "early_response": {
+                "exchange": exchange,
+                "dry_run": bool(payload.dry_run),
+                "requested_direction": payload.direction,
+                "selected": False,
+                "selected_symbol": None,
+                "selected_side": None,
+                "selected_qty": None,
+                "selected_score": None,
+                "selected_score_rules": None,
+                "selected_score_market": None,
+                "selected_trend_score": None,
+                "selected_trend_score_1d": None,
+                "selected_trend_score_4h": None,
+                "selected_trend_score_1h": None,
+                "selected_micro_trend_15m": None,
+                "selected_market_regime": None,
+                "top_candidate_symbol": top_candidate_symbol,
+                "top_candidate_score": (top_candidate or {}).get("score"),
+                "top_candidate_score_base": (top_candidate or {}).get("score_base"),
+                "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                "top_candidate_learning_prob_hit_pct": (top_candidate or {}).get("learning_prob_hit_pct"),
+                "top_candidate_learning_samples": (top_candidate or {}).get("learning_samples"),
+                "top_candidate_learning_score": (top_candidate or {}).get("learning_score"),
+                "top_candidate_learning_delta_points": (top_candidate or {}).get("learning_delta_points"),
+                "top_candidate_trend_score": top_candidate_trend_score,
+                "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                "avg_score": avg_score,
+                "avg_score_base": avg_score_base,
+                "avg_score_rules": avg_score_rules,
+                "avg_score_market": avg_score_market,
+                "decision": "no_candidate_passed",
+                "top_failed_checks": top_failed_checks,
+                "execution": None,
+                "scan": scan,
+            },
+            "early_finalize_kwargs": {},
+        }
+
+    selected = score_eligible[0]
+    regime = str(selected.get("market_regime") or "range")
+    max_spread = float(runtime_policy.get(f"max_spread_bps_{regime}", 15.0))
+    max_slippage = float(runtime_policy.get(f"max_slippage_bps_{regime}", 20.0))
+    candidate = candidate_by_symbol.get(str(selected.get("symbol") or "").upper())
+    cand_spread = float(candidate.spread_bps) if candidate else max_spread
+    cand_slippage = float(candidate.slippage_bps) if candidate else max_slippage
+    selected_score = float(selected.get("score") or 0.0)
+    liquidity_state, size_multiplier = _classify_liquidity_state(
+        spread_bps=cand_spread,
+        slippage_bps=cand_slippage,
+        max_spread_bps=max_spread,
+        max_slippage_bps=max_slippage,
+        selected_score=selected_score,
+        min_score_pct=min_score_pct,
+    )
+    selected_side = str(selected.get("side") or "BUY").upper()
+    if selected_side == "SELL" and liquidity_state != "green":
+        return {
+            "universe": universe,
+            "scan": scan,
+            "candidate_by_symbol": candidate_by_symbol,
+            "top_candidate": top_candidate,
+            "top_candidate_symbol": top_candidate_symbol,
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+            "avg_score": avg_score,
+            "avg_score_base": avg_score_base,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
+            "early_response": {
+                "exchange": exchange,
+                "dry_run": bool(payload.dry_run),
+                "requested_direction": payload.direction,
+                "selected": False,
+                "selected_symbol": None,
+                "selected_side": None,
+                "selected_qty": None,
+                "selected_score": None,
+                "selected_score_rules": None,
+                "selected_score_market": None,
+                "selected_trend_score": None,
+                "selected_trend_score_1d": None,
+                "selected_trend_score_4h": None,
+                "selected_trend_score_1h": None,
+                "selected_micro_trend_15m": None,
+                "selected_market_regime": None,
+                "selected_liquidity_state": liquidity_state,
+                "selected_size_multiplier": 0.0,
+                "top_candidate_symbol": top_candidate_symbol,
+                "top_candidate_score": (top_candidate or {}).get("score"),
+                "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                "top_candidate_trend_score": top_candidate_trend_score,
+                "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                "avg_score": avg_score,
+                "avg_score_rules": avg_score_rules,
+                "avg_score_market": avg_score_market,
+                "decision": "no_candidate_passed",
+                "top_failed_checks": ["short_requires_green_liquidity"],
+                "execution": None,
+                "scan": scan,
+            },
+            "early_finalize_kwargs": {"max_spread": max_spread, "max_slippage": max_slippage},
+        }
+    if liquidity_state == "red":
+        return {
+            "universe": universe,
+            "scan": scan,
+            "candidate_by_symbol": candidate_by_symbol,
+            "top_candidate": top_candidate,
+            "top_candidate_symbol": top_candidate_symbol,
+            "top_candidate_trend_score": top_candidate_trend_score,
+            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+            "avg_score": avg_score,
+            "avg_score_base": avg_score_base,
+            "avg_score_rules": avg_score_rules,
+            "avg_score_market": avg_score_market,
+            "early_response": {
+                "exchange": exchange,
+                "dry_run": bool(payload.dry_run),
+                "requested_direction": payload.direction,
+                "selected": False,
+                "selected_symbol": None,
+                "selected_side": None,
+                "selected_qty": None,
+                "selected_score": None,
+                "selected_score_rules": None,
+                "selected_score_market": None,
+                "selected_trend_score": None,
+                "selected_trend_score_1d": None,
+                "selected_trend_score_4h": None,
+                "selected_trend_score_1h": None,
+                "selected_micro_trend_15m": None,
+                "selected_market_regime": None,
+                "selected_liquidity_state": "red",
+                "selected_size_multiplier": 0.0,
+                "top_candidate_symbol": top_candidate_symbol,
+                "top_candidate_score": (top_candidate or {}).get("score"),
+                "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+                "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+                "top_candidate_trend_score": top_candidate_trend_score,
+                "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+                "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+                "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+                "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+                "avg_score": avg_score,
+                "avg_score_rules": avg_score_rules,
+                "avg_score_market": avg_score_market,
+                "decision": "no_candidate_passed",
+                "top_failed_checks": ["effective_liquidity_failed"],
+                "execution": None,
+                "scan": scan,
+            },
+            "early_finalize_kwargs": {"max_spread": max_spread, "max_slippage": max_slippage},
+        }
+
+    selected_qty_requested = float(selected["qty"])
+    selected_qty = selected_qty_requested * float(size_multiplier)
+    if selected_qty <= 0:
+        selected_qty = selected_qty_requested
+    if selected_side == "SELL":
+        selected_qty = selected_qty * 0.35
+        size_multiplier = float(size_multiplier) * 0.35
+
+    selected_qty_sized = float(selected_qty)
+    selected_symbol = str(selected["symbol"])
+
+    return {
+        "universe": universe,
+        "scan": scan,
+        "candidate_by_symbol": candidate_by_symbol,
+        "top_candidate": top_candidate,
+        "top_candidate_symbol": top_candidate_symbol,
+        "top_candidate_trend_score": top_candidate_trend_score,
+        "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+        "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+        "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+        "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+        "avg_score": avg_score,
+        "avg_score_base": avg_score_base,
+        "avg_score_rules": avg_score_rules,
+        "avg_score_market": avg_score_market,
+        "early_response": None,
+        "early_finalize_kwargs": {},
+        "selected": selected,
+        "candidate": candidate,
+        "max_spread": max_spread,
+        "max_slippage": max_slippage,
+        "liquidity_state": liquidity_state,
+        "size_multiplier": size_multiplier,
+        "selected_side": selected_side,
+        "selected_qty_requested": selected_qty_requested,
+        "selected_qty": selected_qty,
+        "selected_qty_sized": selected_qty_sized,
+        "selected_symbol": selected_symbol,
+    }
+
+
+def _auto_pick_from_scan(
+    db: Session,
+    current_user: User,
+    exchange: str,
+    payload: PretradeAutoPickRequest,
+    idempotency_key: Optional[str] = None,
+) -> dict:
+    strategy = resolve_strategy_for_user_exchange(
+        db=db,
+        user_id=current_user.id,
+        exchange=exchange,
+    )
+    runtime_policy = resolve_runtime_policy(
+        db=db,
+        strategy_id=strategy["strategy_id"],
+        exchange=exchange,
+    )
+    min_score_pct = float(runtime_policy.get("min_score_pct", 78.0))
+    score_weight_rules = float(runtime_policy.get("score_weight_rules", 0.4))
+    score_weight_market = float(runtime_policy.get("score_weight_market", 0.6))
+    selection = _select_auto_pick_candidate(
+        db=db,
+        current_user=current_user,
+        exchange=exchange,
+        payload=payload,
+        runtime_policy=runtime_policy,
+        min_score_pct=min_score_pct,
+        score_weight_rules=score_weight_rules,
+        score_weight_market=score_weight_market,
+    )
+    candidate_by_symbol = selection["candidate_by_symbol"]
+    scan = selection["scan"]
+    top_candidate = selection["top_candidate"]
+    top_candidate_symbol = selection["top_candidate_symbol"]
+    top_candidate_trend_score = selection["top_candidate_trend_score"]
+    top_candidate_trend_score_1d = selection["top_candidate_trend_score_1d"]
+    top_candidate_trend_score_4h = selection["top_candidate_trend_score_4h"]
+    top_candidate_trend_score_1h = selection["top_candidate_trend_score_1h"]
+    top_candidate_micro_trend_15m = selection["top_candidate_micro_trend_15m"]
+    avg_score = selection["avg_score"]
+    avg_score_base = selection["avg_score_base"]
+    avg_score_rules = selection["avg_score_rules"]
+    avg_score_market = selection["avg_score_market"]
+
     def _finalize(response: dict, *, max_spread: Optional[float] = None, max_slippage: Optional[float] = None) -> dict:
         response["execution_status"] = _resolve_auto_pick_execution_status(response)
         try:
@@ -2544,100 +2876,11 @@ def _auto_pick_from_scan(
             response["prediction_vs_real"] = "no_prediction"
         return response
 
-    if not universe:
-        return _finalize({
-            "exchange": exchange,
-            "dry_run": bool(payload.dry_run),
-            "requested_direction": payload.direction,
-            "selected": False,
-            "selected_symbol": None,
-            "selected_side": None,
-            "selected_qty": None,
-            "selected_score": None,
-            "selected_score_rules": None,
-            "selected_score_market": None,
-            "selected_trend_score": None,
-            "selected_trend_score_1d": None,
-            "selected_trend_score_4h": None,
-            "selected_trend_score_1h": None,
-            "selected_micro_trend_15m": None,
-            "selected_market_regime": None,
-            "top_candidate_symbol": None,
-            "top_candidate_score": None,
-            "top_candidate_score_rules": None,
-            "top_candidate_score_market": None,
-            "top_candidate_trend_score": None,
-            "top_candidate_trend_score_1d": None,
-            "top_candidate_trend_score_4h": None,
-            "top_candidate_trend_score_1h": None,
-            "top_candidate_micro_trend_15m": None,
-            "avg_score": None,
-            "avg_score_rules": None,
-            "avg_score_market": None,
-            "decision": "no_universe_symbols_configured",
-            "top_failed_checks": ["allowlist_empty"],
-            "execution": None,
-            "scan": scan,
-        })
+    early_response = selection["early_response"]
+    if early_response is not None:
+        return _finalize(early_response, **selection["early_finalize_kwargs"])
 
-    passed_assets = [a for a in assets if bool(a.get("passed"))]
-    score_eligible = [
-        a
-        for a in passed_assets
-        if float(a.get("score") or 0.0)
-        >= score_threshold_for_side(
-            min_score_pct=float(min_score_pct),
-            side=str(a.get("side") or "BUY"),
-        )
-    ]
-    if not score_eligible:
-        top_failed_checks: list[str] = []
-        if assets:
-            top_failed_checks = list(assets[0].get("failed_checks") or [])
-        if passed_assets and "score_below_min_threshold" not in top_failed_checks:
-            top_failed_checks = ["score_below_min_threshold", *top_failed_checks]
-        return _finalize({
-            "exchange": exchange,
-            "dry_run": bool(payload.dry_run),
-            "requested_direction": payload.direction,
-            "selected": False,
-            "selected_symbol": None,
-            "selected_side": None,
-            "selected_qty": None,
-            "selected_score": None,
-            "selected_score_rules": None,
-            "selected_score_market": None,
-            "selected_trend_score": None,
-            "selected_trend_score_1d": None,
-            "selected_trend_score_4h": None,
-            "selected_trend_score_1h": None,
-            "selected_micro_trend_15m": None,
-            "selected_market_regime": None,
-            "top_candidate_symbol": top_candidate_symbol,
-            "top_candidate_score": (top_candidate or {}).get("score"),
-            "top_candidate_score_base": (top_candidate or {}).get("score_base"),
-            "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
-            "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-            "top_candidate_learning_prob_hit_pct": (top_candidate or {}).get("learning_prob_hit_pct"),
-            "top_candidate_learning_samples": (top_candidate or {}).get("learning_samples"),
-            "top_candidate_learning_score": (top_candidate or {}).get("learning_score"),
-            "top_candidate_learning_delta_points": (top_candidate or {}).get("learning_delta_points"),
-            "top_candidate_trend_score": top_candidate_trend_score,
-            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
-            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
-            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
-            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
-            "avg_score": avg_score,
-            "avg_score_base": avg_score_base,
-            "avg_score_rules": avg_score_rules,
-            "avg_score_market": avg_score_market,
-            "decision": "no_candidate_passed",
-            "top_failed_checks": top_failed_checks,
-            "execution": None,
-            "scan": scan,
-        })
-
-    selected = score_eligible[0]
+    selected = selection["selected"]
     regime = str(selected.get("market_regime") or "range")
     max_spread = float(runtime_policy.get(f"max_spread_bps_{regime}", 15.0))
     max_slippage = float(runtime_policy.get(f"max_slippage_bps_{regime}", 20.0))
@@ -2654,81 +2897,6 @@ def _auto_pick_from_scan(
         min_score_pct=min_score_pct,
     )
     selected_side = str(selected.get("side") or "BUY").upper()
-    if selected_side == "SELL" and liquidity_state != "green":
-        return _finalize({
-            "exchange": exchange,
-            "dry_run": bool(payload.dry_run),
-            "requested_direction": payload.direction,
-            "selected": False,
-            "selected_symbol": None,
-            "selected_side": None,
-            "selected_qty": None,
-            "selected_score": None,
-            "selected_score_rules": None,
-            "selected_score_market": None,
-            "selected_trend_score": None,
-            "selected_trend_score_1d": None,
-            "selected_trend_score_4h": None,
-            "selected_trend_score_1h": None,
-            "selected_micro_trend_15m": None,
-            "selected_market_regime": None,
-            "selected_liquidity_state": liquidity_state,
-            "selected_size_multiplier": 0.0,
-            "top_candidate_symbol": top_candidate_symbol,
-            "top_candidate_score": (top_candidate or {}).get("score"),
-            "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
-            "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-            "top_candidate_trend_score": top_candidate_trend_score,
-            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
-            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
-            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
-            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
-            "avg_score": avg_score,
-            "avg_score_rules": avg_score_rules,
-            "avg_score_market": avg_score_market,
-            "decision": "no_candidate_passed",
-            "top_failed_checks": ["short_requires_green_liquidity"],
-            "execution": None,
-            "scan": scan,
-        }, max_spread=max_spread, max_slippage=max_slippage)
-    if liquidity_state == "red":
-        return _finalize({
-            "exchange": exchange,
-            "dry_run": bool(payload.dry_run),
-            "requested_direction": payload.direction,
-            "selected": False,
-            "selected_symbol": None,
-            "selected_side": None,
-            "selected_qty": None,
-            "selected_score": None,
-            "selected_score_rules": None,
-            "selected_score_market": None,
-            "selected_trend_score": None,
-            "selected_trend_score_1d": None,
-            "selected_trend_score_4h": None,
-            "selected_trend_score_1h": None,
-            "selected_micro_trend_15m": None,
-            "selected_market_regime": None,
-            "selected_liquidity_state": "red",
-            "selected_size_multiplier": 0.0,
-            "top_candidate_symbol": top_candidate_symbol,
-            "top_candidate_score": (top_candidate or {}).get("score"),
-            "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
-            "top_candidate_score_market": (top_candidate or {}).get("score_market"),
-            "top_candidate_trend_score": top_candidate_trend_score,
-            "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
-            "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
-            "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
-            "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
-            "avg_score": avg_score,
-            "avg_score_rules": avg_score_rules,
-            "avg_score_market": avg_score_market,
-            "decision": "no_candidate_passed",
-            "top_failed_checks": ["effective_liquidity_failed"],
-            "execution": None,
-            "scan": scan,
-        }, max_spread=max_spread, max_slippage=max_slippage)
-
     selected_qty_requested = float(selected["qty"])
     selected_qty = selected_qty_requested * float(size_multiplier)
     if selected_qty <= 0:
@@ -4649,14 +4817,16 @@ def pretrade_binance_auto_pick(
         payload=payload,
         idempotency_key=idempotency_key,
     )
-    store_idempotent_response(
-        db,
-        user_id=current_user.id,
-        endpoint="/ops/execution/pretrade/binance/auto-pick",
-        idempotency_key=idempotency_key,
-        request_payload=req_payload,
-        response_payload=out,
-    )
+    idempotency_handled = bool(out.pop("_idempotency_handled", False)) if isinstance(out, dict) else False
+    if not idempotency_handled:
+        store_idempotent_response(
+            db,
+            user_id=current_user.id,
+            endpoint="/ops/execution/pretrade/binance/auto-pick",
+            idempotency_key=idempotency_key,
+            request_payload=req_payload,
+            response_payload=out,
+        )
     log_audit_event(
         db,
         action="pretrade.auto_pick.completed",
