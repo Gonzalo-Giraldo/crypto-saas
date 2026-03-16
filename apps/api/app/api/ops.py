@@ -1,8 +1,10 @@
 from pydantic import BaseModel
 from apps.worker.app.engine import broker_registry
-from apps.worker.app.engine.execution_runtime import _cancel_order_via_adapter
+
+from apps.worker.app.engine.execution_runtime import cancel_broker_order
 
 # Cancel Order API
+
 class CancelOrderRequest(BaseModel):
     exchange: str
     symbol: str
@@ -10,14 +12,17 @@ class CancelOrderRequest(BaseModel):
     market: str = "SPOT"
 
 @router.post("/cancel-order")
-def cancel_order_endpoint(payload: CancelOrderRequest):
+def cancel_order_endpoint(
+    payload: CancelOrderRequest,
+    current_user: User = Depends(get_current_user),
+):
     try:
-        adapter = broker_registry.get_broker_adapter(payload.exchange)
-        response = _cancel_order_via_adapter(
-            adapter=adapter,
+        response = cancel_broker_order(
+            exchange=payload.exchange,
             symbol=payload.symbol,
             client_order_id=payload.client_order_id,
             market=payload.market,
+            user_id=current_user.id,
         )
         return response
     except HTTPException as exc:
