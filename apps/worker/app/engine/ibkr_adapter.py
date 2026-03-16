@@ -22,3 +22,8 @@ class IBKRBrokerAdapter(BrokerAdapter):
     def query_order(self, symbol: str, client_order_id: str, market: str = None, **kwargs):
         # No query seam exists yet for IBKR; raise explicit error
         raise NotImplementedError("IBKRBrokerAdapter.query_order is not implemented yet. No IBKR query seam exists.")
+
+    def cancel_order(self, *, symbol: str, client_order_id: str, market: str = "SPOT", **kwargs):
+        raise NotImplementedError(
+            "IBKRBrokerAdapter.cancel_order is not implemented yet."
+        )

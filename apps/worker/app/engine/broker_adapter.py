@@ -30,3 +30,15 @@ class BrokerAdapter(ABC):
         market: str | None = None,
     ) -> dict[str, Any]:
         """Query order state by broker/client identifier and return raw status payload."""
+
+    @abstractmethod
+    def cancel_order(
+        self,
+        *,
+        symbol: str,
+        client_order_id: str,
+        market: str = "SPOT",
+        **kwargs
+    ) -> dict[str, Any]:
+        """Cancel an order by client_order_id and return broker-specific response payload."""
+        raise NotImplementedError("BrokerAdapter.cancel_order must be implemented by subclasses.")
