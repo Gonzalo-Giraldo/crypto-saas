@@ -2120,6 +2120,7 @@ def test_pretrade_auto_pick_same_key_concurrent_requests_are_not_both_executed(
 ):
     import threading
     import time
+    from fastapi import HTTPException
     from fastapi.testclient import TestClient
     from apps.api.app.api import ops as ops_module
 
@@ -2140,17 +2141,36 @@ def test_pretrade_auto_pick_same_key_concurrent_requests_are_not_both_executed(
     )
 
     calls = {"count": 0}
+    reconciliation = {"count": 0, "kwargs": None}
+    audit = {"details": None}
+
+    def _fake_query_order_status(**kwargs):
+        reconciliation["count"] += 1
+        reconciliation["kwargs"] = dict(kwargs)
+        return {"status": "REJECTED", "clientOrderId": kwargs["orig_client_order_id"]}
+
+    def _fake_log_audit_event(details):
+        audit["details"] = details
 
     def _fake_execute_binance_test_order_for_user(**kwargs):
         calls["count"] += 1
         time.sleep(0.05)
-        return {
-            "status": "ok",
-            "provider": "binance",
-            "symbol": kwargs.get("symbol", "BTCUSDT"),
-            "side": kwargs.get("side", "BUY"),
-            "qty": kwargs.get("qty", 0.0),
-        }
+        client_order_id = "cid-same-key-timeout-1"
+        result = _fake_query_order_status(
+            symbol=kwargs.get("symbol", "BTCUSDT"),
+            orig_client_order_id=client_order_id,
+            market="SPOT",
+        )
+        _fake_log_audit_event(
+            {
+                "client_order_id": client_order_id,
+                "reconciliation_attempt": {
+                    "client_order_id": client_order_id,
+                    "result": result,
+                },
+            }
+        )
+        raise HTTPException(status_code=502, detail="Binance test order failed: request timed out")
 
     monkeypatch.setattr(
         ops_module,
@@ -2229,7 +2249,12 @@ def test_pretrade_auto_pick_same_key_concurrent_requests_are_not_both_executed(
     assert set(status_codes).issubset({200, 409, 500}), bodies
     assert sum(1 for code in status_codes if code == 200) <= 1, bodies
     assert any(code in {409, 500} for code in status_codes), bodies
-    assert calls["count"] <= 1, bodies
+    assert calls["count"] == 1, bodies
+    assert reconciliation["count"] == 1
+    assert reconciliation["kwargs"] is not None
+    assert reconciliation["kwargs"]["orig_client_order_id"] == "cid-same-key-timeout-1"
+    assert audit["details"] is not None
+    assert audit["details"]["reconciliation_attempt"]["result"]["status"] == "REJECTED"
 
 
 def test_pretrade_auto_pick_live_http_error_does_not_finalize_reserved_intent_twice(client, monkeypatch):
