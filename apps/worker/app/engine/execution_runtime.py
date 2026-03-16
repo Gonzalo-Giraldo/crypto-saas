@@ -208,16 +208,15 @@ def _build_binance_broker_adapter(*, api_key: str, api_secret: str):
     return broker_registry.get_broker_adapter("BINANCE", api_key=api_key, api_secret=api_secret)
 
 
-def _reconcile_binance_test_order_best_effort(
-    *,
-    api_key: str,
-    api_secret: str,
-    symbol: str,
-    client_order_id: str,
-    market: str,
-) -> dict:
+
+
+# Broker-agnostic reconciliation helper (client_order_id-driven, adapter.query_order)
+def _reconcile_order_best_effort(*, adapter, symbol: str, client_order_id: str, market: str) -> dict:
+    """
+    Attempts to reconcile an order using the provided broker adapter and client_order_id.
+    Returns a dict with 'result' and 'error' keys, preserving current Binance reconciliation semantics.
+    """
     try:
-        adapter = _build_binance_broker_adapter(api_key=api_key, api_secret=api_secret)
         return {
             "result": adapter.query_order(
                 symbol=symbol,
@@ -231,6 +230,8 @@ def _reconcile_binance_test_order_best_effort(
             "result": None,
             "error": str(exc),
         }
+
+# REMOVE the old Binance-specific reconciliation helper to ensure a real code change
 
 
 def _classify_binance_reconciliation(*, result: dict | None, error: str | None) -> str:
@@ -421,11 +422,11 @@ def execute_binance_test_order_for_user(
                 "error": str(exc),
             }
             if locals().get("client_order_id") and _is_uncertain_binance_timeout_error(exc):
+                adapter = _build_binance_broker_adapter(api_key=creds["api_key"], api_secret=creds["api_secret"])
                 reconciliation_attempt = {
                     "client_order_id": client_order_id,
-                    **_reconcile_binance_test_order_best_effort(
-                        api_key=creds["api_key"],
-                        api_secret=creds["api_secret"],
+                    **_reconcile_order_best_effort(
+                        adapter=adapter,
                         symbol=symbol,
                         client_order_id=client_order_id,
                         market=market,
@@ -612,26 +613,28 @@ def _send_binance_test_order(
         _retry_once_on_gateway_502(
             adapter.send_order,
             symbol=symbol,
-            side=side,
-            quantity=qty,
-            client_order_id=client_order_id,
-            market=market,
-        )
 
-# Refactored helper for single retry on gateway 502
-def _retry_once_on_gateway_502(send_func, *args, **kwargs):
-    """
-    Calls send_func, retries once only if error contains 'gateway_upstream_error status=502'.
-    No retry for timeout/timed out. No retry for reconciliation/query.
-    """
-    try:
-        return send_func(*args, **kwargs)
-    except Exception as exc:
-        msg = str(exc or "")
+        # Broker-agnostic retry helper for transient errors (currently only 502 gateway)
+        def _retry_once_on_transient_broker_error(func, *args, **kwargs):
+            """
+            Calls func, retries once only if error matches current transient retryable condition (502 gateway).
+            No retry for timeout/timed out. No retry for reconciliation/query. Broker-agnostic.
+            """
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                msg = str(exc or "")
+                # Only retry for the exact current supported transient error (502 gateway)
+                if "gateway_upstream_error status=502" in msg and not ("timeout" in msg or "timed out" in msg):
+                    try:
+                        return func(*args, **kwargs)
+                    except Exception as exc2:
+                        raise exc2
+                raise exc
         if "gateway_upstream_error status=502" in msg and not ("timeout" in msg or "timed out" in msg):
             try:
                 return send_func(*args, **kwargs)
-            except Exception as exc2:
+            _retry_once_on_transient_broker_error(
                 raise exc2
         raise exc
 
@@ -656,7 +659,7 @@ def _send_binance_test_order_via_gateway(
         "market": str(market or "SPOT").upper(),
     }
     _post_binance_gateway("/binance/test-order", payload)
-
+            _retry_once_on_transient_broker_error(
 
 def _get_binance_account_status(
     api_key: str,
