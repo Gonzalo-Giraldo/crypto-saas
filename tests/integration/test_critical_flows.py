@@ -1493,7 +1493,7 @@ def test_binance_runtime_test_order_entrypoint_maps_internal_failure_to_http_502
         assert exc.detail == "Binance test order failed: gateway_upstream_error status=502"
 
 
-def test_binance_runtime_timeout_error_triggers_best_effort_reconciliation(client, monkeypatch):
+def test_binance_runtime_timeout_reconciliation_uses_generated_client_order_id(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.execution_runtime as runtime
 
@@ -1505,6 +1505,7 @@ def test_binance_runtime_timeout_error_triggers_best_effort_reconciliation(clien
             return None
 
     audit = {"details": None}
+    send = {"called": False}
     reconciliation = {"kwargs": None}
 
     monkeypatch.setattr(runtime, "SessionLocal", lambda: _DB())
@@ -1520,10 +1521,14 @@ def test_binance_runtime_timeout_error_triggers_best_effort_reconciliation(clien
         lambda symbol, requested_qty, market: {"normalized_qty": 1.0},
     )
     monkeypatch.setattr(runtime, "_build_binance_client_order_id", lambda **kwargs: "cid-timeout-1")
+    def _fake_send_binance_test_order_with_retry(**kwargs):
+        send["called"] = True
+        raise RuntimeError("request timed out")
+
     monkeypatch.setattr(
         runtime,
         "_send_binance_test_order_with_retry",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("request timed out")),
+        _fake_send_binance_test_order_with_retry,
     )
 
     def _fake_query_order_status(**kwargs):
@@ -1543,6 +1548,7 @@ def test_binance_runtime_timeout_error_triggers_best_effort_reconciliation(clien
         assert exc.status_code == 502
         assert exc.detail == "Binance test order failed: request timed out"
 
+    assert send["called"] is True
     assert reconciliation["kwargs"] is not None
     assert reconciliation["kwargs"]["symbol"] == "BTCUSDT"
     assert reconciliation["kwargs"]["orig_client_order_id"] == "cid-timeout-1"
