@@ -662,6 +662,164 @@ def _finalize_auto_pick_idempotent_intent_best_effort(
         pass
 
 
+def _run_binance_auto_pick_live_flow(
+    *,
+    db: Session,
+    current_user: User,
+    exchange: str,
+    payload: PretradeAutoPickRequest,
+    idempotency_key: Optional[str],
+    selected: dict,
+    selected_symbol: str,
+    selected_qty: float,
+    selected_qty_requested: float,
+    selected_qty_sized: float,
+    selected_side: str,
+    candidate,
+    execution_preview: dict,
+    liquidity_state: str,
+    size_multiplier: float,
+    top_candidate_symbol: Optional[str],
+    top_candidate: Optional[dict],
+    top_candidate_trend_score,
+    top_candidate_trend_score_1d,
+    top_candidate_trend_score_4h,
+    top_candidate_trend_score_1h,
+    top_candidate_micro_trend_15m,
+    avg_score,
+    avg_score_base,
+    avg_score_rules,
+    avg_score_market,
+    scan: dict,
+    enforce_exit_plan: bool,
+    exit_plan,
+    max_spread: float,
+    max_slippage: float,
+    _finalize,
+) -> dict:
+    execution = None
+    decision = "dry_run_selected_gray" if liquidity_state == "gray" else "dry_run_selected"
+    idempotency_reserved = False
+    idempotency_finalized = False
+    idempotency_endpoint = None
+    idempotency_request_payload = None
+
+    cached_response, idempotency_endpoint, idempotency_request_payload = _reserve_auto_pick_pre_dispatch_idempotency(
+        db=db,
+        user_id=current_user.id,
+        exchange=exchange,
+        symbol=selected_symbol,
+        side=selected_side,
+        selected_qty=selected_qty,
+        idempotency_key=idempotency_key,
+    )
+    if cached_response is not None:
+        return cached_response
+    idempotency_reserved = True
+
+    try:
+        execution = execute_binance_test_order_for_user(
+            user_id=current_user.id,
+            symbol=selected["symbol"],
+            side=selected["side"],
+            qty=selected_qty,
+            intent_key=idempotency_key,
+        )
+        decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
+        if enforce_exit_plan:
+            execution = {**(execution or {}), "exit_plan": exit_plan}
+    except HTTPException as exc:
+        decision = "insufficient_resources_or_execution_error"
+        execution = {"error": str(exc.detail)}
+        if idempotency_reserved:
+            _finalize_auto_pick_idempotent_intent_best_effort(
+                db=db,
+                user_id=current_user.id,
+                endpoint=idempotency_endpoint,
+                idempotency_key=idempotency_key,
+                request_payload=idempotency_request_payload,
+                response_payload={"decision": decision, "execution": execution},
+                status_code=500,
+            )
+            idempotency_finalized = True
+
+    (
+        selected_trend_score,
+        selected_trend_score_1d,
+        selected_trend_score_4h,
+        selected_trend_score_1h,
+        selected_micro_trend_15m,
+    ) = _resolve_auto_pick_mtf_trend_fields(selected_symbol, candidate, exchange)
+
+    out = _finalize({
+        "exchange": exchange,
+        "dry_run": bool(payload.dry_run),
+        "requested_direction": payload.direction,
+        "selected": True,
+        "selected_symbol": selected_symbol,
+        "selected_side": selected["side"],
+        "selected_qty_requested": round(selected_qty_requested, 8),
+        "selected_qty_sized": round(selected_qty_sized, 8),
+        "selected_qty_normalized": round(float(execution_preview.get("normalized_qty", 0.0)), 8),
+        "selected_price_estimate": execution_preview.get("price_estimate"),
+        "selected_estimated_notional": execution_preview.get("estimated_notional"),
+        "selected_qty_normalization_source": execution_preview.get("normalization_source"),
+        "selected_qty": round(selected_qty, 8),
+        "selected_score": selected["score"],
+        "selected_score_base": selected.get("score_base"),
+        "selected_score_rules": selected["score_rules"],
+        "selected_score_market": selected["score_market"],
+        "selected_learning_prob_hit_pct": selected.get("learning_prob_hit_pct"),
+        "selected_learning_samples": selected.get("learning_samples"),
+        "selected_learning_score": selected.get("learning_score"),
+        "selected_learning_delta_points": selected.get("learning_delta_points"),
+        "selected_trend_score": selected_trend_score,
+        "selected_trend_score_1d": selected_trend_score_1d,
+        "selected_trend_score_4h": selected_trend_score_4h,
+        "selected_trend_score_1h": selected_trend_score_1h,
+        "selected_micro_trend_15m": selected_micro_trend_15m,
+        "selected_market_regime": selected["market_regime"],
+        "selected_liquidity_state": liquidity_state,
+        "selected_size_multiplier": round(float(size_multiplier), 4),
+        "top_candidate_symbol": top_candidate_symbol,
+        "top_candidate_score": (top_candidate or {}).get("score"),
+        "top_candidate_score_base": (top_candidate or {}).get("score_base"),
+        "top_candidate_score_rules": (top_candidate or {}).get("score_rules"),
+        "top_candidate_score_market": (top_candidate or {}).get("score_market"),
+        "top_candidate_learning_prob_hit_pct": (top_candidate or {}).get("learning_prob_hit_pct"),
+        "top_candidate_learning_samples": (top_candidate or {}).get("learning_samples"),
+        "top_candidate_learning_score": (top_candidate or {}).get("learning_score"),
+        "top_candidate_learning_delta_points": (top_candidate or {}).get("learning_delta_points"),
+        "top_candidate_trend_score": top_candidate_trend_score,
+        "top_candidate_trend_score_1d": top_candidate_trend_score_1d,
+        "top_candidate_trend_score_4h": top_candidate_trend_score_4h,
+        "top_candidate_trend_score_1h": top_candidate_trend_score_1h,
+        "top_candidate_micro_trend_15m": top_candidate_micro_trend_15m,
+        "avg_score": avg_score,
+        "avg_score_base": avg_score_base,
+        "avg_score_rules": avg_score_rules,
+        "avg_score_market": avg_score_market,
+        "decision": decision,
+        "top_failed_checks": [],
+        "execution": execution,
+        "scan": scan,
+    }, max_spread=max_spread, max_slippage=max_slippage)
+
+    if idempotency_reserved and not idempotency_finalized:
+        # Keep the candidate result path operational; reservation finalization is best-effort.
+        _finalize_auto_pick_idempotent_intent_best_effort(
+            db=db,
+            user_id=current_user.id,
+            endpoint=idempotency_endpoint,
+            idempotency_key=idempotency_key,
+            request_payload=idempotency_request_payload,
+            response_payload=out,
+            status_code=200,
+        )
+
+    return out
+
+
 def _evaluate_binance_spot_usdt_broker_guard(
     *,
     user_id: str,
@@ -2823,6 +2981,41 @@ def _auto_pick_from_scan(
                     "execution": None,
                     "scan": scan,
                 }, max_spread=max_spread, max_slippage=max_slippage)
+            if exchange == "BINANCE":
+                return _run_binance_auto_pick_live_flow(
+                    db=db,
+                    current_user=current_user,
+                    exchange=exchange,
+                    payload=payload,
+                    idempotency_key=idempotency_key,
+                    selected=selected,
+                    selected_symbol=selected_symbol,
+                    selected_qty=selected_qty,
+                    selected_qty_requested=selected_qty_requested,
+                    selected_qty_sized=selected_qty_sized,
+                    selected_side=selected_side,
+                    candidate=candidate,
+                    execution_preview=execution_preview,
+                    liquidity_state=liquidity_state,
+                    size_multiplier=size_multiplier,
+                    top_candidate_symbol=top_candidate_symbol,
+                    top_candidate=top_candidate,
+                    top_candidate_trend_score=top_candidate_trend_score,
+                    top_candidate_trend_score_1d=top_candidate_trend_score_1d,
+                    top_candidate_trend_score_4h=top_candidate_trend_score_4h,
+                    top_candidate_trend_score_1h=top_candidate_trend_score_1h,
+                    top_candidate_micro_trend_15m=top_candidate_micro_trend_15m,
+                    avg_score=avg_score,
+                    avg_score_base=avg_score_base,
+                    avg_score_rules=avg_score_rules,
+                    avg_score_market=avg_score_market,
+                    scan=scan,
+                    enforce_exit_plan=enforce_exit_plan,
+                    exit_plan=exit_plan,
+                    max_spread=max_spread,
+                    max_slippage=max_slippage,
+                    _finalize=_finalize,
+                )
             cached_response, idempotency_endpoint, idempotency_request_payload = _reserve_auto_pick_pre_dispatch_idempotency(
                 db=db,
                 user_id=current_user.id,
