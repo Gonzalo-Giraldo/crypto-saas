@@ -12,6 +12,8 @@ from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+import apps.worker.app.engine.binance_adapter as binance_adapter_module
+from apps.worker.app.engine.binance_adapter import BinanceBrokerAdapter
 from apps.worker.app.engine.binance_client import (
     send_test_order,
     get_account_status,
@@ -94,6 +96,13 @@ def _is_uncertain_binance_timeout_error(exc: Exception) -> bool:
     return "timeout" in msg or "timed out" in msg
 
 
+def _build_binance_broker_adapter(*, api_key: str, api_secret: str) -> BinanceBrokerAdapter:
+    # Keep runtime monkeypatch seams operational while routing broker-facing calls through the adapter.
+    binance_adapter_module.send_test_order = send_test_order
+    binance_adapter_module.query_order_status = query_order_status
+    return BinanceBrokerAdapter(api_key=api_key, api_secret=api_secret)
+
+
 def _reconcile_binance_test_order_best_effort(
     *,
     api_key: str,
@@ -103,12 +112,11 @@ def _reconcile_binance_test_order_best_effort(
     market: str,
 ) -> dict:
     try:
+        adapter = _build_binance_broker_adapter(api_key=api_key, api_secret=api_secret)
         return {
-            "result": query_order_status(
-                api_key=api_key,
-                api_secret=api_secret,
+            "result": adapter.query_order(
                 symbol=symbol,
-                orig_client_order_id=client_order_id,
+                client_order_id=client_order_id,
                 market=market,
             ),
             "error": None,
@@ -467,11 +475,11 @@ def _send_binance_test_order(
     if not client_order_id:
         raise RuntimeError("kernel_dispatch_guard: missing client_order_id")
 
+    adapter = _build_binance_broker_adapter(api_key=api_key, api_secret=api_secret)
+
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if not gateway_enabled:
-        send_test_order(
-            api_key=api_key,
-            api_secret=api_secret,
+        adapter.send_order(
             symbol=symbol,
             side=side,
             quantity=qty,
@@ -495,9 +503,7 @@ def _send_binance_test_order(
             raise
         if "gateway_upstream_error status=" in str(exc or ""):
             raise
-        send_test_order(
-            api_key=api_key,
-            api_secret=api_secret,
+        adapter.send_order(
             symbol=symbol,
             side=side,
             quantity=qty,
