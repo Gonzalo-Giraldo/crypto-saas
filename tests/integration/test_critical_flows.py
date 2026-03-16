@@ -1,3 +1,85 @@
+def test_ibkr_adapter_send_order_delegates_to_client(monkeypatch):
+    """
+    Proves IBKRBrokerAdapter.send_order delegates to ibkr_client.send_order.
+    """
+    import apps.worker.app.engine.ibkr_adapter as ibkr_adapter
+    called = {}
+    def fake_send_order(**kwargs):
+        called["args"] = kwargs
+        return "sent"
+    monkeypatch.setattr("apps.worker.app.engine.ibkr_client.send_order", fake_send_order)
+    adapter = ibkr_adapter.IBKRBrokerAdapter(api_key="k", api_secret="s")
+    result = adapter.send_order(symbol="AAPL", side="BUY", quantity=1.0, client_order_id="cid-1")
+    assert result == "sent"
+    assert called["args"]["symbol"] == "AAPL"
+    assert called["args"]["side"] == "BUY"
+    assert called["args"]["quantity"] == 1.0
+    assert called["args"]["order_ref"] == "cid-1"
+
+def test_ibkr_adapter_query_order_delegates_to_client(monkeypatch):
+    """
+    Proves IBKRBrokerAdapter.query_order delegates to ibkr_client.query_order_status.
+    """
+    import apps.worker.app.engine.ibkr_adapter as ibkr_adapter
+    called = {}
+    def fake_query_order_status(**kwargs):
+        called["args"] = kwargs
+        return {"status": "queried"}
+    monkeypatch.setattr("apps.worker.app.engine.ibkr_client.query_order_status", fake_query_order_status)
+    adapter = ibkr_adapter.IBKRBrokerAdapter(api_key="k", api_secret="s")
+    result = adapter.query_order(symbol="AAPL", client_order_id="cid-2")
+    assert result["status"] == "queried"
+    assert called["args"]["symbol"] == "AAPL"
+    assert called["args"]["client_order_id"] == "cid-2"
+
+def test_ibkr_adapter_cancel_order_delegates_to_client(monkeypatch):
+    """
+    Proves IBKRBrokerAdapter.cancel_order delegates to ibkr_client.cancel_order.
+    """
+    import apps.worker.app.engine.ibkr_adapter as ibkr_adapter
+    called = {}
+    def fake_cancel_order(**kwargs):
+        called["args"] = kwargs
+        return {"status": "cancelled"}
+    monkeypatch.setattr("apps.worker.app.engine.ibkr_client.cancel_order", fake_cancel_order)
+    adapter = ibkr_adapter.IBKRBrokerAdapter(api_key="k", api_secret="s")
+    result = adapter.cancel_order(symbol="AAPL", client_order_id="cid-3")
+    assert result["status"] == "cancelled"
+    assert called["args"]["symbol"] == "AAPL"
+    assert called["args"]["client_order_id"] == "cid-3"
+
+def test_ibkr_client_send_order_not_implemented():
+    """
+    Proves ibkr_client.send_order raises NotImplementedError.
+    """
+    import apps.worker.app.engine.ibkr_client as ibkr_client
+    try:
+        ibkr_client.send_order(api_key="k", api_secret="s", symbol="AAPL", side="BUY", quantity=1.0, order_ref="cid-1")
+        assert False, "expected NotImplementedError"
+    except NotImplementedError as exc:
+        assert "not yet implemented" in str(exc)
+
+def test_ibkr_client_query_order_status_not_implemented():
+    """
+    Proves ibkr_client.query_order_status raises NotImplementedError.
+    """
+    import apps.worker.app.engine.ibkr_client as ibkr_client
+    try:
+        ibkr_client.query_order_status(api_key="k", api_secret="s", symbol="AAPL", client_order_id="cid-2")
+        assert False, "expected NotImplementedError"
+    except NotImplementedError as exc:
+        assert "not yet implemented" in str(exc)
+
+def test_ibkr_client_cancel_order_not_implemented():
+    """
+    Proves ibkr_client.cancel_order raises NotImplementedError.
+    """
+    import apps.worker.app.engine.ibkr_client as ibkr_client
+    try:
+        ibkr_client.cancel_order(api_key="k", api_secret="s", symbol="AAPL", client_order_id="cid-3")
+        assert False, "expected NotImplementedError"
+    except NotImplementedError as exc:
+        assert "not yet implemented" in str(exc)
 def test_binance_gateway_cancel_order_maps_orig_client_order_id(client, monkeypatch):
     """
     Proves /binance/cancel-order maps orig_client_order_id → origClientOrderId in gateway request.
