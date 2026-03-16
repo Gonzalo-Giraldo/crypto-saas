@@ -1,3 +1,47 @@
+def cancel_broker_order(
+    *,
+    exchange: str,
+    api_key: str = None,
+    api_secret: str = None,
+    symbol: str,
+    client_order_id: str,
+    market: str = "SPOT",
+    user_id: str = None,
+):
+    """
+    Cancel an order via the runtime, resolving the broker and credentials, and using the adapter abstraction.
+    """
+    db = SessionLocal()
+    try:
+        # If credentials not provided, try to resolve via user_id and exchange
+        creds = None
+        if not (api_key and api_secret):
+            if not user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Missing credentials and user_id for cancel_broker_order",
+                )
+            creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange=exchange)
+            if not creds:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing credentials for {exchange}",
+                )
+            api_key = creds["api_key"]
+            api_secret = creds["api_secret"]
+        adapter = broker_registry.get_broker_adapter(
+            exchange,
+            api_key=api_key,
+            api_secret=api_secret,
+        )
+        return _cancel_order_via_adapter(
+            adapter=adapter,
+            symbol=symbol,
+            client_order_id=client_order_id,
+            market=market,
+        )
+    finally:
+        db.close()
 def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, market: str = "SPOT"):
     """
     Helper to cancel an order via the broker adapter, following the exception handling pattern of send_order/query_order flows.
