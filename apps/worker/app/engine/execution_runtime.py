@@ -2,18 +2,63 @@ def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, mar
     """
     Helper to cancel an order via the broker adapter, following the exception handling pattern of send_order/query_order flows.
     """
+    db = SessionLocal()
+    broker = getattr(adapter, "broker", None) or getattr(adapter, "exchange", None) or getattr(adapter, "name", None) or None
     try:
-        return adapter.cancel_order(
+        log_audit_event(
+            db,
+            action="order_cancel_requested",
+            user_id=None,
+            entity_type="execution",
+            details={
+                "symbol": symbol,
+                "client_order_id": client_order_id,
+                "market": market,
+                "broker": broker,
+            },
+        )
+        db.commit()
+        result = adapter.cancel_order(
             symbol=symbol,
             client_order_id=client_order_id,
             market=market,
         )
+        log_audit_event(
+            db,
+            action="order_cancelled",
+            user_id=None,
+            entity_type="execution",
+            details={
+                "symbol": symbol,
+                "client_order_id": client_order_id,
+                "market": market,
+                "broker": broker,
+                "result": result,
+            },
+        )
+        db.commit()
+        return result
     except Exception as exc:
-        # Use the same error handling pattern as send_order/query_order helpers
+        log_audit_event(
+            db,
+            action="order_cancel_failed",
+            user_id=None,
+            entity_type="execution",
+            details={
+                "symbol": symbol,
+                "client_order_id": client_order_id,
+                "market": market,
+                "broker": broker,
+                "error": str(exc),
+            },
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Broker cancel_order failed: {exc}",
         )
+    finally:
+        db.close()
 import hashlib
 import hmac
 import time
