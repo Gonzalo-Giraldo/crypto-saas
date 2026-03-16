@@ -1,3 +1,135 @@
+def test_binance_gateway_cancel_order_maps_orig_client_order_id(client, monkeypatch):
+    """
+    Proves /binance/cancel-order maps orig_client_order_id → origClientOrderId in gateway request.
+    """
+    import apps.binance_gateway.main as gw
+    from fastapi.testclient import TestClient as GatewayClient
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setattr(gw, "INTERNAL_TOKEN", "gw-token")
+    monkeypatch.setattr(gw, "BINANCE_SPOT_BASE", "https://spot.example.test")
+    monkeypatch.setattr(gw, "RATE_LIMIT_PER_MIN", 9999)
+
+    captured = {"method": None, "url": None, "json": None}
+
+    class _Resp:
+        status_code = 200
+        @staticmethod
+        def json():
+            return {"symbol": "BTCUSDT", "status": "CANCELED"}
+
+    def _fake_request(method: str, url: str, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["json"] = kwargs.get("json")
+        return _Resp()
+
+    monkeypatch.setattr(gw.requests, "request", _fake_request)
+
+    with GatewayClient(gw.app) as gc:
+        resp = gc.post(
+            "/binance/cancel-order",
+            headers={"X-Internal-Token": "gw-token"},
+            json={
+                "api_key": "k",
+                "api_secret": "s",
+                "symbol": "BTCUSDT",
+                "orig_client_order_id": "cid-456",
+                "market": "spot",
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["data"]["status"] == "CANCELED"
+    assert body["mode"] == "gateway_cancel_order_spot"
+    assert captured["method"] == "DELETE"
+    assert str(captured["url"]).startswith("https://spot.example.test/api/v3/order?")
+    parsed = parse_qs(urlparse(str(captured["url"])).query)
+    assert parsed.get("symbol") == ["BTCUSDT"]
+    assert parsed.get("origClientOrderId") == ["cid-456"]
+
+
+def test_binance_runtime_cancel_order_gateway_envelope(client, monkeypatch):
+    """
+    Proves runtime _cancel_order_via_adapter sends correct envelope to /binance/cancel-order gateway.
+    """
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    called = {}
+
+    def _fake_cancel_order_via_gateway(api_key, api_secret, symbol, orig_client_order_id, market):
+        called["args"] = {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "symbol": symbol,
+            "orig_client_order_id": orig_client_order_id,
+            "market": market,
+        }
+        return {"status": "CANCELED", "clientOrderId": orig_client_order_id}
+
+    class _FakeAdapter:
+        def cancel_order(self, **kwargs):
+            return _fake_cancel_order_via_gateway(**kwargs)
+
+    monkeypatch.setattr(runtime, "broker_registry", {"BINANCE": _FakeAdapter()})
+
+    out = runtime._cancel_order_via_adapter(
+        broker="BINANCE",
+        api_key="k",
+        api_secret="s",
+        symbol="BTCUSDT",
+        orig_client_order_id="cid-789",
+        market="SPOT",
+    )
+    assert out["status"] == "CANCELED"
+    assert called["args"] == {
+        "api_key": "k",
+        "api_secret": "s",
+        "symbol": "BTCUSDT",
+        "orig_client_order_id": "cid-789",
+        "market": "SPOT",
+    }
+
+
+def test_binance_adapter_cancel_order_delegates_to_client(monkeypatch):
+    """
+    Proves BinanceBrokerAdapter.cancel_order delegates to binance_client.cancel_order with correct args.
+    """
+    import apps.worker.app.engine.binance_adapter as binance_adapter
+
+    called = {}
+
+    class _FakeClient:
+        def cancel_order(self, api_key, api_secret, symbol, orig_client_order_id, market):
+            called["args"] = {
+                "api_key": api_key,
+                "api_secret": api_secret,
+                "symbol": symbol,
+                "orig_client_order_id": orig_client_order_id,
+                "market": market,
+            }
+            return {"status": "CANCELED", "clientOrderId": orig_client_order_id}
+
+    adapter = binance_adapter.BinanceBrokerAdapter()
+    adapter.binance_client = _FakeClient()
+
+    out = adapter.cancel_order(
+        api_key="k",
+        api_secret="s",
+        symbol="BTCUSDT",
+        orig_client_order_id="cid-999",
+        market="SPOT",
+    )
+    assert out["status"] == "CANCELED"
+    assert called["args"] == {
+        "api_key": "k",
+        "api_secret": "s",
+        "symbol": "BTCUSDT",
+        "orig_client_order_id": "cid-999",
+        "market": "SPOT",
+    }
 def test_binance_runtime_gateway_502_retry_succeeds(client, monkeypatch):
     """
     Proves runtime retries once for gateway_upstream_error status=502, succeeds on second attempt, no reconciliation.
