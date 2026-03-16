@@ -1,3 +1,19 @@
+def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, market: str = "SPOT"):
+    """
+    Helper to cancel an order via the broker adapter, following the exception handling pattern of send_order/query_order flows.
+    """
+    try:
+        return adapter.cancel_order(
+            symbol=symbol,
+            client_order_id=client_order_id,
+            market=market,
+        )
+    except Exception as exc:
+        # Use the same error handling pattern as send_order/query_order helpers
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Broker cancel_order failed: {exc}",
+        )
 import hashlib
 import hmac
 import time
