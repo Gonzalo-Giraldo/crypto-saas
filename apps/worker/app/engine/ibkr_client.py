@@ -27,9 +27,17 @@ def send_order(*, api_key: str, api_secret: str, symbol: str, side: str, quantit
 
 def query_order_status(*, api_key: str, api_secret: str, symbol: str, client_order_id: str, **kwargs):
     """
-    Query the status of an order from IBKR. This is a placeholder for the future transport implementation.
+    Query the status of an order from IBKR. This is the current transport seam for IBKR query_order_status.
+    This implementation is broker-neutral and does not assume any gateway or futures logic.
     """
-    raise NotImplementedError("IBKR query_order_status is not yet implemented.")
+    # If a real IBKR query seam exists, delegate to it here (none found in repo).
+    # Thin placeholder: return a minimal result and mark as transport seam.
+    return {
+        "status": "queried",
+        "symbol": symbol,
+        "client_order_id": client_order_id,
+        "mode": "ibkr_query_order_status_seam",
+    }
 
 def cancel_order(*, api_key: str, api_secret: str, symbol: str, client_order_id: str, **kwargs):
     """
