@@ -132,6 +132,59 @@ def send_test_order(
     return {"ok": True}
 
 
+
+
+def cancel_order(
+    *,
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    orig_client_order_id: str,
+    market: str = "SPOT",
+) -> dict:
+    sym = str(symbol or "").strip().upper()
+    order_id = str(orig_client_order_id or "").strip()
+    market_norm = str(market or "SPOT").upper()
+
+    if not sym:
+        raise RuntimeError("symbol_required")
+    if not order_id:
+        raise RuntimeError("orig_client_order_id_required")
+
+    if _gateway_enabled():
+        body = _post_gateway(
+            "/binance/cancel-order",
+            {
+                "api_key": api_key,
+                "api_secret": api_secret,
+                "symbol": sym,
+                "orig_client_order_id": order_id,
+                "market": market_norm,
+            },
+            timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+        )
+        if not isinstance(body, dict):
+            raise RuntimeError("invalid_binance_cancel_order_response")
+        return body
+
+    endpoint = "/fapi/v1/order" if market_norm == "FUTURES" else "/api/v3/order"
+    params = {
+        "symbol": sym,
+        "origClientOrderId": order_id,
+        "timestamp": _timestamp_ms(),
+    }
+    signed = _sign_params(params, api_secret)
+    url = f"{_base_rest_url(market_norm)}{endpoint}?{signed}"
+    headers = {"X-MBX-APIKEY": api_key}
+    response = requests.delete(url, headers=headers, timeout=10)
+    if response.status_code >= 400:
+        detail = response.text.strip()
+        raise RuntimeError(f"Binance cancel order error {response.status_code}: {detail}")
+    body = response.json()
+    if not isinstance(body, dict):
+        raise RuntimeError("invalid_binance_cancel_order_response")
+    return body
+
 def query_order_status(
     api_key: str,
     api_secret: str,
