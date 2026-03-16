@@ -20,6 +20,25 @@ Notes:
 - This is coverage expansion only.
 - No production/runtime behavior was changed in this iteration.
 
+### 353504d - timeout reconciliation coverage tightened for binance runtime
+
+Updated the focused timeout reconciliation test so the covered behavior is
+more explicit and directly tied to the runtime send path.
+
+What is now verified:
+- the send path actually executes and fails with timeout-like behavior
+- reconciliation is attempted after that failure
+- query_order_status receives the generated client_order_id
+- reconciliation evidence is present in the observed audit/error payload
+
+Validation executed:
+- docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "timeout and reconciliation and client_order_id"
+- Result: 1 passed, 95 deselected, 7 warnings
+
+Notes:
+- This is coverage expansion only.
+- No runtime/production behavior changed in this iteration.
+
 ## 8fa06ff — auto-pick live idempotent finalize error-path test coverage
 - Added one isolated coverage test for the reserved-idempotency live auto-pick error path.
 - Covered the path where live execution fails with `HTTPException 502` and finalize best-effort is invoked with error payload.

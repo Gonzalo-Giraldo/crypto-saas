@@ -70,10 +70,35 @@ Classification:
 - coverage only
 - no production code changes applied in this iteration
 
+## 353504d - tests: add timeout reconciliation coverage for binance runtime
+
+Date: 2026-03-15
+Scope:
+- tests/integration/test_critical_flows.py
+
+Summary:
+Tightened timeout reconciliation coverage for the hardened Binance runtime
+path by adjusting the existing focused test to explicitly prove the send
+path timed out before reconciliation was attempted.
+
+Behavior captured:
+- send path was executed and failed with timeout-like behavior
+- reconciliation was attempted afterward
+- query_order_status received the generated client_order_id
+- observed audit/error payload includes reconciliation evidence
+
+Validation:
+- docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "timeout and reconciliation and client_order_id"
+- Result: 1 passed, 95 deselected, 7 warnings
+
+Classification:
+- PASS real
+- coverage only
+- no production code changes applied in this iteration
+
 ## 8fa06ff — tests: add auto-pick live idempotent finalize error-path coverage
 - Scope: coverage for live auto-pick idempotent finalize behavior on HTTP error path.
 - File changed: `tests/integration/test_critical_flows.py`
-- Evidence:
   - Added isolated test for live auto-pick reserved-idempotency error path
   - Simulated `execute_binance_test_order_for_user(...)` failure with `HTTPException(502, "gateway_upstream_error status=502")`
   - Confirmed business response uses `decision == "insufficient_resources_or_execution_error"`
@@ -81,19 +106,10 @@ Classification:
   - Confirmed finalize payload preserves `execution.error == "gateway_upstream_error status=502"`
 - Validation executed:
   - `docker compose run --rm api python -m pytest -q tests/integration/test_critical_flows.py -k "auto_pick_live_http_error_finalizes_reserved_idempotent_intent"`
-- Validation result:
-  - PASS real: `1 passed, 88 deselected`
-- Notes:
-  - The test required three mechanical adjustments to hit the intended branch:
     - neutralize pre-dispatch guards
     - capture all finalize calls instead of only the last one
-    - assert existence of the `500` finalize call because the flow may later also emit a `200` finalize
-
 ## f35863c — tests: add auto-pick idempotency guard coverage for dry_run vs live
 - Scope: policy coverage for auto-pick idempotency guard across dry_run and live execution paths.
-- File changed: `tests/integration/test_critical_flows.py`
-- Evidence:
-  - Added isolated test for `_require_idempotency_for_auto_pick_execution(...)`
   - Confirmed `dry_run=False` without `X-Idempotency-Key` raises `HTTPException 400`
   - Confirmed `dry_run=True` without `X-Idempotency-Key` is allowed
 - Validation executed:
