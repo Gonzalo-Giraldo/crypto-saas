@@ -1,3 +1,11 @@
+# === Minimal in-process runtime observability counters ===
+_runtime_counters = {
+    "orders_sent": 0,
+    "orders_failed": 0,
+    "orders_retried": 0,
+    "orders_reconciled": 0,
+    "orders_cancelled": 0,
+}
 def cancel_broker_order(
     *,
     exchange: str,
@@ -558,14 +566,18 @@ def _send_binance_test_order_with_retry(
                 client_order_id=client_order_id,
                 market=market,
             )
+            _runtime_counters["orders_sent"] += 1
             return
         except Exception as exc:
             last_exc = exc
             is_last = i >= attempts - 1
+            if not is_last:
+                _runtime_counters["orders_retried"] += 1
             if is_last or not _is_retryable_binance_error(exc):
                 break
             time.sleep(backoff_base * (2 ** i))
     if last_exc:
+        _runtime_counters["orders_failed"] += 1
         raise last_exc
 
 
@@ -787,48 +799,48 @@ def get_binance_account_status_for_user(user_id: str):
                 api_secret=creds["api_secret"],
             )
         except Exception as exc:
+            details = {
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "client_order_id": locals().get("client_order_id"),
+                "normalized_qty": (locals().get("qty_meta") or {}).get("normalized_qty"),
+                "market": market,
+                "error": str(exc),
+            }
+            reconciled = False
+            if locals().get("client_order_id") and _is_uncertain_binance_timeout_error(exc):
+                adapter = _build_binance_broker_adapter(api_key=creds["api_key"], api_secret=creds["api_secret"])
+                reconciliation_attempt = {
+                    "client_order_id": client_order_id,
+                    **_reconcile_order_best_effort(
+                        adapter=adapter,
+                        symbol=symbol,
+                        client_order_id=client_order_id,
+                        market=market,
+                    ),
+                }
+                details["reconciliation_attempt"] = reconciliation_attempt
+                details["reconciliation_classification"] = _classify_binance_reconciliation(
+                    result=reconciliation_attempt.get("result"),
+                    error=reconciliation_attempt.get("error"),
+                )
+                reconciled = True
+            _runtime_counters["orders_failed"] += 1
+            if reconciled:
+                _runtime_counters["orders_reconciled"] += 1
             log_audit_event(
                 db,
-                action="execution.binance.account_status.error",
+                action="execution.binance.test_order.error",
                 user_id=user_id,
                 entity_type="execution",
-                details={"error": str(exc)},
+                details=details,
             )
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Binance account status failed: {exc}",
+                detail=f"Binance test order failed: {exc}",
             )
-
-        balances = []
-        for b in (raw.get("balances") or []):
-            free = float(b.get("free", 0) or 0)
-            locked = float(b.get("locked", 0) or 0)
-            total = free + locked
-            if total <= 0:
-                continue
-            balances.append(
-                {
-                    "asset": str(b.get("asset", "")),
-                    "free": free,
-                    "locked": locked,
-                    "total": total,
-                }
-            )
-        balances.sort(key=lambda x: x["total"], reverse=True)
-        balances = balances[:20]
-        out = {
-            "exchange": "BINANCE",
-            "mode": "testnet_account",
-            "account_id": None,
-            "can_trade": bool(raw.get("canTrade", True)),
-            "balances": balances,
-            "open_orders": None,
-            "positions": [],
-            "metrics": {
-                "maker_commission": raw.get("makerCommission"),
-                "taker_commission": raw.get("takerCommission"),
-                "permissions": raw.get("permissions", []),
                 "update_time": raw.get("updateTime"),
             },
         }
@@ -846,63 +858,63 @@ def get_binance_account_status_for_user(user_id: str):
 
 
 def get_binance_spot_usdt_free_for_user(user_id: str) -> dict:
-    db = SessionLocal()
     try:
-        _assert_binance_gateway_policy()
-        creds = get_decrypted_exchange_secret(
-            db=db,
-            user_id=user_id,
-            exchange="BINANCE",
-        )
-        if not creds:
-            raise RuntimeError("broker_status_unavailable")
-
-        try:
-            raw = _get_binance_account_status(
-                api_key=creds["api_key"],
-                api_secret=creds["api_secret"],
-            )
-        except Exception as exc:
-            log_audit_event(
-                db,
-                action="execution.binance.spot_usdt_guard.error",
-                user_id=user_id,
-                entity_type="execution",
-                details={"error": str(exc)},
-            )
-            db.commit()
-            raise RuntimeError("broker_status_unavailable")
-
-        if not isinstance(raw, dict):
-            raise RuntimeError("broker_status_unavailable")
-
-        can_trade = bool(raw.get("canTrade", True))
-        usdt_free = None
-        for balance in (raw.get("balances") or []):
-            asset = str((balance or {}).get("asset") or "").strip().upper()
-            if asset != "USDT":
-                continue
-            try:
-                usdt_free = float((balance or {}).get("free", 0) or 0)
-            except Exception:
-                usdt_free = None
-            break
-
         log_audit_event(
             db,
-            action="execution.binance.spot_usdt_guard.success",
-            user_id=user_id,
+            action="order_cancel_requested",
+            user_id=None,
             entity_type="execution",
             details={
-                "can_trade": can_trade,
-                "usdt_free_available": usdt_free is not None,
+                "symbol": symbol,
+                "client_order_id": client_order_id,
+                "market": market,
+                "broker": broker,
             },
         )
         db.commit()
-        return {
-            "can_trade": can_trade,
-            "usdt_free": usdt_free,
-        }
+        result = adapter.cancel_order(
+            symbol=symbol,
+            client_order_id=client_order_id,
+            market=market,
+        )
+        _runtime_counters["orders_cancelled"] += 1
+        log_audit_event(
+            db,
+            action="order_cancelled",
+            user_id=None,
+            entity_type="execution",
+            details={
+                "symbol": symbol,
+                "client_order_id": client_order_id,
+                "market": market,
+                "broker": broker,
+                "result": result,
+            },
+        )
+        db.commit()
+        return result
+    except Exception as exc:
+        _runtime_counters["orders_failed"] += 1
+        log_audit_event(
+            db,
+            action="order_cancel_failed",
+            user_id=None,
+            entity_type="execution",
+            details={
+                "symbol": symbol,
+                "client_order_id": client_order_id,
+                "market": market,
+                "broker": broker,
+                "error": str(exc),
+            },
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Broker cancel_order failed: {exc}",
+        )
+    finally:
+        db.close()
     finally:
         db.close()
 
