@@ -3198,21 +3198,12 @@ def _auto_pick_from_scan(
             idempotency_reserved = True
 
             try:
-                if exchange == "BINANCE":
-                    execution = execute_binance_test_order_for_user(
-                        user_id=current_user.id,
-                        symbol=selected["symbol"],
-                        side=selected["side"],
-                        qty=selected_qty,
-                        intent_key=idempotency_key,
-                    )
-                else:
-                    execution = execute_ibkr_test_order_for_user(
-                        user_id=current_user.id,
-                        symbol=selected["symbol"],
-                        side=selected["side"],
-                        qty=selected_qty,
-                    )
+                execution = execute_ibkr_test_order_for_user(
+                    user_id=current_user.id,
+                    symbol=selected["symbol"],
+                    side=selected["side"],
+                    qty=selected_qty,
+                )
                 decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
                 if enforce_exit_plan:
                     execution = {**(execution or {}), "exit_plan": exit_plan}
