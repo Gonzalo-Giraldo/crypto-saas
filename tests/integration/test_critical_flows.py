@@ -1609,6 +1609,62 @@ def test_binance_runtime_timeout_reconciliation_classification_records_executed(
     assert audit["details"]["reconciliation_attempt"]["result"]["status"] == "PARTIALLY_FILLED"
 
 
+def test_binance_runtime_timeout_reconciliation_classification_records_failed(client, monkeypatch):
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    class _DB:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    audit = {"details": None}
+    send = {"called": False}
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {"normalized_qty": 1.0},
+    )
+    monkeypatch.setattr(runtime, "_build_binance_client_order_id", lambda **kwargs: "cid-timeout-3")
+
+    def _fake_send_binance_test_order_with_retry(**kwargs):
+        send["called"] = True
+        raise RuntimeError("request timed out")
+
+    monkeypatch.setattr(
+        runtime,
+        "_send_binance_test_order_with_retry",
+        _fake_send_binance_test_order_with_retry,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "query_order_status",
+        lambda **kwargs: {"status": "REJECTED", "clientOrderId": kwargs["orig_client_order_id"]},
+    )
+    monkeypatch.setattr(runtime, "log_audit_event", lambda db, action, user_id, entity_type, details: audit.__setitem__("details", details))
+
+    try:
+        runtime.execute_binance_test_order_for_user("user-1", "BTCUSDT", "BUY", 1.0)
+        assert False, "expected HTTPException"
+    except runtime.HTTPException as exc:
+        assert exc.status_code == 502
+        assert exc.detail == "Binance test order failed: request timed out"
+
+    assert send["called"] is True
+    assert audit["details"] is not None
+    assert audit["details"]["reconciliation_classification"] == "FAILED"
+
+
 def test_auto_pick_execution_requires_idempotency_key_only_when_not_dry_run(client):
     _ = client
     import apps.api.app.api.ops as ops_api
