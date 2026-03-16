@@ -234,3 +234,165 @@ Initial micro-steps:
 3. identify where it should be propagated
 4. identify where it should be recorded locally
 5. implement the smallest safe version first
+
+---
+
+## Ordered Next Roadmap — Risk Hardening, Broker Abstraction, Runtime Improvements
+
+### Execution Order
+
+The next implementation sequence must follow this exact order:
+
+1. Stage 4.1 — Execution error normalization
+2. Stage 4.2 — Timeout reconciliation hardening
+3. Stage 4.3 — Audit completeness
+4. Stage 4.4 — Idempotency safety review
+5. Stage 5.1 — Create broker interface
+6. Stage 5.2 — Extract Binance adapter
+7. Stage 5.3 — Make execution runtime broker-agnostic
+8. Stage 5.4 — Add broker registry
+9. Stage 6.1 — Retry policy
+10. Stage 6.2 — Execution metrics
+
+This order is intentional:
+- first remove remaining operational risk
+- then separate broker concerns from execution logic
+- then add operational runtime improvements
+
+---
+
+## Stage 4 — Risk Hardening
+
+### 4.1 Execution error normalization
+Goal:
+- normalize broker/runtime execution outcomes into a consistent internal model
+
+Target states:
+- EXECUTED
+- FAILED
+- SENT_UNKNOWN
+- NOT_SENT
+
+Closure criteria:
+- execution paths classify outcomes consistently
+- targeted validation exists
+
+### 4.2 Timeout reconciliation hardening
+Goal:
+- ensure timeout/uncertain execution paths consistently trigger reconciliation
+
+Closure criteria:
+- timeout path always attempts broker-side verification where applicable
+- targeted validation exists
+
+### 4.3 Audit completeness
+Goal:
+- ensure each execution path emits complete audit evidence
+
+Minimum event coverage:
+- start
+- completed
+- reconciliation
+- failed
+
+Closure criteria:
+- audit behavior is present and observable for all key execution outcomes
+
+### 4.4 Idempotency safety review
+Goal:
+- confirm finalize/retry/concurrency behavior remains safe after recent hardening
+
+Focus:
+- finalize paths
+- retry paths
+- concurrent requests
+
+Closure criteria:
+- review produces either validation-only closure or narrowly scoped fixes
+- no ambiguity remains in critical idempotent execution behavior
+
+---
+
+## Stage 5 — Broker Abstraction
+
+### 5.1 Create broker interface
+Goal:
+- introduce a broker-facing contract such as:
+	- send_order(...)
+	- query_order(...)
+	- cancel_order(...)
+
+Closure criteria:
+- a clear broker interface exists in code
+- no runtime behavior change yet beyond adapter indirection
+
+### 5.2 Extract Binance adapter
+Goal:
+- move Binance-specific broker behavior into a dedicated adapter module
+
+Closure criteria:
+- Binance execution/query logic is no longer directly embedded as ad hoc runtime coupling
+
+### 5.3 Make execution runtime broker-agnostic
+Goal:
+- replace direct Binance-specific execution calls with broker interface calls
+
+Closure criteria:
+- execution runtime depends on broker abstraction, not Binance-specific implementation details
+
+### 5.4 Add broker registry
+Goal:
+- resolve broker adapter by exchange/runtime context
+
+Closure criteria:
+- runtime can select the correct broker adapter through a single registry/factory mechanism
+
+---
+
+## Stage 6 — Runtime Improvements
+
+### 6.1 Retry policy
+Goal:
+- add controlled retry behavior for transient failures
+
+Focus:
+- network errors
+- gateway errors
+- timeout
+
+Closure criteria:
+- retry behavior is explicit, bounded, and validated
+
+### 6.2 Execution metrics
+Goal:
+- expose execution observability metrics
+
+Examples:
+- latency
+- fail rate
+- timeout rate
+
+Closure criteria:
+- runtime-level execution metrics are available for operational review
+
+---
+
+## Resulting Target Architecture
+
+strategy
+→ selection
+→ execution_runtime
+→ broker_adapter
+	 → binance
+	 → bybit
+	 → ibkr
+
+---
+
+## Active Rule for These Stages
+
+The next stages must continue to follow the same discipline:
+- one micro-step at a time
+- one primary change type per iteration
+- every iteration must produce a real deliverable
+- documentation alone does not count as sufficient progress
