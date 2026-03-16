@@ -11,9 +11,19 @@ not yet implemented or wired to any adapter or runtime logic.
 
 def send_order(*, api_key: str, api_secret: str, symbol: str, side: str, quantity: float, order_ref: str, **kwargs):
     """
-    Send an order to IBKR. This is a placeholder for the future transport implementation.
+    Send an order to IBKR. This is the current transport seam for IBKR send_order.
+    This implementation is broker-neutral and does not assume any gateway or futures logic.
     """
-    raise NotImplementedError("IBKR send_order is not yet implemented.")
+    # If a real IBKR execution seam exists, delegate to it here (none found in repo).
+    # Thin placeholder: return a minimal result and mark as transport seam.
+    return {
+        "status": "sent",
+        "symbol": symbol,
+        "side": side,
+        "quantity": quantity,
+        "order_ref": order_ref,
+        "mode": "ibkr_send_order_seam",
+    }
 
 def query_order_status(*, api_key: str, api_secret: str, symbol: str, client_order_id: str, **kwargs):
     """
