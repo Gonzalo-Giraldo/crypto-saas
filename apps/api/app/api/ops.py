@@ -1,3 +1,32 @@
+from pydantic import BaseModel
+from apps.worker.app.engine import broker_registry
+from apps.worker.app.engine.execution_runtime import _cancel_order_via_adapter
+
+# Cancel Order API
+class CancelOrderRequest(BaseModel):
+    exchange: str
+    symbol: str
+    client_order_id: str
+    market: str = "SPOT"
+
+@router.post("/cancel-order")
+def cancel_order_endpoint(payload: CancelOrderRequest):
+    try:
+        adapter = broker_registry.get_broker_adapter(payload.exchange)
+        response = _cancel_order_via_adapter(
+            adapter=adapter,
+            symbol=payload.symbol,
+            client_order_id=payload.client_order_id,
+            market=payload.market,
+        )
+        return response
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Cancel order failed: {exc}",
+        )
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
