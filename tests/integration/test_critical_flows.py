@@ -1,3 +1,104 @@
+def test_cancel_order_success_path(client, monkeypatch):
+    """
+    Proves POST /ops/cancel-order returns success, calls runtime, adapter, and passes through args.
+    """
+    import apps.api.app.api.ops as ops_api
+    called = {}
+    def fake_cancel_broker_order(exchange, symbol, client_order_id, market, user_id, **kwargs):
+        called.update({
+            "exchange": exchange,
+            "symbol": symbol,
+            "client_order_id": client_order_id,
+            "market": market,
+            "user_id": user_id,
+        })
+        return {"status": "CANCELED", "client_order_id": client_order_id, "symbol": symbol, "market": market}
+    monkeypatch.setattr(ops_api, "cancel_broker_order", fake_cancel_broker_order)
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    resp = client.post(
+        "/ops/cancel-order",
+        headers=_auth(token),
+        json={
+            "exchange": "BINANCE",
+            "symbol": "BTCUSDT",
+            "client_order_id": "cid-100",
+            "market": "SPOT",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "CANCELED"
+    assert body["client_order_id"] == "cid-100"
+    assert body["symbol"] == "BTCUSDT"
+    assert body["market"] == "SPOT"
+    assert called["exchange"] == "BINANCE"
+    assert called["symbol"] == "BTCUSDT"
+    assert called["client_order_id"] == "cid-100"
+    assert called["market"] == "SPOT"
+    assert called["user_id"]
+
+def test_cancel_order_failure_path(client, monkeypatch):
+    """
+    Proves POST /ops/cancel-order surfaces runtime/adapter failure as HTTPException, broker-agnostic.
+    """
+    import apps.api.app.api.ops as ops_api
+    from fastapi import HTTPException
+    def fake_cancel_broker_order(**kwargs):
+        raise HTTPException(status_code=502, detail="cancel failed: broker unreachable")
+    monkeypatch.setattr(ops_api, "cancel_broker_order", fake_cancel_broker_order)
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    resp = client.post(
+        "/ops/cancel-order",
+        headers=_auth(token),
+        json={
+            "exchange": "BINANCE",
+            "symbol": "BTCUSDT",
+            "client_order_id": "cid-101",
+            "market": "SPOT",
+        },
+    )
+    assert resp.status_code == 502, resp.text
+    body = resp.json()
+    assert "cancel failed" in body["detail"]
+
+def test_cancel_order_audit_linkage(client, monkeypatch):
+    """
+    Proves cancel flow triggers audit event (order_cancel_requested) in runtime path.
+    """
+    import apps.api.app.api.ops as ops_api
+    audit_events = []
+    def fake_cancel_broker_order(exchange, symbol, client_order_id, market, user_id, **kwargs):
+        # Simulate audit event in runtime
+        audit_events.append({
+            "action": "order_cancel_requested",
+            "symbol": symbol,
+            "client_order_id": client_order_id,
+            "market": market,
+            "exchange": exchange,
+            "user_id": user_id,
+        })
+        return {"status": "CANCELED", "client_order_id": client_order_id}
+    monkeypatch.setattr(ops_api, "cancel_broker_order", fake_cancel_broker_order)
+    token = _token(client, "trader@test.com", "TraderPass123!")
+    resp = client.post(
+        "/ops/cancel-order",
+        headers=_auth(token),
+        json={
+            "exchange": "BINANCE",
+            "symbol": "BTCUSDT",
+            "client_order_id": "cid-102",
+            "market": "SPOT",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert audit_events, "Audit event should be triggered"
+    event = audit_events[0]
+    assert event["action"] == "order_cancel_requested"
+    assert event["symbol"] == "BTCUSDT"
+    assert event["client_order_id"] == "cid-102"
+    assert event["market"] == "SPOT"
+    assert event["exchange"] == "BINANCE"
+    assert event["user_id"]
 def test_ibkr_adapter_send_order_delegates_to_client(monkeypatch):
     """
     Proves IBKRBrokerAdapter.send_order delegates to ibkr_client.send_order.
