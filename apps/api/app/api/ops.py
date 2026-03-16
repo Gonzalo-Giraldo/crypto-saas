@@ -4801,6 +4801,17 @@ def pretrade_binance_auto_pick(
         idempotency_key=idempotency_key,
     )
     req_payload = payload.model_dump()
+    log_audit_event(
+        db,
+        action="pretrade.auto_pick.started",
+        user_id=current_user.id,
+        entity_type="pretrade_auto_pick",
+        details={
+            "exchange": "BINANCE",
+            "dry_run": bool(payload.dry_run),
+            "requested_direction": payload.direction,
+        },
+    )
     cached = consume_idempotent_response(
         db,
         user_id=current_user.id,

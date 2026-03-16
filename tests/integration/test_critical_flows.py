@@ -1930,6 +1930,12 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     assert dry_data["execution"] is None
 
     import apps.api.app.api.ops as ops_api
+    audit_actions = []
+
+    def _capture_audit(db, action, user_id, entity_type, details):
+        audit_actions.append(action)
+
+    monkeypatch.setattr(ops_api, "log_audit_event", _capture_audit)
 
     monkeypatch.setattr(
         ops_api,
@@ -1975,6 +1981,7 @@ def test_pretrade_auto_pick_dry_run_and_execute(client, monkeypatch):
     assert exec_data["execution_status"] == "executed"
     assert exec_data["prediction_vs_real"] in {"no_prediction", "pending", "match", "mismatch"}
     assert exec_data["execution"]["sent"] is True
+    assert "pretrade.auto_pick.started" in audit_actions
 
 
 def test_pretrade_auto_pick_requires_idempotency_key_when_executing(client):
