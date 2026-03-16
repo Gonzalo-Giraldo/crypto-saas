@@ -479,7 +479,14 @@ def _send_binance_test_order(
 
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if not gateway_enabled:
-        _send_with_single_retry_on_gateway_502(adapter, symbol, side, qty, client_order_id, market)
+        _retry_once_on_gateway_502(
+            adapter.send_order,
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+            client_order_id=client_order_id,
+            market=market,
+        )
         return
 
     try:
@@ -497,36 +504,32 @@ def _send_binance_test_order(
             raise
         if "gateway_upstream_error status=" in str(exc or ""):
             raise
-        _send_with_single_retry_on_gateway_502(adapter, symbol, side, qty, client_order_id, market)
-
-def _send_with_single_retry_on_gateway_502(adapter, symbol, side, qty, client_order_id, market):
-    """
-    Calls adapter.send_order, retries once only if error contains 'gateway_upstream_error status=502'.
-    No retry for timeout/timed out. No retry for reconciliation/query.
-    """
-    try:
-        adapter.send_order(
+        _retry_once_on_gateway_502(
+            adapter.send_order,
             symbol=symbol,
             side=side,
             quantity=qty,
             client_order_id=client_order_id,
             market=market,
         )
+
+# Refactored helper for single retry on gateway 502
+def _retry_once_on_gateway_502(send_func, *args, **kwargs):
+    """
+    Calls send_func, retries once only if error contains 'gateway_upstream_error status=502'.
+    No retry for timeout/timed out. No retry for reconciliation/query.
+    """
+    try:
+        return send_func(*args, **kwargs)
     except Exception as exc:
         msg = str(exc or "")
         if "gateway_upstream_error status=502" in msg and not ("timeout" in msg or "timed out" in msg):
             try:
-                adapter.send_order(
-                    symbol=symbol,
-                    side=side,
-                    quantity=qty,
-                    client_order_id=client_order_id,
-                    market=market,
-                )
-                return
+                return send_func(*args, **kwargs)
             except Exception as exc2:
                 raise exc2
         raise exc
+
 
 
 def _send_binance_test_order_via_gateway(

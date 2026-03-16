@@ -35,7 +35,11 @@ def test_binance_runtime_gateway_502_retry_succeeds(client, monkeypatch):
     monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
     monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
     monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_TOKEN", "tok")
-    monkeypatch.setattr(runtime, "_build_binance_broker_adapter", lambda **kwargs: type("FakeAdapter", (), {"send_order": staticmethod(fake_send_order)})())
+    class FakeAdapter:
+        @staticmethod
+        def send_order(**kwargs):
+            return fake_send_order(**kwargs)
+    monkeypatch.setattr(runtime, "_build_binance_broker_adapter", lambda **kwargs: FakeAdapter())
 
     out = runtime.execute_binance_test_order_for_user(
         user_id="u-retry-502",
