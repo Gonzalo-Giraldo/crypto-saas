@@ -12,8 +12,7 @@ from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
-import apps.worker.app.engine.binance_adapter as binance_adapter_module
-from apps.worker.app.engine.binance_adapter import BinanceBrokerAdapter
+from apps.worker.app.engine import broker_registry
 from apps.worker.app.engine.binance_client import (
     send_test_order,
     get_account_status,
@@ -96,11 +95,13 @@ def _is_uncertain_binance_timeout_error(exc: Exception) -> bool:
     return "timeout" in msg or "timed out" in msg
 
 
-def _build_binance_broker_adapter(*, api_key: str, api_secret: str) -> BinanceBrokerAdapter:
+def _build_binance_broker_adapter(*, api_key: str, api_secret: str):
     # Keep runtime monkeypatch seams operational while routing broker-facing calls through the adapter.
+    # (Preserve monkeypatch/test seams for now.)
+    import apps.worker.app.engine.binance_adapter as binance_adapter_module
     binance_adapter_module.send_test_order = send_test_order
     binance_adapter_module.query_order_status = query_order_status
-    return BinanceBrokerAdapter(api_key=api_key, api_secret=api_secret)
+    return broker_registry.get_broker_adapter("BINANCE", api_key=api_key, api_secret=api_secret)
 
 
 def _reconcile_binance_test_order_best_effort(
