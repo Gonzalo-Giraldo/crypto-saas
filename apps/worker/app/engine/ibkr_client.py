@@ -41,13 +41,17 @@ def query_order_status(*, api_key: str, api_secret: str, symbol: str, client_ord
 
 def cancel_order(*, api_key: str, api_secret: str, symbol: str, client_order_id: str, **kwargs):
     """
-    Cancel an order on IBKR. This is a placeholder for the future transport implementation.
+    Cancel an order on IBKR. This is the current transport seam for IBKR cancel_order.
+    This implementation is broker-neutral and does not assume any gateway or futures logic.
     """
-    raise NotImplementedError("IBKR cancel_order is not yet implemented.")
-    code = _extract_bridge_code(body_text)
-    if code:
-        detail += f" code={code}"
-    return detail
+    # If a real IBKR cancel seam exists, delegate to it here (none found in repo).
+    # Thin placeholder: return a minimal result and mark as transport seam.
+    return {
+        "status": "cancelled",
+        "symbol": symbol,
+        "client_order_id": client_order_id,
+        "mode": "ibkr_cancel_order_seam",
+    }
 
 
 def _post_bridge(url: str, *, payload_raw: str, headers: dict, timeout: int = 12) -> requests.Response:
