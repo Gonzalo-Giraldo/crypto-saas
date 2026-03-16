@@ -164,6 +164,35 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
     return {"ok": True, "mode": f"gateway_test_order_{market.lower()}"}
 
 
+
+
+class BinanceCancelOrderIn(BaseModel):
+    api_key: str
+    api_secret: str
+    symbol: str
+    orig_client_order_id: str
+    market: str = "SPOT"
+
+
+@app.post("/binance/cancel-order")
+def binance_cancel_order(
+    payload: BinanceCancelOrderIn,
+    x_internal_token: str = Header(default="")
+):
+    _authorize_internal_request(x_internal_token)
+    market = str(payload.market or "SPOT").upper()
+    endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
+    return _signed_request(
+        "DELETE",
+        endpoint,
+        {
+            "symbol": payload.symbol,
+            "origClientOrderId": payload.orig_client_order_id,
+        },
+        api_key=payload.api_key,
+        api_secret=payload.api_secret,
+    )
+
 @app.post("/binance/order-status")
 def binance_order_status(payload: BinanceOrderStatusIn, x_internal_token: str = Header(default="")):
     _authorize_internal_request(x_internal_token)

@@ -96,8 +96,7 @@ def _is_uncertain_binance_timeout_error(exc: Exception) -> bool:
 
 
 def _build_binance_broker_adapter(*, api_key: str, api_secret: str):
-    # Keep runtime monkeypatch seams operational while routing broker-facing calls through the adapter.
-    # (Preserve monkeypatch/test seams for now.)
+    # Monkeypatchable seam for testability; uses broker registry internally.
     import apps.worker.app.engine.binance_adapter as binance_adapter_module
     binance_adapter_module.send_test_order = send_test_order
     binance_adapter_module.query_order_status = query_order_status
