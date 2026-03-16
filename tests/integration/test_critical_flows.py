@@ -431,6 +431,72 @@ def test_binance_runtime_send_path_executes_gateway_chain(client, monkeypatch):
     assert calls["json"]["client_order_id"] is not None
 
 
+def test_binance_runtime_send_test_order_propagates_client_order_id_from_intent_key(client, monkeypatch):
+    """Proves the live Binance execution path propagates a non-empty, intent-derived
+    client_order_id into the outbound gateway request payload."""
+    _ = client
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    payload = {}
+
+    class _FakeDB:
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        @staticmethod
+        def json():
+            return {"ok": True}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        payload.update(json or {})
+        return _Resp()
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _FakeDB())
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(runtime, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {
+            "normalized_qty": float(requested_qty),
+            "market": market,
+        },
+    )
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_BASE_URL", "https://gw.example.test")
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_ENABLED", True)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_FALLBACK_DIRECT", False)
+    monkeypatch.setattr(runtime.settings, "BINANCE_GATEWAY_TOKEN", "tok")
+    monkeypatch.setattr(runtime.requests, "post", _fake_post)
+
+    out = runtime.execute_binance_test_order_for_user(
+        user_id="u-coid-test",
+        symbol="BTCUSDT",
+        side="buy",
+        qty=0.05,
+        intent_key="ik-coid-verify",
+    )
+
+    # Outbound payload must carry a non-empty client_order_id.
+    assert payload.get("client_order_id"), "client_order_id must be present and non-empty in gateway payload"
+    # When intent_key is supplied the runtime uses the deterministic CSI path → "csi" prefix.
+    assert payload["client_order_id"].startswith("csi"), (
+        f"expected deterministic intent-keyed id starting with 'csi', got: {payload['client_order_id']!r}"
+    )
+    # The return value must echo the same id so callers can track the order.
+    assert out["client_order_id"] == payload["client_order_id"]
+
+
 def test_binance_client_gateway_error_is_sanitized(client, monkeypatch):
     _ = client
     import apps.worker.app.engine.binance_client as bclient
