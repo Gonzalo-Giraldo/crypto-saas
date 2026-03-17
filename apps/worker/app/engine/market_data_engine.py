@@ -46,6 +46,11 @@ class MarketDataState:
         return quotes
 
 class MarketDataEngine:
+    def get_price_value(self, user_id: str, broker: str, symbol: str, now_ts: Optional[float] = None) -> Optional[float]:
+        quote = self.get_fresh_price(user_id, broker, symbol, now_ts=now_ts)
+        if not quote or not hasattr(quote, "price") or quote.price is None:
+            return None
+        return quote.price
 
     price_ttl_seconds = 30
 

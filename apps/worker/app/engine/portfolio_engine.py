@@ -33,6 +33,58 @@ class PortfolioState:
 
 
 class PortfolioEngine:
+        def get_position_value(self, user_id: str, broker: str, symbol: str, market_data_engine, now_ts: Optional[float] = None) -> Optional[float]:
+            pos = self.get_position(user_id, broker, symbol)
+            if not pos or pos.quantity is None:
+                return 0
+            price = market_data_engine.get_price_value(user_id, broker, symbol, now_ts=now_ts)
+            if price is None:
+                return None
+            return pos.quantity * price
+
+        def get_total_portfolio_value(self, user_id: str, broker: Optional[str] = None, market_data_engine=None, now_ts: Optional[float] = None) -> Optional[float]:
+            if market_data_engine is None:
+                return None
+            total = 0.0
+            brokers = self.state.user_portfolios.get(user_id, {})
+            if broker is not None:
+                bp = brokers.get(broker)
+                if bp:
+                    for symbol, pos in bp.positions.items():
+                        if pos.quantity is not None:
+                            price = market_data_engine.get_price_value(user_id, broker, symbol, now_ts=now_ts)
+                            if price is not None:
+                                total += pos.quantity * price
+            else:
+                for b, bp in brokers.items():
+                    for symbol, pos in bp.positions.items():
+                        if pos.quantity is not None:
+                            price = market_data_engine.get_price_value(user_id, b, symbol, now_ts=now_ts)
+                            if price is not None:
+                                total += pos.quantity * price
+            return total
+
+        def get_position_values_by_symbol(self, user_id: str, broker: Optional[str] = None, market_data_engine=None, now_ts: Optional[float] = None) -> dict:
+            if market_data_engine is None:
+                return {}
+            values = {}
+            brokers = self.state.user_portfolios.get(user_id, {})
+            if broker is not None:
+                bp = brokers.get(broker)
+                if bp:
+                    for symbol, pos in bp.positions.items():
+                        if pos.quantity is not None:
+                            price = market_data_engine.get_price_value(user_id, broker, symbol, now_ts=now_ts)
+                            if price is not None:
+                                values[symbol] = pos.quantity * price
+            else:
+                for b, bp in brokers.items():
+                    for symbol, pos in bp.positions.items():
+                        if pos.quantity is not None:
+                            price = market_data_engine.get_price_value(user_id, b, symbol, now_ts=now_ts)
+                            if price is not None:
+                                values[symbol] = pos.quantity * price
+            return values
     def __init__(self):
         self.state = PortfolioState()
 
