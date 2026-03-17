@@ -24,6 +24,9 @@ class TradingRuntime:
             "risk": {
                 "allowed": allowed,
                 "reason": reason,
+            },
+            "execution": {
+                "ready": allowed
             }
         }
 
