@@ -51,27 +51,41 @@ class MarketDataEngine:
                 Trigger manual explícito para actualizar el precio de un símbolo de Binance para un usuario.
                 Llama fetch_and_cache_binance_price y retorna el PriceQuote actualizado o None si falla.
                 """
-                ok = self.fetch_and_cache_binance_price(user_id, symbol, adapter)
-                if not ok:
-                    return None
-                return self.get_price(user_id, "binance", symbol)
+    def update_binance_price(self, user_id: str, symbol: str, adapter):
+        """
+        Trigger manual explícito para actualizar el precio de un símbolo de Binance para un usuario.
+        Llama fetch_and_cache_binance_price y retorna el PriceQuote actualizado o None si falla (contrato original).
+        """
+        ok = self.fetch_and_cache_binance_price(user_id, symbol, adapter)
+        if not ok:
+            return None
+        price_obj = self.get_price(user_id, "binance", symbol)
+        if not price_obj or not hasattr(price_obj, "price") or price_obj.price is None:
+            return None
+        return price_obj
         def fetch_and_cache_binance_price(self, user_id: str, symbol: str, adapter) -> bool:
             """
             Obtiene el precio spot de Binance vía adapter y lo almacena en cache para el usuario.
             Retorna True si se actualizó el cache, False si falló.
             """
-            quote = adapter.fetch_symbol_price(symbol)
-            if not quote or not isinstance(quote, dict) or "price" not in quote:
-                return False
-            self.set_price(
-                user_id=user_id,
-                broker="binance",
-                symbol=symbol,
-                price=quote["price"],
-                timestamp=quote.get("timestamp"),
-                metadata=quote.get("metadata")
-            )
-            return True
+    def fetch_and_cache_binance_price(self, user_id: str, symbol: str, adapter) -> bool:
+        """
+        Obtiene el precio spot de Binance vía adapter y lo almacena en cache para el usuario.
+        Retorna True si se actualizó el cache, False si falló (fallo explícito, no propaga None ambiguo).
+        """
+        quote = adapter.fetch_symbol_price(symbol)
+        if not quote or not isinstance(quote, dict) or "price" not in quote or quote["price"] is None:
+            # No actualiza cache si fetch falla o el precio es inválido
+            return False
+        self.set_price(
+            user_id=user_id,
+            broker="binance",
+            symbol=symbol,
+            price=quote["price"],
+            timestamp=quote.get("timestamp"),
+            metadata=quote.get("metadata")
+        )
+        return True
     def get_price_value(self, user_id: str, broker: str, symbol: str, now_ts: Optional[float] = None) -> Optional[float]:
         quote = self.get_fresh_price(user_id, broker, symbol, now_ts=now_ts)
         if not quote or not hasattr(quote, "price") or quote.price is None:
