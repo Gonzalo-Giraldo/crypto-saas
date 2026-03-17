@@ -50,27 +50,34 @@ class BinanceMarketDataAdapter:
                 try:
                     payload = json.loads(data)
                 except json.JSONDecodeError:
+                    print(f"[MARKET_DATA] fetch {symbol} failed reason=json_decode_error")
                     return None
-        except urllib.error.HTTPError:
-            # 4xx/5xx de Binance
+        except urllib.error.HTTPError as e:
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=HTTPError code={getattr(e, 'code', None)}")
             return None
-        except urllib.error.URLError:
-            # Problemas de red, timeout, DNS, etc.
+        except urllib.error.URLError as e:
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=URLError {e}")
             return None
         except TimeoutError:
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=timeout")
             return None
-        except Exception:
+        except Exception as e:
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=exception {e}")
             return None
 
         # Validar payload esperado
         if not isinstance(payload, dict):
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=payload_not_dict")
             return None
         norm = self.normalize_price_response(symbol, payload)
         if not norm:
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=normalize_failed")
             return None
         # Validar symbol y precio presentes
         if not norm.get("symbol") or norm.get("price") is None:
+            print(f"[MARKET_DATA] fetch {symbol} failed reason=missing_symbol_or_price")
             return None
+        print(f"[MARKET_DATA] fetch {symbol} success price={norm['price']}")
         return self.build_price_quote(
             symbol=norm["symbol"],
             price=norm["price"],

@@ -32,6 +32,7 @@ def manual_binance_risk_eval(
     risk_allowed = False
     risk_reason = None
 
+    print(f"[OPS] flow start user={payload.user_id} symbol={payload.symbol}")
     # 1. Actualizar precio real (manejo explícito de error)
     try:
         price_result = market_data_engine.update_binance_price(
@@ -39,6 +40,7 @@ def manual_binance_risk_eval(
         )
         price_updated = price_result is not None
     except Exception as exc:
+        print(f"[OPS] price update error user={payload.user_id} symbol={payload.symbol} error={exc}")
         price_result = None
         price_updated = False
 
@@ -58,12 +60,15 @@ def manual_binance_risk_eval(
         risk_result = risk_engine.evaluate_intent(risk_intent)
         risk_allowed = bool(getattr(risk_result, "approved", False))
         risk_reason = getattr(risk_result, "reason", None)
+        print(f"[RISK] evaluation allowed={risk_allowed} reason={risk_reason}")
         success = True
     except Exception as exc:
+        print(f"[OPS] risk evaluation error user={payload.user_id} symbol={payload.symbol} error={exc}")
         risk_allowed = False
         risk_reason = f"risk_eval_error: {exc}"
         success = False
 
+    print(f"[OPS] flow success={success} user={payload.user_id} symbol={payload.symbol} allowed={risk_allowed}")
     return JSONResponse(
         content={
             "success": success,

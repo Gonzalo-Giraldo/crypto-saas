@@ -61,10 +61,13 @@ class MarketDataEngine:
         """
         ok = self.fetch_and_cache_binance_price(user_id, symbol, adapter)
         if not ok:
+            print(f"[MARKET_DATA] update failed user={user_id} symbol={symbol}")
             return None
         price_obj = self.get_price(user_id, "binance", symbol)
         if not price_obj or not hasattr(price_obj, "price") or price_obj.price is None:
+            print(f"[MARKET_DATA] update failed user={user_id} symbol={symbol} (post-cache)")
             return None
+        print(f"[MARKET_DATA] update success user={user_id} symbol={symbol}")
         return price_obj
         def fetch_and_cache_binance_price(self, user_id: str, symbol: str, adapter) -> bool:
             """
