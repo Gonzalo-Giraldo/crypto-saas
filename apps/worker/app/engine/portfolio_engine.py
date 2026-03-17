@@ -26,6 +26,37 @@ class PortfolioState:
         self.balances: Dict[str, Balance] = {}
 
 class PortfolioEngine:
+        def update_position(self, symbol: str, quantity: float, average_price: Optional[float] = None, broker: Optional[str] = None):
+            pos = self.state.positions.get(symbol)
+            if pos:
+                pos.quantity = quantity
+                if average_price is not None:
+                    pos.average_price = average_price
+                if broker is not None:
+                    pos.broker = broker
+            else:
+                self.state.positions[symbol] = Position(
+                    symbol=symbol,
+                    quantity=quantity,
+                    average_price=average_price,
+                    broker=broker
+                )
+
+        def set_balance(self, asset: str, total: float, available: Optional[float] = None, broker: Optional[str] = None):
+            bal = self.state.balances.get(asset)
+            if bal:
+                bal.total = total
+                if available is not None:
+                    bal.available = available
+                if broker is not None:
+                    bal.broker = broker
+            else:
+                self.state.balances[asset] = Balance(
+                    asset=asset,
+                    total=total,
+                    available=available if available is not None else total,
+                    broker=broker
+                )
     def __init__(self):
         self.state = PortfolioState()
 
@@ -37,6 +68,9 @@ class PortfolioEngine:
 
     def get_symbol_exposure(self, symbol: str) -> float:
         pos = self.get_position(symbol)
-        if pos is not None and pos.notional is not None:
-            return pos.notional
+        if pos is not None:
+            if pos.notional is not None:
+                return pos.notional
+            if pos.quantity is not None:
+                return pos.quantity
         return 0.0
