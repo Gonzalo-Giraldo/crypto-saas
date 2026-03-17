@@ -26,6 +26,33 @@ class PortfolioState:
         self.balances: Dict[str, Balance] = {}
 
 class PortfolioEngine:
+            def get_total_exposure(self) -> float:
+                total = 0.0
+                for pos in self.state.positions.values():
+                    if pos.notional is not None:
+                        total += pos.notional
+                    elif pos.quantity is not None:
+                        total += pos.quantity
+                return total
+
+            def get_exposure_by_symbol(self) -> dict:
+                exposures = {}
+                for symbol, pos in self.state.positions.items():
+                    if pos.notional is not None:
+                        exposures[symbol] = pos.notional
+                    elif pos.quantity is not None:
+                        exposures[symbol] = pos.quantity
+                    else:
+                        exposures[symbol] = 0.0
+                return exposures
+
+            def get_exposure_by_broker(self) -> dict:
+                exposures = {}
+                for pos in self.state.positions.values():
+                    broker = pos.broker or "unknown"
+                    value = pos.notional if pos.notional is not None else (pos.quantity if pos.quantity is not None else 0.0)
+                    exposures[broker] = exposures.get(broker, 0.0) + value
+                return exposures
         def update_position(self, symbol: str, quantity: float, average_price: Optional[float] = None, broker: Optional[str] = None):
             pos = self.state.positions.get(symbol)
             if pos:
