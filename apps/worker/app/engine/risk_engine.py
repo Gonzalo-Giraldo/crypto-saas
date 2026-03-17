@@ -34,13 +34,44 @@ class RiskDecision:
         self.reason = reason
         self.adjusted_quantity = adjusted_quantity
 
+
 class RiskEngine:
-    def __init__(self):
+    def __init__(self, portfolio_engine=None, market_data_engine=None):
         # Configurable risk guardrails (safe defaults)
         self.max_order_quantity = 100
         self.max_notional_value = 1_000_000
         self.max_symbol_exposure = 1_000_000
         self.risk_engine_enabled = True
+        self.portfolio_engine = portfolio_engine
+        self.market_data_engine = market_data_engine
+
+    def set_portfolio_engine(self, portfolio_engine):
+        self.portfolio_engine = portfolio_engine
+
+    def set_market_data_engine(self, market_data_engine):
+        self.market_data_engine = market_data_engine
+
+    def _get_value_context(self, intent):
+        # intent debe tener user_id, broker, symbol
+        user_id = getattr(intent, 'strategy_id', None)  # Asumimos strategy_id como user_id
+        broker = getattr(intent, 'broker', None)
+        symbol = getattr(intent, 'symbol', None)
+        pe = self.portfolio_engine
+        mde = self.market_data_engine
+        if pe and mde and user_id and broker and symbol:
+            try:
+                position_value = pe.get_position_value(user_id, broker, symbol, mde)
+            except Exception:
+                position_value = None
+            try:
+                total_portfolio_value = pe.get_total_portfolio_value(user_id, broker, mde)
+            except Exception:
+                total_portfolio_value = None
+            return {
+                'position_value': position_value,
+                'total_portfolio_value': total_portfolio_value
+            }
+        return {'position_value': None, 'total_portfolio_value': None}
 
     def disable_trading(self):
         self.risk_engine_enabled = False
@@ -49,6 +80,11 @@ class RiskEngine:
         self.risk_engine_enabled = True
 
     def evaluate_intent(self, intent: RiskIntent) -> RiskDecision:
+        # Contexto de valuación (no afecta decisión)
+        value_ctx = self._get_value_context(intent)
+        position_value = value_ctx['position_value']
+        total_portfolio_value = value_ctx['total_portfolio_value']
+
         # 0️⃣ Global kill switch
         if not self.risk_engine_enabled:
             return RiskDecision(
