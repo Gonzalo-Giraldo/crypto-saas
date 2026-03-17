@@ -46,6 +46,23 @@ class MarketDataState:
         return quotes
 
 class MarketDataEngine:
+        def fetch_and_cache_binance_price(self, user_id: str, symbol: str, adapter) -> bool:
+            """
+            Obtiene el precio spot de Binance vía adapter y lo almacena en cache para el usuario.
+            Retorna True si se actualizó el cache, False si falló.
+            """
+            quote = adapter.fetch_symbol_price(symbol)
+            if not quote or not isinstance(quote, dict) or "price" not in quote:
+                return False
+            self.set_price(
+                user_id=user_id,
+                broker="binance",
+                symbol=symbol,
+                price=quote["price"],
+                timestamp=quote.get("timestamp"),
+                metadata=quote.get("metadata")
+            )
+            return True
     def get_price_value(self, user_id: str, broker: str, symbol: str, now_ts: Optional[float] = None) -> Optional[float]:
         quote = self.get_fresh_price(user_id, broker, symbol, now_ts=now_ts)
         if not quote or not hasattr(quote, "price") or quote.price is None:
