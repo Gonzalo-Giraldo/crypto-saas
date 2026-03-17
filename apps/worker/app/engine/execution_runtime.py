@@ -1,3 +1,13 @@
+from apps.worker.app.engine.binance_endpoint_manager import BinanceEndpointManager
+# === Binance Endpoint Manager Hook ===
+_binance_endpoint_manager = BinanceEndpointManager()
+
+def _get_binance_active_endpoint():
+    """
+    Runtime hook to get the current active Binance endpoint.
+    Does not change current runtime behavior.
+    """
+    return _binance_endpoint_manager.get_active_endpoint()
 from apps.worker.app.engine.binance_stream_listener import BinanceStreamListener
 # === Binance Stream Event Normalization Hook ===
 _binance_stream_listener = BinanceStreamListener()
