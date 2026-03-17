@@ -3,54 +3,77 @@ from pydantic import BaseModel
 from apps.worker.app.engine.market_data_engine import MarketDataEngine
 from apps.worker.app.engine.risk_engine import RiskEngine
 from apps.worker.app.engine.binance_market_data_adapter import BinanceMarketDataAdapter
+
+# --- Manual Risk Evaluation Endpoint (hardened, standardized response) ---
+from fastapi.responses import JSONResponse
+
 class ManualRiskEvalRequest(BaseModel):
     user_id: str
     symbol: str
     intent: dict  # Debe contener los campos requeridos por RiskIntent
 
-class ManualRiskEvalResponse(BaseModel):
-    price_update: dict
-    risk_result: dict
-
-
-@router.post("/manual-binance-risk-eval", response_model=ManualRiskEvalResponse)
+@router.post("/manual-binance-risk-eval")
 def manual_binance_risk_eval(
     payload: ManualRiskEvalRequest,
     current_user: User = Depends(get_current_user),
 ):
     """
     Endpoint manual: actualiza precio real Binance y evalúa riesgo para un intent dado.
+    Respuesta estandarizada y manejo explícito de errores.
     """
-    # Instanciar/adquirir engines/adapters (en producción, usar singletons o DI)
     market_data_engine = MarketDataEngine()
     risk_engine = RiskEngine(market_data_engine=market_data_engine)
     binance_adapter = BinanceMarketDataAdapter()
 
-    # 1. Actualizar precio real
-    price_result = market_data_engine.update_binance_price(
-        payload.user_id, payload.symbol, binance_adapter
-    )
-    price_update = {
-        "symbol": payload.symbol,
-        "user_id": payload.user_id,
-        "price": getattr(price_result, "price", None) if price_result else None,
-        "timestamp": getattr(price_result, "timestamp", None) if price_result else None,
-        "ok": price_result is not None,
-    }
+    # Defaults
+    success = False
+    price_updated = False
+    price_available = False
+    risk_allowed = False
+    risk_reason = None
 
-    # 2. Evaluar riesgo
-    # Construir RiskIntent desde el dict recibido
-    intent_obj = RiskEngine.RiskIntent if hasattr(RiskEngine, "RiskIntent") else None
-    if intent_obj is None:
-        from apps.worker.app.engine.risk_engine import RiskIntent as intent_obj
-    risk_intent = intent_obj(**payload.intent)
-    risk_result = risk_engine.evaluate_intent(risk_intent)
+    # 1. Actualizar precio real (manejo explícito de error)
+    try:
+        price_result = market_data_engine.update_binance_price(
+            payload.user_id, payload.symbol, binance_adapter
+        )
+        price_updated = price_result is not None
+    except Exception as exc:
+        price_result = None
+        price_updated = False
 
-    return ManualRiskEvalResponse(
-        price_update=price_update,
-        risk_result={
-            k: getattr(risk_result, k, None) for k in ["approved", "reason", "adjusted_quantity"]
-        },
+    # 2. Verificar si hay precio usable
+    try:
+        price_obj = market_data_engine.get_price(payload.user_id, "binance", payload.symbol)
+        price_available = bool(price_obj and getattr(price_obj, "price", None) is not None)
+    except Exception:
+        price_available = False
+
+    # 3. Evaluar riesgo (manejo explícito de error)
+    try:
+        intent_obj = RiskEngine.RiskIntent if hasattr(RiskEngine, "RiskIntent") else None
+        if intent_obj is None:
+            from apps.worker.app.engine.risk_engine import RiskIntent as intent_obj
+        risk_intent = intent_obj(**payload.intent)
+        risk_result = risk_engine.evaluate_intent(risk_intent)
+        risk_allowed = bool(getattr(risk_result, "approved", False))
+        risk_reason = getattr(risk_result, "reason", None)
+        success = True
+    except Exception as exc:
+        risk_allowed = False
+        risk_reason = f"risk_eval_error: {exc}"
+        success = False
+
+    return JSONResponse(
+        content={
+            "success": success,
+            "price_updated": price_updated,
+            "price_available": price_available,
+            "risk": {
+                "allowed": risk_allowed,
+                "reason": risk_reason,
+            },
+        }
     )
 
 from apps.worker.app.engine.execution_runtime import cancel_broker_order
