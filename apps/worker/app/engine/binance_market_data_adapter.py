@@ -35,4 +35,21 @@ class BinanceMarketDataAdapter:
         }
 
     def fetch_symbol_price(self, symbol):
-        raise NotImplementedError("BinanceMarketDataAdapter groundwork only: no network access implemented.")
+        # Consulta REST a Binance para obtener el precio spot
+        import urllib.request
+        import json
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol.upper()}"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                data = response.read()
+                payload = json.loads(data)
+            norm = self.normalize_price_response(symbol, payload)
+            if not norm:
+                return None
+            return self.build_price_quote(
+                symbol=norm["symbol"],
+                price=norm["price"],
+                metadata={"raw": payload}
+            )
+        except Exception:
+            return None
