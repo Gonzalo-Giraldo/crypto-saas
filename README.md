@@ -1,3 +1,36 @@
+# Project Overview
+
+This project is a modular, broker-agnostic trading platform designed for robust, auditable, and extensible multi-broker execution. It features a layered architecture with clear separation of execution, risk, portfolio, and strategy engines.
+
+## Current Architecture
+- **Execution Engine**: Handles order lifecycle, broker abstraction, retry, reconciliation, audit, and observability.
+- **Risk Engine**: (Planned) Pre-trade risk controls, kill switch, exposure limits.
+- **Portfolio Engine**: (Planned) Positions, inventory, PnL, portfolio exposure.
+- **Strategy Engine**: (Planned) Signal generation, strategy logic, position sizing.
+
+## Supported Brokers
+- Binance (Spot/Futures)
+- Interactive Brokers (IBKR)
+
+## Repository Structure
+- `apps/` — Application code (worker, api, engines)
+- `docs/` — Documentation
+- `tests/` — Test suite
+
+## Documentation Index
+- [System Architecture](docs/system_architecture.md)
+- [Final Architecture Overview](docs/final_architecture_overview.md)
+- [Architecture Diagrams](docs/architecture_diagrams.md)
+- [Broker Integrations](docs/broker_integrations.md)
+- [Execution Engine](docs/execution_engine.md)
+- [Risk Engine](docs/risk_engine.md)
+- [Portfolio Engine](docs/portfolio_engine.md)
+- [Strategy Engine](docs/strategy_engine.md)
+- [Development Guide](docs/development_guide.md)
+
+## Roadmap Summary
+- Phase 11–15: Complete risk, portfolio, and strategy engines; production hardening; expand broker support; finalize observability and documentation.
+
 # crypto-saas
 
 Backend SaaS (FastAPI + PostgreSQL) for conservative crypto trading operations with:
