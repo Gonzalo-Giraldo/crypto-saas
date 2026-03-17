@@ -1,3 +1,13 @@
+from apps.worker.app.engine.binance_stream_listener import BinanceStreamListener
+# === Binance Stream Event Normalization Hook ===
+_binance_stream_listener = BinanceStreamListener()
+
+def _normalize_binance_stream_event(raw_event: dict) -> dict:
+    """
+    Runtime hook to normalize a raw Binance user data stream event.
+    Does not change current runtime behavior.
+    """
+    return _binance_stream_listener.normalize_event(raw_event)
 # === Unknown Execution State Helper (Binance) ===
 def _is_binance_unknown_execution_state(exc: Exception) -> bool:
     """
