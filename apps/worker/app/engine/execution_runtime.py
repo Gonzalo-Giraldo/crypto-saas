@@ -1,3 +1,14 @@
+# === Unknown Execution State Helper (Binance) ===
+def _is_binance_unknown_execution_state(exc: Exception) -> bool:
+    """
+    Returns True if the exception indicates an unknown execution state (timeout, uncertain, reconciliation required).
+    This formalizes the current timeout/uncertain handling for Binance.
+    """
+    # Current policy: treat timeout/timed out as unknown execution state
+    if isinstance(exc, requests.Timeout):
+        return True
+    msg = str(exc or "").lower()
+    return "timeout" in msg or "timed out" in msg
 from apps.worker.app.engine.rate_limit_manager import RateLimitManager
 # === Minimal in-process runtime observability counters ===
 _runtime_counters = {
@@ -430,7 +441,7 @@ def execute_binance_test_order_for_user(
                 "market": market,
                 "error": str(exc),
             }
-            if locals().get("client_order_id") and _is_uncertain_binance_timeout_error(exc):
+            if locals().get("client_order_id") and _is_binance_unknown_execution_state(exc):
                 adapter = _build_binance_broker_adapter(api_key=creds["api_key"], api_secret=creds["api_secret"])
                 reconciliation_attempt = {
                     "client_order_id": client_order_id,
