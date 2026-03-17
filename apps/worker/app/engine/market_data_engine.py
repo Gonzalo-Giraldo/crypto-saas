@@ -46,6 +46,15 @@ class MarketDataState:
         return quotes
 
 class MarketDataEngine:
+            def update_binance_price(self, user_id: str, symbol: str, adapter):
+                """
+                Trigger manual explícito para actualizar el precio de un símbolo de Binance para un usuario.
+                Llama fetch_and_cache_binance_price y retorna el PriceQuote actualizado o None si falla.
+                """
+                ok = self.fetch_and_cache_binance_price(user_id, symbol, adapter)
+                if not ok:
+                    return None
+                return self.get_price(user_id, "binance", symbol)
         def fetch_and_cache_binance_price(self, user_id: str, symbol: str, adapter) -> bool:
             """
             Obtiene el precio spot de Binance vía adapter y lo almacena en cache para el usuario.
