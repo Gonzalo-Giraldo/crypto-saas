@@ -40,8 +40,21 @@ class RiskEngine:
         self.max_order_quantity = 100
         self.max_notional_value = 1_000_000
         self.max_symbol_exposure = 1_000_000
+        self.risk_engine_enabled = True
+
+    def disable_trading(self):
+        self.risk_engine_enabled = False
+
+    def enable_trading(self):
+        self.risk_engine_enabled = True
 
     def evaluate_intent(self, intent: RiskIntent) -> RiskDecision:
+        # 0️⃣ Global kill switch
+        if not self.risk_engine_enabled:
+            return RiskDecision(
+                approved=False,
+                reason="risk_engine_disabled"
+            )
         # 1️⃣ Quantity guardrail
         if intent.quantity > self.max_order_quantity:
             return RiskDecision(
