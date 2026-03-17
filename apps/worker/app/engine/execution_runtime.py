@@ -1,3 +1,4 @@
+from apps.worker.app.engine.rate_limit_manager import RateLimitManager
 # === Minimal in-process runtime observability counters ===
 _runtime_counters = {
     "orders_sent": 0,
@@ -593,22 +594,34 @@ def _send_binance_test_order(
     if not client_order_id:
         raise RuntimeError("kernel_dispatch_guard: missing client_order_id")
 
+
     adapter = _build_binance_broker_adapter(api_key=api_key, api_secret=api_secret)
+    # Minimal groundwork: instantiate RateLimitManager for Binance
+    rate_limit_manager = RateLimitManager(broker="BINANCE")
+
 
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
     if not gateway_enabled:
-        _retry_once_on_gateway_502(
-            adapter.send_order,
-            symbol=symbol,
-            side=side,
-            quantity=qty,
-            client_order_id=client_order_id,
-            market=market,
-        )
+        rate_limit_manager.before_request(endpoint="send_order")
+        try:
+            result = _retry_once_on_gateway_502(
+                adapter.send_order,
+                symbol=symbol,
+                side=side,
+                quantity=qty,
+                client_order_id=client_order_id,
+                market=market,
+            )
+            # No response object, so after_response is not called here
+            return result
+        except Exception as exc:
+            rate_limit_manager.after_error(exc)
+            raise
         return
 
     try:
-        _send_binance_test_order_via_gateway(
+        rate_limit_manager.before_request(endpoint="send_order_gateway")
+        response = _send_binance_test_order_via_gateway(
             api_key=api_key,
             api_secret=api_secret,
             symbol=symbol,
@@ -617,14 +630,27 @@ def _send_binance_test_order(
             client_order_id=client_order_id,
             market=market,
         )
+        rate_limit_manager.after_response(response)
     except Exception as exc:
+        rate_limit_manager.after_error(exc)
         if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
             raise
         if "gateway_upstream_error status=" in str(exc or ""):
             raise
-        _retry_once_on_gateway_502(
-            adapter.send_order,
-            symbol=symbol,
+        rate_limit_manager.before_request(endpoint="send_order_fallback")
+        try:
+            result = _retry_once_on_gateway_502(
+                adapter.send_order,
+                symbol=symbol,
+                side=side,
+                quantity=qty,
+                client_order_id=client_order_id,
+                market=market,
+            )
+            return result
+        except Exception as exc2:
+            rate_limit_manager.after_error(exc2)
+            raise
 
         # Broker-agnostic retry helper for transient errors (currently only 502 gateway)
         def _retry_once_on_transient_broker_error(func, *args, **kwargs):
