@@ -1,8 +1,10 @@
 from pydantic import BaseModel
 
+
 from apps.worker.app.engine.market_data_engine import MarketDataEngine
 from apps.worker.app.engine.risk_engine import RiskEngine
 from apps.worker.app.engine.binance_market_data_adapter import BinanceMarketDataAdapter
+from apps.worker.app.runtime.trading_runtime import TradingRuntime
 
 # --- Manual Risk Evaluation Endpoint (hardened, standardized response) ---
 from fastapi.responses import JSONResponse
@@ -24,62 +26,33 @@ def manual_binance_risk_eval(
     market_data_engine = MarketDataEngine()
     risk_engine = RiskEngine(market_data_engine=market_data_engine)
     binance_adapter = BinanceMarketDataAdapter()
-
-    # Defaults
-    success = False
-    price_updated = False
-    price_available = False
-    risk_allowed = False
-    risk_reason = None
+    runtime = TradingRuntime(market_data_engine, risk_engine, binance_adapter)
 
     print(f"[OPS] flow start user={payload.user_id} symbol={payload.symbol}")
-    # 1. Actualizar precio real (manejo explícito de error)
-    try:
-        price_result = market_data_engine.update_binance_price(
-            payload.user_id, payload.symbol, binance_adapter
-        )
-        price_updated = price_result is not None
-    except Exception as exc:
-        print(f"[OPS] price update error user={payload.user_id} symbol={payload.symbol} error={exc}")
-        price_result = None
-        price_updated = False
+    # Construir intent (RiskIntent) desde el dict recibido
+    intent_obj = RiskEngine.RiskIntent if hasattr(RiskEngine, "RiskIntent") else None
+    if intent_obj is None:
+        from apps.worker.app.engine.risk_engine import RiskIntent as intent_obj
+    risk_intent = intent_obj(**payload.intent)
 
-    # 2. Verificar si hay precio usable
-    try:
-        price_obj = market_data_engine.get_price(payload.user_id, "binance", payload.symbol)
-        price_available = bool(price_obj and getattr(price_obj, "price", None) is not None)
-    except Exception:
-        price_available = False
-
-    # 3. Evaluar riesgo (manejo explícito de error)
-    try:
-        intent_obj = RiskEngine.RiskIntent if hasattr(RiskEngine, "RiskIntent") else None
-        if intent_obj is None:
-            from apps.worker.app.engine.risk_engine import RiskIntent as intent_obj
-        risk_intent = intent_obj(**payload.intent)
-        risk_result = risk_engine.evaluate_intent(risk_intent)
-        risk_allowed = bool(getattr(risk_result, "approved", False))
-        risk_reason = getattr(risk_result, "reason", None)
-        print(f"[RISK] evaluation allowed={risk_allowed} reason={risk_reason}")
-        success = True
-    except Exception as exc:
-        print(f"[OPS] risk evaluation error user={payload.user_id} symbol={payload.symbol} error={exc}")
-        risk_allowed = False
-        risk_reason = f"risk_eval_error: {exc}"
-        success = False
-
-    print(f"[OPS] flow success={success} user={payload.user_id} symbol={payload.symbol} allowed={risk_allowed}")
-    return JSONResponse(
-        content={
-            "success": success,
-            "price_updated": price_updated,
-            "price_available": price_available,
-            "risk": {
-                "allowed": risk_allowed,
-                "reason": risk_reason,
-            },
-        }
+    # Orquestar con runtime
+    result = runtime.process_intent(
+        user_id=payload.user_id,
+        broker="binance",
+        symbol=payload.symbol,
+        intent=risk_intent
     )
+
+    # Adaptar salida al shape esperado por el endpoint
+    response = {
+        "success": result["risk"]["allowed"],
+        "price_updated": result["price_updated"],
+        "price_available": result["price_updated"],  # Mantener semántica previa
+        "risk": result["risk"],
+        "execution": result["execution"],
+    }
+    print(f"[OPS] flow success={response['success']} user={payload.user_id} symbol={payload.symbol} allowed={result['risk']['allowed']}")
+    return JSONResponse(content=response)
 
 from apps.worker.app.engine.execution_runtime import cancel_broker_order
 
