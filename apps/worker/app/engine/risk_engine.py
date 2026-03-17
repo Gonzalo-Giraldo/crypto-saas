@@ -24,10 +24,22 @@ class RiskDecision:
 
 class RiskEngine:
     def __init__(self):
-        # Placeholder for future risk limits/config
-        pass
+        # Configurable risk guardrails (safe defaults)
+        self.max_order_quantity = 100
+        self.max_notional_value = 1_000_000
 
     def evaluate_intent(self, intent: RiskIntent) -> RiskDecision:
-        # Approve everything by default for groundwork
-        # Future: check max position size, notional, leverage, exposure, etc.
+        # 1️⃣ Quantity guardrail
+        if intent.quantity > self.max_order_quantity:
+            return RiskDecision(
+                approved=False,
+                reason="order_quantity_exceeds_limit"
+            )
+        # 2️⃣ Notional guardrail (if present)
+        if intent.notional is not None and intent.notional > self.max_notional_value:
+            return RiskDecision(
+                approved=False,
+                reason="order_notional_exceeds_limit"
+            )
+        # 3️⃣ Approve if within limits
         return RiskDecision(approved=True)
