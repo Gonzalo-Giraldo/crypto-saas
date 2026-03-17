@@ -114,8 +114,31 @@ class RiskEngine:
                 approved=False,
                 reason="price_missing_or_stale"
             )
-        # 2️⃣ Guardrail económico principal (value-based)
-        if position_value is not None and position_value > self.max_notional_value:
+        # 2️⃣ Guardrail económico principal (value-based, proyectado)
+        user_id = getattr(intent, 'strategy_id', None)
+        broker = getattr(intent, 'broker', None)
+        symbol = getattr(intent, 'symbol', None)
+        pe = self.portfolio_engine
+        mde = self.market_data_engine
+        current_position_value = None
+        order_value = None
+        projected_position_value = None
+        if pe and mde and user_id and broker and symbol:
+            try:
+                # Valor actual de la posición
+                current_position_value = pe.get_position_value(user_id, broker, symbol, mde)
+            except Exception:
+                current_position_value = None
+            try:
+                # Valor de la orden (solo la cantidad de la orden * precio actual)
+                price = mde.get_price_value(user_id, broker, symbol)
+                if price is not None and hasattr(intent, 'quantity') and intent.quantity is not None:
+                    order_value = intent.quantity * price
+            except Exception:
+                order_value = None
+            if current_position_value is not None and order_value is not None:
+                projected_position_value = current_position_value + order_value
+        if projected_position_value is not None and projected_position_value > self.max_notional_value:
             return RiskDecision(
                 approved=False,
                 reason="order_value_exceeds_limit"
