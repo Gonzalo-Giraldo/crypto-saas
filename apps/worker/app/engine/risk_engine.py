@@ -114,10 +114,11 @@ class RiskEngine:
                 approved=False,
                 reason="price_missing_or_stale"
             )
-        if intent.notional is not None and intent.notional > self.max_notional_value:
+        # 2️⃣ Guardrail económico principal (value-based)
+        if position_value is not None and position_value > self.max_notional_value:
             return RiskDecision(
                 approved=False,
-                reason="order_notional_exceeds_limit"
+                reason="order_value_exceeds_limit"
             )
         # 3️⃣ Symbol exposure guardrail (if exposure info present)
         if intent.current_symbol_exposure is not None and intent.notional is not None:
