@@ -26,7 +26,12 @@ class TradingRuntime:
                 "reason": reason,
             },
             "execution": {
-                "ready": allowed
+                "ready": allowed,
+                "handoff": {
+                    "user_id": user_id,
+                    "broker": broker,
+                    "symbol": symbol
+                }
             }
         }
 
