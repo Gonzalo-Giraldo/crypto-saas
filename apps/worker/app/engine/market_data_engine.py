@@ -46,6 +46,9 @@ class MarketDataState:
         return quotes
 
 class MarketDataEngine:
+    # NOTE: Actualmente update_binance_price y otros métodos retornan None en caso de fallo de market data.
+    # Esta decisión es por compatibilidad con contratos existentes.
+    # En una fase futura debe migrarse a un resultado estructurado y explícito.
             def update_binance_price(self, user_id: str, symbol: str, adapter):
                 """
                 Trigger manual explícito para actualizar el precio de un símbolo de Binance para un usuario.
