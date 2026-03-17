@@ -36,6 +36,17 @@ class RiskDecision:
 
 
 class RiskEngine:
+        def _is_price_missing_or_stale(self, intent):
+            user_id = getattr(intent, 'strategy_id', None)
+            broker = getattr(intent, 'broker', None)
+            symbol = getattr(intent, 'symbol', None)
+            mde = self.market_data_engine
+            if mde and user_id and broker and symbol:
+                # Usar get_fresh_price para determinar si hay precio y si está stale
+                quote = mde.get_fresh_price(user_id, broker, symbol)
+                if not quote or not hasattr(quote, 'price') or quote.price is None:
+                    return True
+            return False
     def __init__(self, portfolio_engine=None, market_data_engine=None):
         # Configurable risk guardrails (safe defaults)
         self.max_order_quantity = 100
@@ -97,7 +108,12 @@ class RiskEngine:
                 approved=False,
                 reason="order_quantity_exceeds_limit"
             )
-        # 2️⃣ Notional guardrail (if present)
+        # 2️⃣ Notional guardrail (price-dependent)
+        if self._is_price_missing_or_stale(intent):
+            return RiskDecision(
+                approved=False,
+                reason="price_missing_or_stale"
+            )
         if intent.notional is not None and intent.notional > self.max_notional_value:
             return RiskDecision(
                 approved=False,
