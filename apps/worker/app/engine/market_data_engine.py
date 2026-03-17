@@ -46,8 +46,47 @@ class MarketDataState:
         return quotes
 
 class MarketDataEngine:
+
+    price_ttl_seconds = 30
+
     def __init__(self):
         self._state = MarketDataState()
+
+    def is_price_stale(self, user_id: str, broker: str, symbol: str, now_ts: Optional[float] = None) -> bool:
+        quote = self.get_price(user_id, broker, symbol)
+        if not quote or not hasattr(quote, "timestamp") or quote.timestamp is None:
+            return True
+        now = now_ts if now_ts is not None else time.time()
+        return (now - quote.timestamp) > self.price_ttl_seconds
+
+    def get_fresh_price(self, user_id: str, broker: str, symbol: str, now_ts: Optional[float] = None) -> Optional[PriceQuote]:
+        if self.is_price_stale(user_id, broker, symbol, now_ts=now_ts):
+            return None
+        return self.get_price(user_id, broker, symbol)
+
+    def get_stale_symbols(self, user_id: Optional[str] = None, broker: Optional[str] = None, now_ts: Optional[float] = None) -> list:
+        stale = set()
+        now = now_ts if now_ts is not None else time.time()
+        state = self._state.state
+        if user_id is not None:
+            user_brokers = state.get(user_id, {})
+            if broker is not None:
+                broker_quotes = user_brokers.get(broker, {})
+                for symbol, quote in broker_quotes.items():
+                    if not quote or not hasattr(quote, "timestamp") or quote.timestamp is None or (now - quote.timestamp) > self.price_ttl_seconds:
+                        stale.add(symbol)
+            else:
+                for b_quotes in user_brokers.values():
+                    for symbol, quote in b_quotes.items():
+                        if not quote or not hasattr(quote, "timestamp") or quote.timestamp is None or (now - quote.timestamp) > self.price_ttl_seconds:
+                            stale.add(symbol)
+        else:
+            for user_brokers in state.values():
+                for b_quotes in user_brokers.values():
+                    for symbol, quote in b_quotes.items():
+                        if not quote or not hasattr(quote, "timestamp") or quote.timestamp is None or (now - quote.timestamp) > self.price_ttl_seconds:
+                            stale.add(symbol)
+        return list(stale)
 
     def set_price(self, user_id: str, broker: str, symbol: str, price: float, timestamp: Optional[float] = None, metadata: Optional[dict] = None):
         self._state.set_price(user_id, broker, symbol, price, timestamp, metadata)
