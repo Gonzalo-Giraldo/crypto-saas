@@ -4,6 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Codex commit files
+.codex_commitfiles_*
+
 # Virtual environments
 .venv/
 venv/
@@ -23,6 +26,11 @@ db.sqlite
 
 # MacOS
 .DS_Store
+
+# Ignore all .txt files except configuration files
+*.txt
+!requirements.txt
+!runtime.txt
 
 # Docker
 *.pid

@@ -9,6 +9,9 @@ This groundwork provides placeholder functions for the main IBKR order lifecycle
 not yet implemented or wired to any adapter or runtime logic.
 """
 
+import requests
+from typing import Optional, Any, Dict
+
 def send_order(*, api_key: str, api_secret: str, symbol: str, side: str, quantity: float, order_ref: str, **kwargs):
     """
     Send an order to IBKR. This is the current transport seam for IBKR send_order.
@@ -67,8 +70,8 @@ def send_ibkr_test_order(
     symbol: str,
     side: str,
     quantity: float,
-    order_ref: str | None = None,
-) -> dict[str, Any]:
+    order_ref: Optional[str] = None,
+) -> Dict[str, Any]:
     _validate_inputs(api_key=api_key, api_secret=api_secret, symbol=symbol, quantity=quantity)
     if not str(order_ref or "").strip():
         raise RuntimeError("kernel_dispatch_guard: missing order_ref")
@@ -107,7 +110,7 @@ def send_ibkr_test_order(
 def get_ibkr_account_status(
     api_key: str,
     api_secret: str,
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     if len(api_key or "") < 8:
         raise RuntimeError("ibkr_input_error field=api_key reason=too_short")
     if len(api_secret or "") < 8:
