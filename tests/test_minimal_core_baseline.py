@@ -23,6 +23,9 @@ def test_minimal_execution_runtime_accept_binance_stub():
     )
     assert result["accepted"] is True
     assert result["order_ref"] == "order-1"
+    assert result["intent_id"] == "user1:order-1"
+    assert "created_at" in result and isinstance(result["created_at"], float)
+    assert "processed_at" in result and isinstance(result["processed_at"], float)
 
 def test_minimal_execution_runtime_duplicate_order_ref():
     runtime = MinimalExecutionRuntime()
@@ -49,6 +52,7 @@ def test_minimal_execution_runtime_duplicate_order_ref():
         mode="stub"
     )
     assert result["idempotency_status"] == "duplicate"
+    assert result["stage"] == "idempotency"
 
 def test_minimal_execution_runtime_reject_unsupported_broker():
     runtime = MinimalExecutionRuntime()

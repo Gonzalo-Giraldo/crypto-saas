@@ -20,6 +20,7 @@ class MinimalExecutionRuntime:
         mode,
         metadata=None
     ):
+        import time
         # Validate required fields
         if not order_ref or not str(order_ref).strip():
             return self._reject(
@@ -33,6 +34,7 @@ class MinimalExecutionRuntime:
             )
         idempotency_key = (user_id, order_ref)
         if idempotency_key in self._idempotency_store:
+            # Return the stored result, but update idempotency_status and stage for duplicate
             result = self._idempotency_store[idempotency_key].copy()
             result["idempotency_status"] = "duplicate"
             result["stage"] = "idempotency"
@@ -112,8 +114,11 @@ class MinimalExecutionRuntime:
                 risk_status="rejected",
             )
         # Simulated submission (stub)
+        now = time.time()
+        intent_id = f"{user_id}:{order_ref}"
         result = {
             "accepted": True,
+            "intent_id": intent_id,
             "stage": "submission",
             "reason": None,
             "broker": broker,
@@ -123,10 +128,18 @@ class MinimalExecutionRuntime:
             "order_ref": order_ref,
             "idempotency_status": "ok",
             "risk_status": "approved",
+            "intent_status": "processed",
             "submission_status": "simulated_submitted",
             "fill_status": "not_filled",
+            "created_at": now,
+            "processed_at": now,
             "portfolio_effect_applied": False,
         }
+        # Invariants
+        assert result["fill_status"] != "filled"
+        assert result["accepted"] is True
+        assert result["submission_status"] is not None
+        assert result["risk_status"] == "approved"
         self._idempotency_store[idempotency_key] = result.copy()
         return result
 
@@ -142,8 +155,12 @@ class MinimalExecutionRuntime:
         order_ref,
         risk_status=None,
     ):
-        return {
+        import time
+        intent_id = None
+        now = time.time()
+        result = {
             "accepted": False,
+            "intent_id": intent_id,
             "stage": stage,
             "reason": reason,
             "broker": broker,
@@ -153,7 +170,15 @@ class MinimalExecutionRuntime:
             "order_ref": order_ref,
             "idempotency_status": "not_checked",
             "risk_status": risk_status,
+            "intent_status": "rejected",
             "submission_status": None,
             "fill_status": "unknown",
+            "created_at": now,
+            "processed_at": now,
             "portfolio_effect_applied": False,
         }
+        # Invariants
+        assert result["accepted"] is False
+        assert result["submission_status"] is None
+        assert result["fill_status"] != "filled"
+        return result
