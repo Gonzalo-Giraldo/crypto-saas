@@ -1,3 +1,9 @@
+class ExecutionResult:
+    def __init__(self, **kwargs):
+        self._data = kwargs
+
+    def to_dict(self):
+        return self._data.copy()
 
 from apps.worker.app.engine.risk_engine import RiskIntent, RiskEngine
 
@@ -116,32 +122,33 @@ class MinimalExecutionRuntime:
         # Simulated submission (stub)
         now = time.time()
         intent_id = f"{user_id}:{order_ref}"
-        result = {
-            "accepted": True,
-            "intent_id": intent_id,
-            "stage": "submission",
-            "reason": None,
-            "broker": broker,
-            "symbol": symbol,
-            "side": side_norm,
-            "quantity": quantity,
-            "order_ref": order_ref,
-            "idempotency_status": "ok",
-            "risk_status": "approved",
-            "intent_status": "processed",
-            "submission_status": "simulated_submitted",
-            "fill_status": "not_filled",
-            "created_at": now,
-            "processed_at": now,
-            "portfolio_effect_applied": False,
-        }
+        result = ExecutionResult(
+            accepted=True,
+            intent_id=intent_id,
+            stage="submission",
+            reason=None,
+            broker=broker,
+            symbol=symbol,
+            side=side_norm,
+            quantity=quantity,
+            order_ref=order_ref,
+            idempotency_status="ok",
+            risk_status="approved",
+            intent_status="processed",
+            submission_status="simulated_submitted",
+            fill_status="not_filled",
+            created_at=now,
+            processed_at=now,
+            portfolio_effect_applied=False,
+        )
         # Invariants
-        assert result["fill_status"] != "filled"
-        assert result["accepted"] is True
-        assert result["submission_status"] is not None
-        assert result["risk_status"] == "approved"
-        self._idempotency_store[idempotency_key] = result.copy()
-        return result
+        d = result.to_dict()
+        assert d["fill_status"] != "filled"
+        assert d["accepted"] is True
+        assert d["submission_status"] is not None
+        assert d["risk_status"] == "approved"
+        self._idempotency_store[idempotency_key] = d.copy()
+        return result.to_dict()
 
     def _reject(
         self,
@@ -158,27 +165,28 @@ class MinimalExecutionRuntime:
         import time
         intent_id = None
         now = time.time()
-        result = {
-            "accepted": False,
-            "intent_id": intent_id,
-            "stage": stage,
-            "reason": reason,
-            "broker": broker,
-            "symbol": symbol,
-            "side": side,
-            "quantity": quantity,
-            "order_ref": order_ref,
-            "idempotency_status": "not_checked",
-            "risk_status": risk_status,
-            "intent_status": "rejected",
-            "submission_status": None,
-            "fill_status": "unknown",
-            "created_at": now,
-            "processed_at": now,
-            "portfolio_effect_applied": False,
-        }
+        result = ExecutionResult(
+            accepted=False,
+            intent_id=intent_id,
+            stage=stage,
+            reason=reason,
+            broker=broker,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_ref=order_ref,
+            idempotency_status="not_checked",
+            risk_status=risk_status,
+            intent_status="rejected",
+            submission_status=None,
+            fill_status="unknown",
+            created_at=now,
+            processed_at=now,
+            portfolio_effect_applied=False,
+        )
+        d = result.to_dict()
         # Invariants
-        assert result["accepted"] is False
-        assert result["submission_status"] is None
-        assert result["fill_status"] != "filled"
-        return result
+        assert d["accepted"] is False
+        assert d["submission_status"] is None
+        assert d["fill_status"] != "filled"
+        return result.to_dict()
