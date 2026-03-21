@@ -18,7 +18,7 @@ class MinimalExecutionRuntime:
         # Deterministically resolve the project root by directory structure (5 levels up from this file)
         here = os.path.abspath(os.path.dirname(__file__))
         project_root = here
-        for _ in range(5):
+        for _ in range(4):
             project_root = os.path.dirname(project_root)
         return os.path.join(project_root, '.minimal_runtime_idempotency_store.json')
 
