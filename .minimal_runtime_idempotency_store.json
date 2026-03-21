@@ -1,0 +1,21 @@
+{
+  "u1::persist-1": {
+    "accepted": true,
+    "broker": "binance",
+    "created_at": 1774052473.045972,
+    "fill_status": "not_filled",
+    "idempotency_status": "ok",
+    "intent_id": "u1:persist-1",
+    "intent_status": "processed",
+    "order_ref": "persist-1",
+    "portfolio_effect_applied": false,
+    "processed_at": 1774052473.045972,
+    "quantity": 1.0,
+    "reason": null,
+    "risk_status": "approved",
+    "side": "BUY",
+    "stage": "submission",
+    "submission_status": "simulated_submitted",
+    "symbol": "BTCUSDT"
+  }
+}
