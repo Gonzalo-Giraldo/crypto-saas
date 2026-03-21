@@ -52,6 +52,10 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="crypto-saas API", lifespan=lifespan)
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 # OJO: users_router ya importa el modelo User, así que el modelo ya queda registrado.
 Base.metadata.create_all(bind=engine)
 
