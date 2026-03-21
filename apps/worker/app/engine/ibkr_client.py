@@ -9,6 +9,8 @@ This groundwork provides placeholder functions for the main IBKR order lifecycle
 not yet implemented or wired to any adapter or runtime logic.
 """
 
+import requests
+
 def send_order(*, api_key: str, api_secret: str, symbol: str, side: str, quantity: float, order_ref: str, **kwargs):
     """
     Send an order to IBKR. This is the current transport seam for IBKR send_order.
