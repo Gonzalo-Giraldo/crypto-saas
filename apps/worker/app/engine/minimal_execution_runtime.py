@@ -1,3 +1,5 @@
+import os
+import json
 class ExecutionResult:
     def __init__(self, **kwargs):
         self._data = kwargs
@@ -9,8 +11,47 @@ from apps.worker.app.engine.risk_engine import RiskIntent, RiskEngine
 
 class MinimalExecutionRuntime:
     def __init__(self):
-        # In-memory idempotency store: {(user_id, order_ref): result_dict}
-        self._idempotency_store = {}
+        self._store_path = self._build_store_path()
+        self._idempotency_store = self._load_store()
+
+    def _build_store_path(self):
+        # Deterministically resolve the project root by directory structure (5 levels up from this file)
+        here = os.path.abspath(os.path.dirname(__file__))
+        project_root = here
+        for _ in range(5):
+            project_root = os.path.dirname(project_root)
+        return os.path.join(project_root, '.minimal_runtime_idempotency_store.json')
+
+    def _serialize_store_key(self, key):
+        # key is (user_id, order_ref)
+        return f"{key[0]}::{key[1]}"
+
+    def _deserialize_store_key(self, s):
+        parts = s.split('::', 1)
+        return (parts[0], parts[1])
+
+    def _load_store(self):
+        path = self._store_path
+        if not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            store = {}
+            for k, v in data.items():
+                store[self._deserialize_store_key(k)] = v
+            return store
+        except Exception:
+            return {}
+
+    def _save_store(self):
+        path = self._store_path
+        data = {self._serialize_store_key(k): v for k, v in self._idempotency_store.items()}
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, sort_keys=True)
+        except Exception:
+            pass
 
     def submit_intent(
         self,
@@ -148,6 +189,7 @@ class MinimalExecutionRuntime:
         assert d["submission_status"] is not None
         assert d["risk_status"] == "approved"
         self._idempotency_store[idempotency_key] = d.copy()
+        self._save_store()
         return result.to_dict()
 
     def _reject(
