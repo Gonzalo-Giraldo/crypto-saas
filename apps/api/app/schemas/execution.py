@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator
-from typing import Any
+from typing import Any, Optional
 
 
 ALLOWED_EXCHANGES = {"BINANCE", "IBKR"}
@@ -11,6 +11,7 @@ class ExecutionPrepareRequest(BaseModel):
     symbol: str
     side: str
     qty: float
+    account_id: Optional[str] = None
 
     @field_validator("exchange")
     @classmethod
@@ -43,6 +44,7 @@ class BinanceTestOrderRequest(BaseModel):
     symbol: str
     side: str
     qty: float
+    account_id: Optional[str] = None
 
     @field_validator("side")
     @classmethod
@@ -69,6 +71,7 @@ class IbkrTestOrderRequest(BaseModel):
     symbol: str
     side: str
     qty: float
+    account_id: Optional[str] = None
 
     @field_validator("side")
     @classmethod
