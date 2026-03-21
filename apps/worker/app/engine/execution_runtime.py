@@ -388,6 +388,10 @@ def execute_binance_test_order_for_user(
             )
 
         market = "FUTURES" if str(side or "").upper() == "SELL" else "SPOT"
+        # Contexto interno del runtime
+        runtime_context = {}
+        if account_id is not None and str(account_id).strip():
+            runtime_context["account_id"] = account_id
         try:
             qty_meta = prepare_binance_market_order_quantity(
                 symbol=symbol,
@@ -712,6 +716,11 @@ def execute_ibkr_test_order_for_user(
             side=side,
             quantity=qty,
         )
+
+        # Contexto interno del runtime
+        runtime_context = {}
+        if account_id is not None and str(account_id).strip():
+            runtime_context["account_id"] = account_id
 
         try:
             result = send_ibkr_test_order(
