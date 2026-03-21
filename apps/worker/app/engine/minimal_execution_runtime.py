@@ -9,6 +9,19 @@ class ExecutionResult:
 
 from apps.worker.app.engine.risk_engine import RiskIntent, RiskEngine
 
+def normalize_order_ref(order_ref):
+    """
+    Normaliza order_ref: strip() y valida no vacío.
+    Si es None o vacío tras strip, retorna None (el caller debe manejar el error como hoy).
+    No cambia case ni formato.
+    """
+    if order_ref is None:
+        return None
+    ref = str(order_ref).strip()
+    if not ref:
+        return None
+    return ref
+
 class MinimalExecutionRuntime:
     def _build_idempotency_key(self, user_id, broker, order_ref, account_id=None):
         """
@@ -77,8 +90,9 @@ class MinimalExecutionRuntime:
         metadata=None
     ):
         import time
-        # Validate required fields
-        if not order_ref or not str(order_ref).strip():
+        # Normalizar order_ref
+        norm_order_ref = normalize_order_ref(order_ref)
+        if not norm_order_ref:
             return self._reject(
                 stage="input_validation",
                 reason="order_ref is required",
@@ -88,6 +102,7 @@ class MinimalExecutionRuntime:
                 quantity=quantity,
                 order_ref=order_ref,
             )
+        order_ref = norm_order_ref
         account_id = None
         if metadata and isinstance(metadata, dict):
             account_id = metadata.get("account_id")

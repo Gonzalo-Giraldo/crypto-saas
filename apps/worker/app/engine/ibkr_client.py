@@ -64,6 +64,8 @@ def _post_bridge(url: str, *, payload_raw: str, headers: dict, timeout: int = 12
     except requests.RequestException:
         raise RuntimeError("ibkr_upstream_unreachable")
 
+from apps.worker.app.engine.minimal_execution_runtime import normalize_order_ref
+
 def _build_order_ref(
     *,
     order_ref: str | None = None,
@@ -73,8 +75,9 @@ def _build_order_ref(
     side: str | None = None,
     **kwargs,
 ) -> str:
-    if order_ref:
-        return str(order_ref)
+    norm_order_ref = normalize_order_ref(order_ref) if order_ref is not None else None
+    if norm_order_ref:
+        return norm_order_ref
 
     parts = [p for p in (user_id, strategy_id, symbol, side) if p]
     if parts:
