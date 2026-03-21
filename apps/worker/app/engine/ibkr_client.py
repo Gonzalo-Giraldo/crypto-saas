@@ -64,6 +64,23 @@ def _post_bridge(url: str, *, payload_raw: str, headers: dict, timeout: int = 12
     except requests.RequestException:
         raise RuntimeError("ibkr_upstream_unreachable")
 
+def _build_order_ref(
+    *,
+    order_ref: str | None = None,
+    user_id: str | None = None,
+    strategy_id: str | None = None,
+    symbol: str | None = None,
+    side: str | None = None,
+    **kwargs,
+) -> str:
+    if order_ref:
+        return str(order_ref)
+
+    parts = [p for p in (user_id, strategy_id, symbol, side) if p]
+    if parts:
+        return "-".join(str(p) for p in parts)
+
+    return "ibkr-order"
 
 def send_ibkr_test_order(
     api_key: str,
