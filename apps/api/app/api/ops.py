@@ -2,6 +2,9 @@ from pydantic import BaseModel
 from apps.worker.app.engine import broker_registry
 from apps.worker.app.engine.execution_runtime import _cancel_order_via_adapter
 
+from fastapi import APIRouter
+router = APIRouter()
+
 # Cancel Order API
 class CancelOrderRequest(BaseModel):
     exchange: str
