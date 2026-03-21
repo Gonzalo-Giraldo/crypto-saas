@@ -371,6 +371,7 @@ def execute_binance_test_order_for_user(
     side: str,
     qty: float,
     intent_key: str | None = None,
+    account_id: str | None = None,
 ):
     db = SessionLocal()
     try:
@@ -690,6 +691,7 @@ def execute_ibkr_test_order_for_user(
     symbol: str,
     side: str,
     qty: float,
+    account_id: str | None = None,
 ):
     db = SessionLocal()
     try:
