@@ -10,10 +10,14 @@ class ExecutionResult:
 from apps.worker.app.engine.risk_engine import RiskIntent, RiskEngine
 
 class MinimalExecutionRuntime:
-    def _build_idempotency_key(self, user_id, broker, order_ref):
+    def _build_idempotency_key(self, user_id, broker, order_ref, account_id=None):
         """
-        Construye la clave de idempotencia con la lógica actual.
+        Construye la clave de idempotencia.
+        Si account_id existe y no es vacío, la clave es (user_id, account_id, broker, order_ref).
+        Si no, la clave es (user_id, broker, order_ref).
         """
+        if account_id is not None and str(account_id).strip():
+            return (user_id, account_id, broker, order_ref)
         return (user_id, broker, order_ref)
     def __init__(self):
         self._store_path = self._build_store_path()
@@ -84,7 +88,10 @@ class MinimalExecutionRuntime:
                 quantity=quantity,
                 order_ref=order_ref,
             )
-        idempotency_key = self._build_idempotency_key(user_id, broker, order_ref)
+        account_id = None
+        if metadata and isinstance(metadata, dict):
+            account_id = metadata.get("account_id")
+        idempotency_key = self._build_idempotency_key(user_id, broker, order_ref, account_id=account_id)
         if idempotency_key in self._idempotency_store:
             # Return the stored result, but update idempotency_status and stage for duplicate
             result = self._idempotency_store[idempotency_key].copy()
