@@ -1,3 +1,70 @@
+# --- Intent → Binance fill snapshot endpoint (read-only, no persistencia, no reconciliación) ---
+@router.get("/intent-binance-fill", tags=["ops"])
+def get_intent_binance_fill(
+    intent_key: str = Query(...),
+    user_id: str = Query(...),
+    broker: str = Query(...),
+    account_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    if broker.lower() != "binance":
+        return {"success": False, "error": "Only broker=binance is supported in this endpoint"}
+    from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+    from apps.worker.app.engine.binance_client import query_order_status as binance_query_order_status
+    store = IntentConsumptionStore()
+    rec = store.get_consumption_record(
+        user_id=user_id,
+        broker=broker,
+        intent_key=intent_key,
+        account_id=account_id,
+    )
+    if not rec.get("found"):
+        return {"success": False, "error": "No consumption record found for this intent"}
+    broker_execution_id = rec.get("broker_execution_id")
+    broker_execution_id_type = rec.get("broker_execution_id_type")
+    symbol = rec.get("symbol")
+    market = rec.get("market")
+    if not broker_execution_id:
+        return {"success": False, "error": "No broker_execution_id linked for this intent"}
+    if not broker_execution_id_type:
+        return {"success": False, "error": "No broker_execution_id_type linked for this intent"}
+    if not symbol:
+        return {"success": False, "error": "No symbol found in consumption record"}
+    if not market:
+        return {"success": False, "error": "Cannot resolve market from internal context for this intent"}
+    creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange="BINANCE")
+    if not creds:
+        return {"success": False, "error": "No Binance credentials found for user"}
+    try:
+        order = binance_query_order_status(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+            symbol=symbol,
+            orig_client_order_id=broker_execution_id,
+            market=market,
+        )
+        # Extraer snapshot de fill solo de payload real
+        executed_qty = order.get("executedQty") if isinstance(order, dict) else None
+        cummulative_quote_qty = order.get("cummulativeQuoteQty") if isinstance(order, dict) else None
+        broker_status = order.get("status") if isinstance(order, dict) else None
+        return {
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "broker_status": broker_status,
+            "executed_qty": executed_qty,
+            "cummulative_quote_qty": cummulative_quote_qty,
+            "success": True,
+        }
+    except Exception as exc:
+        return {
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "broker_status": None,
+            "executed_qty": None,
+            "cummulative_quote_qty": None,
+            "success": False,
+            "error": str(exc),
+        }
 # --- Intent → Binance execution status endpoint (read-only, no symbol in request) ---
 from fastapi import Depends, APIRouter
 from fastapi import APIRouter, HTTPException, status, Depends, Query
