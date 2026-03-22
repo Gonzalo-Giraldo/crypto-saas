@@ -1,3 +1,68 @@
+# --- Consumo persistente de intent_key por contexto (debe estar a nivel módulo) ---
+def build_intent_consumption_key(user_id, broker, intent_key, account_id=None):
+    """
+    Construye la clave de consumo persistente de intent_key por contexto elegible.
+    Si account_id falta, usa 'no-account'.
+    """
+    acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
+    return (str(user_id), str(broker), str(intent_key), str(acc))
+
+class IntentConsumptionStore:
+    """
+    Almacenamiento persistente mínimo para consumo de intent_key por contexto.
+    Reutiliza el patrón de idempotencia (archivo json en disco).
+    """
+    def __init__(self):
+        self._store_path = self._build_store_path()
+        self._consumption_store = self._load_store()
+
+    def _build_store_path(self):
+        # Deterministically resolve the project root by directory structure (4 levels up from this file)
+        here = os.path.abspath(os.path.dirname(__file__))
+        project_root = here
+        for _ in range(4):
+            project_root = os.path.dirname(project_root)
+        return os.path.join(project_root, '.intent_consumption_store.json')
+
+    def _serialize_store_key(self, key):
+        # key is (user_id, broker, intent_key, account_id)
+        return f"{key[0]}::{key[1]}::{key[2]}::{key[3]}"
+
+    def _deserialize_store_key(self, s):
+        parts = s.split('::')
+        return (parts[0], parts[1], parts[2], parts[3])
+
+    def _load_store(self):
+        path = self._store_path
+        if not os.path.isfile(path):
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            store = {}
+            for k, v in data.items():
+                store[self._deserialize_store_key(k)] = v
+            return store
+        except Exception:
+            return {}
+
+    def _save_store(self):
+        path = self._store_path
+        data = {self._serialize_store_key(k): v for k, v in self._consumption_store.items()}
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, sort_keys=True)
+        except Exception:
+            pass
+
+    def has_consumed(self, user_id, broker, intent_key, account_id=None):
+        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
+        return key in self._consumption_store
+
+    def register_consumption(self, user_id, broker, intent_key, account_id=None):
+        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
+        self._consumption_store[key] = {"consumed": True}
+        self._save_store()
 import os
 import json
 class ExecutionResult:
