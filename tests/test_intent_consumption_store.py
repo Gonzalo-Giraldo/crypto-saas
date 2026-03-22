@@ -1,7 +1,9 @@
+import pytest
 import os
+import sys
 import tempfile
 import shutil
-import pytest
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore, build_intent_consumption_key
 
 @pytest.fixture
@@ -13,6 +15,26 @@ def temp_store(monkeypatch):
     store = IntentConsumptionStore()
     yield store
     shutil.rmtree(tmpdir)
+
+def test_get_consumption_record_found_and_not_found(temp_store):
+    store = temp_store
+    # Caso no encontrado
+    r = store.get_consumption_record('u1', 'BINANCE', 'IKX', 'A1')
+    assert r["found"] is False
+    assert r["intent_key"] == "IKX"
+    assert r["user_id"] == "u1"
+    assert r["broker"] == "BINANCE"
+    assert r["account_id"] == "A1"
+    assert r["consumed_at"] is None
+    # Caso encontrado
+    store.register_consumption('u1', 'BINANCE', 'IKX', 'A1')
+    r2 = store.get_consumption_record('u1', 'BINANCE', 'IKX', 'A1')
+    assert r2["found"] is True
+    assert r2["intent_key"] == "IKX"
+    assert r2["user_id"] == "u1"
+    assert r2["broker"] == "BINANCE"
+    assert r2["account_id"] == "A1"
+    assert r2["consumed_at"] is None or isinstance(r2["consumed_at"], (str, type(None)))
 
 def test_consumption_same_context_blocked(temp_store):
     store = temp_store

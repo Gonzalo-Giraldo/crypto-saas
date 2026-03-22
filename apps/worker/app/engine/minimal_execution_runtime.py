@@ -8,6 +8,30 @@ def build_intent_consumption_key(user_id, broker, intent_key, account_id=None):
     return (str(user_id), str(broker), str(intent_key), str(acc))
 
 class IntentConsumptionStore:
+    def get_consumption_record(self, user_id, broker, intent_key, account_id=None):
+        """
+        Consulta read-only de consumo de intent_key por contexto.
+        Devuelve dict con campos mínimos y estado encontrado/no encontrado.
+        """
+        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
+        record = self._consumption_store.get(key)
+        if record is not None:
+            return {
+                "found": True,
+                "intent_key": intent_key,
+                "user_id": user_id,
+                "broker": broker,
+                "account_id": account_id if account_id is not None else "no-account",
+                "consumed_at": record.get("consumed_at") if "consumed_at" in record else None,
+            }
+        return {
+            "found": False,
+            "intent_key": intent_key,
+            "user_id": user_id,
+            "broker": broker,
+            "account_id": account_id if account_id is not None else "no-account",
+            "consumed_at": None,
+        }
     """
     Almacenamiento persistente mínimo para consumo de intent_key por contexto.
     Reutiliza el patrón de idempotencia (archivo json en disco).
