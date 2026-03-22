@@ -698,6 +698,7 @@ def execute_ibkr_test_order_for_user(
     account_id: str | None = None,
 ):
     db = SessionLocal()
+    from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore, build_intent_consumption_key
     try:
         creds = get_decrypted_exchange_secret(
             db=db,
@@ -709,6 +710,34 @@ def execute_ibkr_test_order_for_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing credentials for IBKR",
             )
+
+        # --- Control de consumo persistente de intent_key por contexto ---
+        # intent_key puede venir en kwargs o metadata, buscarlo explícitamente
+        import inspect
+        frame = inspect.currentframe()
+        intent_key = None
+        try:
+            # Buscar intent_key en argumentos si está disponible
+            if "intent_key" in frame.f_back.f_locals:
+                intent_key = frame.f_back.f_locals["intent_key"]
+        except Exception:
+            pass
+        # Si no hay intent_key, continuar sin control
+        if intent_key:
+            store = IntentConsumptionStore()
+            consumption_key = build_intent_consumption_key(user_id, "IBKR", intent_key, account_id)
+            if store.has_consumed(user_id, "IBKR", intent_key, account_id):
+                return {
+                    "exchange": "IBKR",
+                    "mode": "blocked_duplicate_intent_key",
+                    "symbol": symbol.upper(),
+                    "side": side.upper(),
+                    "qty": qty,
+                    "sent": False,
+                    "order_ref": None,
+                    "reason": "intent_key already consumed for this context"
+                }
+            store.register_consumption(user_id, "IBKR", intent_key, account_id)
 
         order_ref = _build_order_ref(
             api_key=creds["api_key"],
