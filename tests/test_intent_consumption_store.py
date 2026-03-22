@@ -1,3 +1,35 @@
+def test_attach_execution_success(temp_store):
+    store = temp_store
+    store.register_consumption('u1', 'BINANCE', 'IK100', 'A1')
+    ok = store.attach_execution('u1', 'BINANCE', 'IK100', 'A1', 'EX123', 'ORDER')
+    assert ok is True
+    rec = store.get_consumption_record('u1', 'BINANCE', 'IK100', 'A1')
+    assert rec['found'] is True
+    assert rec['broker_execution_id'] == 'EX123'
+    assert rec['broker_execution_id_type'] == 'ORDER'
+def test_attach_execution_missing_intent(temp_store):
+    store = temp_store
+    ok = store.attach_execution('u1', 'BINANCE', 'IK404', 'A1', 'EX404', 'ORDER')
+    assert ok is False
+    rec = store.get_consumption_record('u1', 'BINANCE', 'IK404', 'A1')
+    assert rec['found'] is False or 'broker_execution_id' not in rec
+def test_execution_fields_exposed(temp_store):
+    store = temp_store
+    store.register_consumption('u2', 'BINANCE', 'IK200', 'A2')
+    store.attach_execution('u2', 'BINANCE', 'IK200', 'A2', 'EX200', 'ORDER')
+    # get_consumption_record
+    rec = store.get_consumption_record('u2', 'BINANCE', 'IK200', 'A2')
+    assert rec['found'] is True
+    assert rec['broker_execution_id'] == 'EX200'
+    assert rec['broker_execution_id_type'] == 'ORDER'
+    # list_recent_consumptions
+    found = False
+    for r in store.list_recent_consumptions():
+        if r['intent_key'] == 'IK200' and r['user_id'] == 'u2':
+            assert r['broker_execution_id'] == 'EX200'
+            assert r['broker_execution_id_type'] == 'ORDER'
+            found = True
+    assert found
 def test_list_recent_consumptions_empty(temp_store):
     store = temp_store
     result = store.list_recent_consumptions()

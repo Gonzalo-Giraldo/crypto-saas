@@ -8,6 +8,23 @@ def build_intent_consumption_key(user_id, broker, intent_key, account_id=None):
     return (str(user_id), str(broker), str(intent_key), str(acc))
 
 class IntentConsumptionStore:
+
+    def attach_execution(
+        self,
+        user_id,
+        broker,
+        intent_key,
+        account_id,
+        execution_id,
+        execution_id_type,
+    ):
+        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
+        if key not in self._consumption_store:
+            return False
+        self._consumption_store[key]["broker_execution_id"] = execution_id
+        self._consumption_store[key]["broker_execution_id_type"] = execution_id_type
+        self._save_store()
+        return True
     def list_recent_consumptions(self, limit=10):
         """
         Devuelve una lista de los consumos recientes de intent_key.
@@ -17,13 +34,18 @@ class IntentConsumptionStore:
         items = list(self._consumption_store.items())
         result = []
         for k, v in items[:limit]:
-            result.append({
+            entry = {
                 'intent_key': k[2],
                 'user_id': k[0],
                 'broker': k[1],
                 'account_id': k[3],
                 'consumed_at': v.get('consumed_at') if 'consumed_at' in v else None
-            })
+            }
+            if 'broker_execution_id' in v:
+                entry['broker_execution_id'] = v['broker_execution_id']
+            if 'broker_execution_id_type' in v:
+                entry['broker_execution_id_type'] = v['broker_execution_id_type']
+            result.append(entry)
         return result
     def get_consumption_record(self, user_id, broker, intent_key, account_id=None):
         """
@@ -33,7 +55,7 @@ class IntentConsumptionStore:
         key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
         record = self._consumption_store.get(key)
         if record is not None:
-            return {
+            result = {
                 "found": True,
                 "intent_key": intent_key,
                 "user_id": user_id,
@@ -41,6 +63,11 @@ class IntentConsumptionStore:
                 "account_id": account_id if account_id is not None else "no-account",
                 "consumed_at": record.get("consumed_at") if "consumed_at" in record else None,
             }
+            if "broker_execution_id" in record:
+                result["broker_execution_id"] = record["broker_execution_id"]
+            if "broker_execution_id_type" in record:
+                result["broker_execution_id_type"] = record["broker_execution_id_type"]
+            return result
         return {
             "found": False,
             "intent_key": intent_key,
