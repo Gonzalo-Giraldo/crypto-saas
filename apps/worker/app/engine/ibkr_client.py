@@ -70,7 +70,10 @@ from apps.worker.app.engine.minimal_execution_runtime import normalize_order_ref
 def generate_order_ref(
     *,
     order_ref: str | None = None,
+    intent_key: str | None = None,
     user_id: str | None = None,
+    broker: str | None = None,
+    account_id: str | None = None,
     strategy_id: str | None = None,
     symbol: str | None = None,
     side: str | None = None,
@@ -79,13 +82,19 @@ def generate_order_ref(
     """
     Contrato oficial de generación de order_ref:
     - Si recibe order_ref explícita no vacía, la normaliza y la devuelve.
-    - Si no, genera determinísticamente una order_ref basada en los mismos inputs que la lógica actual.
+    - Si recibe intent_key no vacío, genera determinísticamente order_ref usando intent_key, user_id, broker, account_id ("no-account" si falta).
+    - Si no, fallback determinístico igual a la lógica anterior.
     - Siempre pasa por normalize_order_ref antes de devolver.
     """
     norm_order_ref = normalize_order_ref(order_ref) if order_ref is not None else None
     if norm_order_ref:
         return norm_order_ref
-    # Lógica determinística igual a la actual
+    norm_intent_key = normalize_order_ref(intent_key) if intent_key is not None else None
+    if norm_intent_key:
+        acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
+        ref = f"{norm_intent_key}::{user_id or ''}::{broker or ''}::{acc}"
+        return normalize_order_ref(ref)
+    # Fallback determinístico igual a la lógica anterior
     parts = [p for p in (user_id, strategy_id, symbol, side) if p]
     if parts:
         return normalize_order_ref("-".join(str(p) for p in parts))
@@ -94,7 +103,10 @@ def generate_order_ref(
 def _build_order_ref(
     *,
     order_ref: str | None = None,
+    intent_key: str | None = None,
     user_id: str | None = None,
+    broker: str | None = None,
+    account_id: str | None = None,
     strategy_id: str | None = None,
     symbol: str | None = None,
     side: str | None = None,
@@ -102,7 +114,10 @@ def _build_order_ref(
 ) -> str:
     return generate_order_ref(
         order_ref=order_ref,
+        intent_key=intent_key,
         user_id=user_id,
+        broker=broker,
+        account_id=account_id,
         strategy_id=strategy_id,
         symbol=symbol,
         side=side,
