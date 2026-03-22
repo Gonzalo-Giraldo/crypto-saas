@@ -3689,6 +3689,35 @@ def get_intent_consumption(
         )
     return intent_consumption_store.list_recent_consumptions(limit=limit)
 
+# --- Intent → Execution explicit endpoint ---
+@router.get("/intent-execution", tags=["ops"])
+def get_intent_execution(
+    intent_key: str = Query(...),
+    user_id: str = Query(...),
+    broker: str = Query(...),
+    account_id: str = Query(...),
+):
+    rec = intent_consumption_store.get_consumption_record(
+        user_id=user_id,
+        broker=broker,
+        intent_key=intent_key,
+        account_id=account_id,
+    )
+    # Solo exponer los campos requeridos
+    out = {
+        "found": bool(rec.get("found")),
+        "intent_key": rec.get("intent_key"),
+        "user_id": rec.get("user_id"),
+        "broker": rec.get("broker"),
+        "account_id": rec.get("account_id"),
+        "consumed_at": rec.get("consumed_at"),
+    }
+    if "broker_execution_id" in rec:
+        out["broker_execution_id"] = rec["broker_execution_id"]
+    if "broker_execution_id_type" in rec:
+        out["broker_execution_id_type"] = rec["broker_execution_id_type"]
+    return out
+
 
 @router.get("/backoffice/summary", response_model=BackofficeSummaryOut)
 def backoffice_summary(
