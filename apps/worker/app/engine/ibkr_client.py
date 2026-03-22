@@ -64,7 +64,32 @@ def _post_bridge(url: str, *, payload_raw: str, headers: dict, timeout: int = 12
     except requests.RequestException:
         raise RuntimeError("ibkr_upstream_unreachable")
 
+
 from apps.worker.app.engine.minimal_execution_runtime import normalize_order_ref
+
+def generate_order_ref(
+    *,
+    order_ref: str | None = None,
+    user_id: str | None = None,
+    strategy_id: str | None = None,
+    symbol: str | None = None,
+    side: str | None = None,
+    **kwargs,
+) -> str:
+    """
+    Contrato oficial de generación de order_ref:
+    - Si recibe order_ref explícita no vacía, la normaliza y la devuelve.
+    - Si no, genera determinísticamente una order_ref basada en los mismos inputs que la lógica actual.
+    - Siempre pasa por normalize_order_ref antes de devolver.
+    """
+    norm_order_ref = normalize_order_ref(order_ref) if order_ref is not None else None
+    if norm_order_ref:
+        return norm_order_ref
+    # Lógica determinística igual a la actual
+    parts = [p for p in (user_id, strategy_id, symbol, side) if p]
+    if parts:
+        return normalize_order_ref("-".join(str(p) for p in parts))
+    return normalize_order_ref("ibkr-order")
 
 def _build_order_ref(
     *,
@@ -75,15 +100,14 @@ def _build_order_ref(
     side: str | None = None,
     **kwargs,
 ) -> str:
-    norm_order_ref = normalize_order_ref(order_ref) if order_ref is not None else None
-    if norm_order_ref:
-        return norm_order_ref
-
-    parts = [p for p in (user_id, strategy_id, symbol, side) if p]
-    if parts:
-        return "-".join(str(p) for p in parts)
-
-    return "ibkr-order"
+    return generate_order_ref(
+        order_ref=order_ref,
+        user_id=user_id,
+        strategy_id=strategy_id,
+        symbol=symbol,
+        side=side,
+        **kwargs,
+    )
 
 def send_ibkr_test_order(
     api_key: str,
