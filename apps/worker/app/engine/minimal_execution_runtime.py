@@ -101,8 +101,10 @@ class IntentConsumptionStore:
         return key in self._consumption_store
 
     def register_consumption(self, user_id, broker, intent_key, account_id=None):
+        import datetime
         key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
-        self._consumption_store[key] = {"consumed": True}
+        consumed_at = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
+        self._consumption_store[key] = {"consumed": True, "consumed_at": consumed_at}
         self._save_store()
 import os
 import json

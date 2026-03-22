@@ -16,6 +16,10 @@ def test_list_recent_consumptions_multiple(temp_store):
     assert ('IK1', 'u1', 'BINANCE', 'A1') in keys
     assert ('IK2', 'u2', 'BINANCE', 'A2') in keys
     assert ('IK3', 'u3', 'BINANCE', 'A3') in keys
+    # Check consumed_at is present and is a string in ISO format
+    for r in result:
+        assert isinstance(r['consumed_at'], str)
+        assert r['consumed_at'].endswith('Z')
 
 def test_list_recent_consumptions_limit(temp_store):
     store = temp_store
@@ -60,7 +64,23 @@ def test_get_consumption_record_found_and_not_found(temp_store):
     assert r2["user_id"] == "u1"
     assert r2["broker"] == "BINANCE"
     assert r2["account_id"] == "A1"
-    assert r2["consumed_at"] is None or isinstance(r2["consumed_at"], (str, type(None)))
+    assert isinstance(r2["consumed_at"], str)
+    assert r2["consumed_at"].endswith('Z')
+def test_consumed_at_persisted_and_exposed(temp_store):
+    store = temp_store
+    store.register_consumption('u1', 'BINANCE', 'IKZ', 'A1')
+    rec = store.get_consumption_record('u1', 'BINANCE', 'IKZ', 'A1')
+    assert rec["found"] is True
+    assert isinstance(rec["consumed_at"], str)
+    assert rec["consumed_at"].endswith('Z')
+    # Should also appear in list_recent_consumptions
+    found = False
+    for r in store.list_recent_consumptions():
+        if r['intent_key'] == 'IKZ' and r['user_id'] == 'u1':
+            assert isinstance(r['consumed_at'], str)
+            assert r['consumed_at'].endswith('Z')
+            found = True
+    assert found
 
 def test_consumption_same_context_blocked(temp_store):
     store = temp_store
