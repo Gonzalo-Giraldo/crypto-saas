@@ -3667,6 +3667,28 @@ def _build_exit_checks(
 def ops_health():
     return {"system_state": "OK", "note": "placeholder"}
 
+# --- Intent Consumption Endpoint ---
+from fastapi import Query
+from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+intent_consumption_store = IntentConsumptionStore()
+
+@router.get("/intent-consumption", tags=["ops"])
+def get_intent_consumption(
+    intent_key: str = Query(None),
+    user_id: str = Query(None),
+    broker: str = Query(None),
+    account_id: str = Query(None),
+    limit: int = Query(10, ge=1, le=100),
+):
+    if intent_key and user_id and broker and account_id is not None:
+        return intent_consumption_store.get_consumption_record(
+            user_id=user_id,
+            broker=broker,
+            intent_key=intent_key,
+            account_id=account_id,
+        )
+    return intent_consumption_store.list_recent_consumptions(limit=limit)
+
 
 @router.get("/backoffice/summary", response_model=BackofficeSummaryOut)
 def backoffice_summary(
