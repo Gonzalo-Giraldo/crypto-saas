@@ -722,7 +722,22 @@ def execute_ibkr_test_order_for_user(
             pass
         if intent_key:
             store = IntentConsumptionStore()
+            # Audit: intent consumption blocked
             if store.has_consumed(user_id, "IBKR", intent_key, account_id):
+                log_audit_event(
+                    db,
+                    action="execution.ibkr.intent_consumption.blocked",
+                    user_id=user_id,
+                    entity_type="execution",
+                    details={
+                        "intent_key": intent_key,
+                        "user_id": user_id,
+                        "broker": "IBKR",
+                        "account_id": account_id,
+                        "status": "blocked"
+                    },
+                )
+                db.commit()
                 return {
                     "exchange": "IBKR",
                     "mode": "blocked_duplicate_intent_key",
@@ -733,7 +748,22 @@ def execute_ibkr_test_order_for_user(
                     "order_ref": None,
                     "reason": "intent_key already consumed for this context"
                 }
+            # Audit: intent consumption accepted
             store.register_consumption(user_id, "IBKR", intent_key, account_id)
+            log_audit_event(
+                db,
+                action="execution.ibkr.intent_consumption.accepted",
+                user_id=user_id,
+                entity_type="execution",
+                details={
+                    "intent_key": intent_key,
+                    "user_id": user_id,
+                    "broker": "IBKR",
+                    "account_id": account_id,
+                    "status": "accepted"
+                },
+            )
+            db.commit()
 
         order_ref = _build_order_ref(
             api_key=creds["api_key"],
