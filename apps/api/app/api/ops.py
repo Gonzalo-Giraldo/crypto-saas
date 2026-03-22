@@ -1,6 +1,84 @@
+# --- Intent → Binance execution status endpoint (read-only, no symbol in request) ---
+from fastapi import Depends, APIRouter
+from fastapi import APIRouter, HTTPException, status, Depends, Query
+from sqlalchemy.orm import Session
+from apps.api.app.db.session import get_db
+from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+
+
+router = APIRouter()
+
+
+# --- Intent → Binance execution status endpoint (read-only, no symbol in request) ---
+@router.get("/intent-binance-status", tags=["ops"])
+def get_intent_binance_status(
+    intent_key: str = Query(...),
+    user_id: str = Query(...),
+    broker: str = Query(...),
+    account_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    if broker.lower() != "binance":
+        return {"success": False, "error": "Only broker=binance is supported in this endpoint"}
+    # Import local para evitar dependencias globales pesadas
+    from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+    from apps.worker.app.engine.binance_client import query_order_status as binance_query_order_status
+    store = IntentConsumptionStore()
+    rec = store.get_consumption_record(
+        user_id=user_id,
+        broker=broker,
+        intent_key=intent_key,
+        account_id=account_id,
+    )
+    if not rec.get("found"):
+        return {"success": False, "error": "No consumption record found for this intent"}
+    broker_execution_id = rec.get("broker_execution_id")
+    broker_execution_id_type = rec.get("broker_execution_id_type")
+    symbol = rec.get("symbol")
+    market = rec.get("market")
+    if not broker_execution_id:
+        return {"success": False, "error": "No broker_execution_id linked for this intent"}
+    if not broker_execution_id_type:
+        return {"success": False, "error": "No broker_execution_id_type linked for this intent"}
+    if not symbol:
+        return {"success": False, "error": "No symbol found in consumption record"}
+    if not market:
+        return {"success": False, "error": "Cannot resolve market from internal context for this intent"}
+    creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange="BINANCE")
+    if not creds:
+        return {"success": False, "error": "No Binance credentials found for user"}
+    try:
+        status = binance_query_order_status(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+            symbol=symbol,
+            orig_client_order_id=broker_execution_id,
+            market=market,
+        )
+        return {
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "broker_status": status,
+            "success": True,
+        }
+    except Exception as exc:
+        return {
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "broker_status": None,
+            "success": False,
+            "error": str(exc),
+        }
+# --- Intent → Binance execution status endpoint ---
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from apps.api.app.db.session import get_db
+from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+from apps.worker.app.engine.binance_client import query_order_status as binance_query_order_status
+
+## (El endpoint duplicado y la versión con symbol/market en request se eliminan para evitar confusión y cumplir el alcance)
 from pydantic import BaseModel
-from apps.worker.app.engine import broker_registry
-from apps.worker.app.engine.execution_runtime import _cancel_order_via_adapter
+
 
 from fastapi import APIRouter
 router = APIRouter()
@@ -15,6 +93,8 @@ class CancelOrderRequest(BaseModel):
 @router.post("/cancel-order")
 def cancel_order_endpoint(payload: CancelOrderRequest):
     try:
+        from apps.worker.app.engine import broker_registry
+        from apps.worker.app.engine.execution_runtime import _cancel_order_via_adapter
         adapter = broker_registry.get_broker_adapter(payload.exchange)
         response = _cancel_order_via_adapter(
             adapter=adapter,

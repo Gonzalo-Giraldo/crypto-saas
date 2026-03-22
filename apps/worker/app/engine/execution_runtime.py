@@ -392,6 +392,12 @@ def execute_binance_test_order_for_user(
         runtime_context = {}
         if account_id is not None and str(account_id).strip():
             runtime_context["account_id"] = account_id
+        # Intent consumption wiring: persist symbol and market if intent_key present
+        if intent_key:
+            from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+            store = IntentConsumptionStore()
+            if not store.has_consumed(user_id, "BINANCE", intent_key, account_id):
+                store.register_consumption(user_id, "BINANCE", intent_key, account_id, symbol=symbol, market=market)
         try:
             qty_meta = prepare_binance_market_order_quantity(
                 symbol=symbol,
@@ -415,6 +421,20 @@ def execute_binance_test_order_for_user(
                 client_order_id=client_order_id,
                 market=market,
             )
+            # Attach broker_execution_id and broker_execution_id_type to the intent consumption record if intent_key is present
+            if intent_key:
+                from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+                store = IntentConsumptionStore()
+                store.attach_execution(
+                    user_id=user_id,
+                    broker="BINANCE",
+                    intent_key=intent_key,
+                    account_id=account_id,
+                    execution_id=client_order_id,
+                    execution_id_type="client_order_id",
+                    symbol=symbol,
+                    market=market,
+                )
         except Exception as exc:
             details = {
                 "symbol": symbol,

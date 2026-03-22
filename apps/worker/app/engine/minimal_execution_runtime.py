@@ -17,18 +17,24 @@ class IntentConsumptionStore:
         account_id,
         execution_id,
         execution_id_type,
+        symbol=None,
+        market=None,
     ):
         key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
         if key not in self._consumption_store:
             return False
         self._consumption_store[key]["broker_execution_id"] = execution_id
         self._consumption_store[key]["broker_execution_id_type"] = execution_id_type
+        if symbol is not None:
+            self._consumption_store[key]["symbol"] = symbol
+        if market is not None:
+            self._consumption_store[key]["market"] = market
         self._save_store()
         return True
     def list_recent_consumptions(self, limit=10):
         """
         Devuelve una lista de los consumos recientes de intent_key.
-        Cada elemento incluye: intent_key, user_id, broker, account_id, consumed_at (si existe).
+        Cada elemento incluye: intent_key, user_id, broker, account_id, consumed_at (si existe), symbol, market.
         El orden es el actual del store (dict), sin semántica de timestamp si no existe.
         """
         items = list(self._consumption_store.items())
@@ -45,12 +51,16 @@ class IntentConsumptionStore:
                 entry['broker_execution_id'] = v['broker_execution_id']
             if 'broker_execution_id_type' in v:
                 entry['broker_execution_id_type'] = v['broker_execution_id_type']
+            if 'symbol' in v:
+                entry['symbol'] = v['symbol']
+            if 'market' in v:
+                entry['market'] = v['market']
             result.append(entry)
         return result
     def get_consumption_record(self, user_id, broker, intent_key, account_id=None):
         """
         Consulta read-only de consumo de intent_key por contexto.
-        Devuelve dict con campos mínimos y estado encontrado/no encontrado.
+        Devuelve dict con campos mínimos y estado encontrado/no encontrado, incluyendo symbol y market si existen.
         """
         key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
         record = self._consumption_store.get(key)
@@ -67,6 +77,10 @@ class IntentConsumptionStore:
                 result["broker_execution_id"] = record["broker_execution_id"]
             if "broker_execution_id_type" in record:
                 result["broker_execution_id_type"] = record["broker_execution_id_type"]
+            if "symbol" in record:
+                result["symbol"] = record["symbol"]
+            if "market" in record:
+                result["market"] = record["market"]
             return result
         return {
             "found": False,
@@ -127,11 +141,15 @@ class IntentConsumptionStore:
         key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
         return key in self._consumption_store
 
-    def register_consumption(self, user_id, broker, intent_key, account_id=None):
+    def register_consumption(self, user_id, broker, intent_key, account_id=None, symbol=None, market=None):
         import datetime
         key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
         consumed_at = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
         self._consumption_store[key] = {"consumed": True, "consumed_at": consumed_at}
+        if symbol is not None:
+            self._consumption_store[key]["symbol"] = symbol
+        if market is not None:
+            self._consumption_store[key]["market"] = market
         self._save_store()
 import os
 import json
