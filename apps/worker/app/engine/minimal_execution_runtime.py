@@ -8,6 +8,23 @@ def build_intent_consumption_key(user_id, broker, intent_key, account_id=None):
     return (str(user_id), str(broker), str(intent_key), str(acc))
 
 class IntentConsumptionStore:
+    def list_recent_consumptions(self, limit=10):
+        """
+        Devuelve una lista de los consumos recientes de intent_key.
+        Cada elemento incluye: intent_key, user_id, broker, account_id, consumed_at (si existe).
+        El orden es el actual del store (dict), sin semántica de timestamp si no existe.
+        """
+        items = list(self._consumption_store.items())
+        result = []
+        for k, v in items[:limit]:
+            result.append({
+                'intent_key': k[2],
+                'user_id': k[0],
+                'broker': k[1],
+                'account_id': k[3],
+                'consumed_at': v.get('consumed_at') if 'consumed_at' in v else None
+            })
+        return result
     def get_consumption_record(self, user_id, broker, intent_key, account_id=None):
         """
         Consulta read-only de consumo de intent_key por contexto.

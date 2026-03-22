@@ -1,3 +1,29 @@
+def test_list_recent_consumptions_empty(temp_store):
+    store = temp_store
+    result = store.list_recent_consumptions()
+    assert isinstance(result, list)
+    assert len(result) == 0
+
+def test_list_recent_consumptions_multiple(temp_store):
+    store = temp_store
+    # Insertar 3 consumos
+    store.register_consumption('u1', 'BINANCE', 'IK1', 'A1')
+    store.register_consumption('u2', 'BINANCE', 'IK2', 'A2')
+    store.register_consumption('u3', 'BINANCE', 'IK3', 'A3')
+    result = store.list_recent_consumptions()
+    assert len(result) == 3
+    keys = set((r['intent_key'], r['user_id'], r['broker'], r['account_id']) for r in result)
+    assert ('IK1', 'u1', 'BINANCE', 'A1') in keys
+    assert ('IK2', 'u2', 'BINANCE', 'A2') in keys
+    assert ('IK3', 'u3', 'BINANCE', 'A3') in keys
+
+def test_list_recent_consumptions_limit(temp_store):
+    store = temp_store
+    # Insertar 5 consumos
+    for i in range(5):
+        store.register_consumption(f'u{i}', 'BINANCE', f'IK{i}', f'A{i}')
+    result = store.list_recent_consumptions(limit=2)
+    assert len(result) == 2
 import pytest
 import os
 import sys
