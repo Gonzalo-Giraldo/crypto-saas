@@ -1,6 +1,12 @@
 
 
-from fastapi import APIRouter
+import json
+from urllib import request as urllib_request
+from fastapi import APIRouter, Query, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from apps.api.app.core.config import settings
+from apps.api.app.db.session import get_db
+
 router = APIRouter()
 
 def fetch_binance_trades_via_gateway(
