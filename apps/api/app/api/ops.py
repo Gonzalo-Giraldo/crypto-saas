@@ -159,25 +159,35 @@ def get_intent_binance_trades(
     link_field_value = broker_execution_id if matched_trades_count > 0 else None
     supports_idempotent_fill_persistence_candidate = has_trade_id_all and order_link_confidence
 
+
     # 4. Señal explícita de mezcla
     trades_contains_unmatched = matched_trades_count != total_trades_count
 
-    # 5. Persistencia opcional de fills (no afecta response principal)
-
-    # Persistencia en DB (idempotente)
+    # 5. Persistencia durable SOLO si no hay mezcla
     db_persistence = None
-    try:
-        from apps.api.app.services.binance_fill_db import persist_binance_fills_db
-        db_persistence = persist_binance_fills_db(
-            db=db,
-            fills=matched_trades,
-            user_id=user_id,
-            account_id=account_id,
-            broker=broker,
-            market=market,
-        )
-    except Exception as exc:
-        db_persistence = {"error": str(exc)}
+    if trades_contains_unmatched:
+        db_persistence = {
+            "persisted": False,
+            "reason": "trades_contains_unmatched: no se persiste ningún fill hasta que todos los trades estén correctamente vinculados."
+        }
+    elif matched_trades_count > 0:
+        try:
+            from apps.api.app.services.binance_fill_db import persist_binance_fills_db
+            db_persistence = persist_binance_fills_db(
+                db=db,
+                fills=matched_trades,
+                user_id=user_id,
+                account_id=account_id,
+                broker=broker,
+                market=market,
+            )
+        except Exception as exc:
+            db_persistence = {"error": str(exc)}
+    else:
+        db_persistence = {
+            "persisted": False,
+            "reason": "No hay matched_trades para persistir."
+        }
 
     return {
         "broker_execution_id": broker_execution_id,
