@@ -1,3 +1,8 @@
+
+
+from fastapi import APIRouter
+router = APIRouter()
+
 def fetch_binance_trades_via_gateway(
     api_key: str,
     api_secret: str,
@@ -151,7 +156,19 @@ def get_intent_binance_trades(
     # 4. Señal explícita de mezcla
     trades_contains_unmatched = matched_trades_count != total_trades_count
 
-    # 5. Respuesta
+    # 5. Persistencia opcional de fills (no afecta response principal)
+    fill_persistence = None
+    try:
+        from apps.api.app.services.fill_store import FillStore
+        fill_persistence = FillStore.persist_binance_fills(
+            user_id=user_id,
+            account_id=account_id,
+            matched_trades=matched_trades,
+            trades_contains_unmatched=trades_contains_unmatched,
+        )
+    except Exception as exc:
+        fill_persistence = {"error": str(exc)}
+
     return {
         "broker_execution_id": broker_execution_id,
         "broker_execution_id_type": broker_execution_id_type,
@@ -167,6 +184,7 @@ def get_intent_binance_trades(
         "matched_trades_count": matched_trades_count,
         "all_trades_match": all_trades_match,
         "trades_contains_unmatched": trades_contains_unmatched,
+        "fill_persistence": fill_persistence,
         "success": True,
     }
 # --- Intent → Binance fill snapshot endpoint (read-only, no persistencia, no reconciliación) ---
@@ -237,17 +255,14 @@ def get_intent_binance_fill(
             "error": str(exc),
         }
 # --- Intent → Binance execution status endpoint (read-only, no symbol in request) ---
-from fastapi import Depends, APIRouter
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import Depends
+from fastapi import HTTPException, status, Depends, Query
 from sqlalchemy.orm import Session
 from apps.api.app.db.session import get_db
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
 
 
-router = APIRouter()
-
-
-# --- Intent → Binance execution status endpoint (read-only, no symbol in request) ---
+## --- Intent → Binance execution status endpoint (read-only, no symbol in request) ---
 @router.get("/intent-binance-status", tags=["ops"])
 def get_intent_binance_status(
     intent_key: str = Query(...),
@@ -319,7 +334,7 @@ from pydantic import BaseModel
 
 
 from fastapi import APIRouter
-router = APIRouter()
+
 
 # Cancel Order API
 class CancelOrderRequest(BaseModel):
