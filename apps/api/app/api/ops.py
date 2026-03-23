@@ -163,17 +163,21 @@ def get_intent_binance_trades(
     trades_contains_unmatched = matched_trades_count != total_trades_count
 
     # 5. Persistencia opcional de fills (no afecta response principal)
-    fill_persistence = None
+
+    # Persistencia en DB (idempotente)
+    db_persistence = None
     try:
-        from apps.api.app.services.fill_store import FillStore
-        fill_persistence = FillStore.persist_binance_fills(
+        from apps.api.app.services.binance_fill_db import persist_binance_fills_db
+        db_persistence = persist_binance_fills_db(
+            db=db,
+            fills=matched_trades,
             user_id=user_id,
             account_id=account_id,
-            matched_trades=matched_trades,
-            trades_contains_unmatched=trades_contains_unmatched,
+            broker=broker,
+            market=market,
         )
     except Exception as exc:
-        fill_persistence = {"error": str(exc)}
+        db_persistence = {"error": str(exc)}
 
     return {
         "broker_execution_id": broker_execution_id,
@@ -190,7 +194,7 @@ def get_intent_binance_trades(
         "matched_trades_count": matched_trades_count,
         "all_trades_match": all_trades_match,
         "trades_contains_unmatched": trades_contains_unmatched,
-        "fill_persistence": fill_persistence,
+        "db_persistence": db_persistence,
         "success": True,
     }
 # --- Intent → Binance fill snapshot endpoint (read-only, no persistencia, no reconciliación) ---
