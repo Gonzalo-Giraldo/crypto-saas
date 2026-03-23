@@ -1,3 +1,174 @@
+def fetch_binance_trades_via_gateway(
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    market: str,
+):
+    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
+    url = f"{base}/binance/my-trades"
+    body = json.dumps(
+        {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "symbol": symbol,
+            "market": market,
+        }
+    ).encode("utf-8")
+    req = urllib_request.Request(
+        url,
+        method="POST",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    if settings.BINANCE_GATEWAY_TOKEN:
+        req.add_header("X-Internal-Token", settings.BINANCE_GATEWAY_TOKEN)
+    with urllib_request.urlopen(req, timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS))) as resp:  # noqa: S310
+        payload = json.loads(resp.read().decode("utf-8"))
+    if isinstance(payload, dict):
+        return payload.get("rows")
+    return payload
+
+@router.get("/intent-binance-trades", tags=["ops"])
+def get_intent_binance_trades(
+    intent_key: str = Query(...),
+    user_id: str = Query(...),
+    broker: str = Query(...),
+    account_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    # 1. Validar broker
+    if broker.lower() != "binance":
+        return {"success": False, "error": "Only broker=binance is supported in this endpoint"}
+    # 2. Obtener consumption record
+    rec = intent_consumption_store.get_consumption_record(
+        user_id=user_id,
+        broker=broker,
+        intent_key=intent_key,
+        account_id=account_id,
+    )
+    if not rec.get("found"):
+        return {"success": False, "error": "No consumption record found for this intent"}
+    broker_execution_id = rec.get("broker_execution_id")
+    broker_execution_id_type = rec.get("broker_execution_id_type")
+    symbol = rec.get("symbol")
+    market = rec.get("market")
+    if not broker_execution_id:
+        return {"success": False, "error": "No broker_execution_id linked for this intent"}
+    if not broker_execution_id_type:
+        return {"success": False, "error": "No broker_execution_id_type linked for this intent"}
+    if not symbol:
+        return {"success": False, "error": "No symbol found in consumption record"}
+    if not market:
+        return {"success": False, "error": "Cannot resolve market from internal context for this intent"}
+    # 3. Obtener credenciales
+    from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+    creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange="BINANCE")
+    if not creds:
+        return {"success": False, "error": "No Binance credentials found for user"}
+    # 4. Llamar get_my_trades
+    try:
+        trades = fetch_binance_trades_via_gateway(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+            symbol=symbol,
+            market=market,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Failed to fetch trades: {exc}",
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+            "market": market,
+        }
+
+    # 2. Validación de trades
+    if trades is None:
+        return {
+            "success": False,
+            "error": "Trades response is None",
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+            "market": market,
+        }
+    if not isinstance(trades, list):
+        return {
+            "success": False,
+            "error": "Trades response is not a list",
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+            "market": market,
+        }
+    if len(trades) == 0:
+        return {
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+            "market": market,
+            "trades": [],
+            "link_field_used": None,
+            "link_field_value": None,
+            "order_link_confidence": False,
+            "supports_idempotent_fill_persistence_candidate": False,
+            "total_trades_count": 0,
+            "matched_trades_count": 0,
+            "all_trades_match": False,
+            "trades_empty": True,
+            "success": True,
+        }
+
+    # 3. Evaluación determinista del vínculo
+    total_trades_count = len(trades)
+    matched_trades_count = 0
+    has_trade_id_all = True
+    matched_trades = []
+    for trade in trades:
+        # Evaluar identidad única
+        trade_id = trade.get("id") or trade.get("tradeId")
+        if trade_id is None:
+            has_trade_id_all = False
+        # Evaluar match exacto
+        order_id = trade.get("orderId")
+        client_order_id = trade.get("clientOrderId")
+        match = False
+        if broker_execution_id_type == "orderId" and order_id is not None and str(order_id) == str(broker_execution_id):
+            match = True
+        elif broker_execution_id_type == "clientOrderId" and client_order_id is not None and str(client_order_id) == str(broker_execution_id):
+            match = True
+        if match:
+            matched_trades.append(trade)
+
+    matched_trades_count = len(matched_trades)
+    order_link_confidence = matched_trades_count > 0
+    all_trades_match = matched_trades_count == total_trades_count and total_trades_count > 0
+    link_field_used = broker_execution_id_type if matched_trades_count > 0 else None
+    link_field_value = broker_execution_id if matched_trades_count > 0 else None
+    supports_idempotent_fill_persistence_candidate = has_trade_id_all and order_link_confidence
+
+    # 4. Señal explícita de mezcla
+    trades_contains_unmatched = matched_trades_count != total_trades_count
+
+    # 5. Respuesta
+    return {
+        "broker_execution_id": broker_execution_id,
+        "broker_execution_id_type": broker_execution_id_type,
+        "symbol": symbol,
+        "market": market,
+        "trades": trades,
+        "matched_trades": matched_trades,
+        "link_field_used": link_field_used,
+        "link_field_value": link_field_value,
+        "order_link_confidence": order_link_confidence,
+        "supports_idempotent_fill_persistence_candidate": supports_idempotent_fill_persistence_candidate,
+        "total_trades_count": total_trades_count,
+        "matched_trades_count": matched_trades_count,
+        "all_trades_match": all_trades_match,
+        "trades_contains_unmatched": trades_contains_unmatched,
+        "success": True,
+    }
 # --- Intent → Binance fill snapshot endpoint (read-only, no persistencia, no reconciliación) ---
 @router.get("/intent-binance-fill", tags=["ops"])
 def get_intent_binance_fill(
