@@ -6,6 +6,8 @@ def persist_binance_fills_db(db, fills: list, user_id: str, account_id: str, bro
     skipped = 0
     for fill in fills:
         trade_id = fill.get("id") or fill.get("tradeId")
+        if trade_id is not None:
+            trade_id = str(trade_id)
         if not trade_id:
             continue
         # Check if already exists

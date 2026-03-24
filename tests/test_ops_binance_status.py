@@ -113,31 +113,37 @@ def test_intent_binance_trades_persistence_contract():
         symbol="BTCUSDT"
     )
     with patch("apps.api.app.api.ops.intent_consumption_store") as mock_store, \
-         patch("apps.api.app.api.ops.get_decrypted_exchange_secret", return_value={"api_key": "k", "api_secret": "s"}), \
+         patch("apps.api.app.services.exchange_secrets.get_decrypted_exchange_secret", return_value={"api_key": "k", "api_secret": "s"}), \
          patch("apps.api.app.api.ops.fetch_binance_trades_via_gateway", return_value=trades), \
          patch("apps.api.app.services.binance_fill_db.persist_binance_fills_db", return_value={"persisted": True}) as mock_persist:
         mock_store.get_consumption_record.return_value = {"found": True, "broker_execution_id": "abc", "broker_execution_id_type": "orderId", "symbol": "BTCUSDT", "market": "BTCUSDT"}
-        response = client.get("/intent-binance-trades", params=payload)
+        response = client.get("/ops/intent-binance-trades", params=payload)
+        print("DEBUG status_code:", response.status_code)
+        try:
+            print("DEBUG json:", response.json())
+        except Exception as e:
+            print("DEBUG json error:", str(e))
+            print("DEBUG raw response:", response.text)
         data = response.json()
         assert response.status_code == 200
         assert data["db_persistence"]["persisted"] is True
         assert data["trades_contains_unmatched"] is False
         mock_persist.assert_called_once()
 
-    # Case 2: trades_contains_unmatched = True (should block persistence)
-    trades_mixed = [
+        # Case 2: trades_contains_unmatched = True (should block persistence)
+        trades_mixed = [
         {"id": 1, "orderId": "abc", "clientOrderId": "cid", "some": "data"},
         {"id": 2, "orderId": "other", "clientOrderId": "cid", "some": "data2"}
     ]
-    with patch("apps.api.app.api.ops.intent_consumption_store") as mock_store, \
-         patch("apps.api.app.api.ops.get_decrypted_exchange_secret", return_value={"api_key": "k", "api_secret": "s"}), \
-         patch("apps.api.app.api.ops.fetch_binance_trades_via_gateway", return_value=trades_mixed), \
-         patch("apps.api.app.services.binance_fill_db.persist_binance_fills_db") as mock_persist:
-        mock_store.get_consumption_record.return_value = {"found": True, "broker_execution_id": "abc", "broker_execution_id_type": "orderId", "symbol": "BTCUSDT", "market": "BTCUSDT"}
-        response = client.get("/intent-binance-trades", params=payload)
-        data = response.json()
-        assert response.status_code == 200
-        assert data["db_persistence"]["persisted"] is False
-        assert "trades_contains_unmatched" in data["db_persistence"]["reason"]
-        assert data["trades_contains_unmatched"] is True
-        mock_persist.assert_not_called()
+        with patch("apps.api.app.api.ops.intent_consumption_store") as mock_store, \
+             patch("apps.api.app.services.exchange_secrets.get_decrypted_exchange_secret", return_value={"api_key": "k", "api_secret": "s"}), \
+             patch("apps.api.app.api.ops.fetch_binance_trades_via_gateway", return_value=trades_mixed), \
+             patch("apps.api.app.services.binance_fill_db.persist_binance_fills_db") as mock_persist:
+            mock_store.get_consumption_record.return_value = {"found": True, "broker_execution_id": "abc", "broker_execution_id_type": "orderId", "symbol": "BTCUSDT", "market": "BTCUSDT"}
+            response = client.get("/ops/intent-binance-trades", params=payload)
+            data = response.json()
+            assert response.status_code == 200
+            assert data["db_persistence"]["persisted"] is False
+            assert "trades_contains_unmatched" in data["db_persistence"]["reason"]
+            assert data["trades_contains_unmatched"] is True
+            mock_persist.assert_not_called()

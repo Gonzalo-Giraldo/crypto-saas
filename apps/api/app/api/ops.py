@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.config import settings
 from apps.api.app.db.session import get_db
 
-router = APIRouter()
+router = APIRouter(prefix="/ops", tags=["ops"])
 
 def fetch_binance_trades_via_gateway(
     api_key: str,
@@ -74,6 +74,7 @@ def get_intent_binance_trades(
     # 3. Obtener credenciales
     from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
     creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange="BINANCE")
+    print("DEBUG creds:", creds)
     if not creds:
         return {"success": False, "error": "No Binance credentials found for user"}
     # 4. Llamar get_my_trades
@@ -547,7 +548,7 @@ from apps.worker.app.engine.execution_runtime import (
     resolve_execution_quantity_preview,
 )
 
-router = APIRouter(prefix="/ops", tags=["ops"])
+# (Eliminada redefinición de router para evitar sobrescribir el objeto decorado)
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"
 
 
