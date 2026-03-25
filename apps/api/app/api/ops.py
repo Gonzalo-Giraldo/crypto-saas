@@ -1,5 +1,4 @@
 
-
 import json
 from urllib import request as urllib_request
 from fastapi import APIRouter, Query, Depends, HTTPException, status
@@ -7,7 +6,73 @@ from sqlalchemy.orm import Session
 from apps.api.app.core.config import settings
 from apps.api.app.db.session import get_db
 
+from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+from apps.worker.app.engine.ibkr_client import query_order_status as ibkr_query_order_status
+
 router = APIRouter(prefix="/ops", tags=["ops"])
+
+# Endpoint: GET /intent-ibkr-status
+@router.get("/intent-ibkr-status", tags=["ops"])
+def get_intent_ibkr_status(
+    intent_key: str = Query(...),
+    user_id: str = Query(...),
+    broker: str = Query(...),
+    account_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    # 1. Validar broker
+    if broker.lower() != "ibkr":
+        return {"success": False, "error": "Only broker=ibkr is supported in this endpoint"}
+    # 2. Obtener consumption record
+    store = IntentConsumptionStore()
+    rec = store.get_consumption_record(
+        user_id=user_id,
+        broker=broker,
+        intent_key=intent_key,
+        account_id=account_id,
+    )
+    if not rec.get("found"):
+        return {"success": False, "error": "No consumption record found for this intent"}
+    broker_execution_id = rec.get("broker_execution_id")
+    broker_execution_id_type = rec.get("broker_execution_id_type")
+    symbol = rec.get("symbol")
+    # Validaciones mínimas
+    if not broker_execution_id:
+        return {"success": False, "error": "No broker_execution_id linked for this intent"}
+    if not broker_execution_id_type:
+        return {"success": False, "error": "No broker_execution_id_type linked for this intent"}
+    if not symbol:
+        return {"success": False, "error": "No symbol found in consumption record"}
+    # 3. Obtener credenciales
+    creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange="IBKR")
+    if not creds:
+        return {"success": False, "error": "No IBKR credentials found for user"}
+    # 4. Consultar status usando query_order_status
+    try:
+        status_payload = ibkr_query_order_status(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+            symbol=symbol,
+            client_order_id=broker_execution_id,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": f"Failed to query IBKR order status: {exc}",
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+        }
+    return {
+        "success": True,
+        "broker_execution_id": broker_execution_id,
+        "broker_execution_id_type": broker_execution_id_type,
+        "symbol": symbol,
+        "broker_status": status_payload.get("status"),
+        "mode": status_payload.get("mode"),
+        "payload": status_payload,
+    }
 
 def _normalize_binance_market_for_gateway(market: str | None, symbol: str | None = None) -> str:
     value = str(market or "").upper().strip()
