@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
-app.include_router(ops_ibkr_router)
+ 
 
 import apps.api.app.models.signal
 import apps.api.app.models.position
@@ -116,10 +116,12 @@ def _ensure_exchange_secret_columns():
 
 _ensure_exchange_secret_columns()
 
+
 app.include_router(ops_router)
 app.include_router(users_router)
 app.include_router(signals_router)
 app.include_router(positions_router)
+app.include_router(ops_ibkr_router)
 
 @app.get("/healthz")
 def healthz():
