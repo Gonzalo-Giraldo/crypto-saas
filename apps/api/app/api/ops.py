@@ -401,11 +401,12 @@ from fastapi import APIRouter
 
 
 
-# ...existing code...
+
+from pydantic import BaseModel
+from apps.api.app.api.deps import get_current_user, require_any_role, require_role
+from apps.api.app.models.user import User
 
 # Cancel Order API
-from pydantic import BaseModel
-
 class CancelOrderRequest(BaseModel):
     exchange: str
     symbol: str
