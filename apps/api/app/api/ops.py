@@ -400,7 +400,12 @@ from pydantic import BaseModel
 from fastapi import APIRouter
 
 
+
+# ...existing code...
+
 # Cancel Order API
+from pydantic import BaseModel
+
 class CancelOrderRequest(BaseModel):
     exchange: str
     symbol: str
