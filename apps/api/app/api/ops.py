@@ -408,16 +408,15 @@ class CancelOrderRequest(BaseModel):
     market: str = "SPOT"
 
 @router.post("/cancel-order")
-def cancel_order_endpoint(payload: CancelOrderRequest):
+def cancel_order_endpoint(payload: CancelOrderRequest, current_user: User = Depends(get_current_user)):
     try:
-        from apps.worker.app.engine import broker_registry
-        from apps.worker.app.engine.execution_runtime import _cancel_order_via_adapter
-        adapter = broker_registry.get_broker_adapter(payload.exchange)
-        response = _cancel_order_via_adapter(
-            adapter=adapter,
+        from apps.worker.app.engine.execution_runtime import cancel_broker_order
+        response = cancel_broker_order(
+            exchange=payload.exchange,
             symbol=payload.symbol,
             client_order_id=payload.client_order_id,
             market=payload.market,
+            user_id=current_user.id,
         )
         return response
     except HTTPException as exc:
@@ -446,6 +445,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.deps import get_current_user, require_any_role, require_role
+from apps.api.app.models.user import User
 from apps.api.app.db.session import engine, get_db
 from apps.api.app.models.audit_log import AuditLog
 from apps.api.app.models.daily_risk import DailyRiskState
