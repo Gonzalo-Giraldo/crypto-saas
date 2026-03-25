@@ -1,3 +1,57 @@
+
+"""
+IBKR Client Transport Module
+---------------------------
+This module provides the explicit client seam for Interactive Brokers (IBKR) lifecycle operations.
+Unlike Binance, there is no gateway abstraction for IBKR in this project. All transport and protocol
+handling for IBKR order operations will be implemented directly in this module.
+
+This groundwork provides placeholder functions for the main IBKR order lifecycle actions. These are
+not yet implemented or wired to any adapter or runtime logic.
+"""
+
+def get_ibkr_trades(api_key: str, api_secret: str, symbol: str, client_order_id: str) -> dict:
+    """
+    Read-only seam to fetch IBKR trades/fills for a given order.
+    If IBKR_BRIDGE_BASE_URL is set, queries the bridge; otherwise returns a seam stub.
+    """
+    from apps.api.app.core.config import settings
+    import json
+    import hashlib
+    import hmac
+
+    symbol_norm = str(symbol or "").upper().strip()
+    client_order_id_norm = str(client_order_id or "").strip()
+    if not symbol_norm:
+        raise RuntimeError("ibkr_trades_input_error: missing symbol")
+    if not client_order_id_norm:
+        raise RuntimeError("ibkr_trades_input_error: missing client_order_id")
+
+    if getattr(settings, "IBKR_BRIDGE_BASE_URL", None):
+        payload = {
+            "symbol": symbol_norm,
+            "client_order_id": client_order_id_norm,
+        }
+        payload_raw = json.dumps(payload, separators=(",", ":"))
+        signature = hmac.new(
+            api_secret.encode("utf-8"),
+            payload_raw.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        headers = {
+            "X-API-KEY": api_key,
+            "X-SIGNATURE": signature,
+            "Content-Type": "application/json",
+        }
+        url = f"{settings.IBKR_BRIDGE_BASE_URL.rstrip('/')}/ibkr/paper/trades"
+        response = _post_bridge(url, payload_raw=payload_raw, headers=headers, timeout=12)
+        if response.status_code >= 400:
+            raise RuntimeError(f"ibkr_bridge_trades_error {response.status_code}: {response.text}")
+        out = response.json()
+        out["mode"] = "bridge"
+        return out
+    # Seam stub if no bridge
+    return {"mode": "ibkr_trades_seam", "trades": []}
 """
 IBKR Client Transport Module
 ---------------------------
