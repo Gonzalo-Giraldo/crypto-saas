@@ -9,12 +9,28 @@ from apps.api.app.db.session import get_db
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 
+def _normalize_binance_market_for_gateway(market: str | None, symbol: str | None = None) -> str:
+    value = str(market or "").upper().strip()
+    if value in {"SPOT", "FUTURES"}:
+        return value
+
+    # No inferir silenciosamente para no mezclar spot/futures en runtime real.
+    # Si el valor parece ser el símbolo u otro dato corrupto, fallar explícitamente.
+    if symbol and value == str(symbol).upper().strip():
+        raise ValueError("invalid_market_in_consumption_record: market contains symbol, expected SPOT or FUTURES")
+
+    raise ValueError(f"invalid_market_in_consumption_record: {market}")
+
+
 def fetch_binance_trades_via_gateway(
     api_key: str,
     api_secret: str,
     symbol: str,
     market: str,
 ):
+    if not (settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL):
+        raise RuntimeError("binance_gateway_not_configured")
+
     base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
     url = f"{base}/binance/my-trades"
     body = json.dumps(
@@ -63,6 +79,18 @@ def get_intent_binance_trades(
     broker_execution_id_type = rec.get("broker_execution_id_type")
     symbol = rec.get("symbol")
     market = rec.get("market")
+
+    try:
+        market = _normalize_binance_market_for_gateway(market=market, symbol=symbol)
+    except ValueError as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+            "market": market,
+        }
     if not broker_execution_id:
         return {"success": False, "error": "No broker_execution_id linked for this intent"}
     if not broker_execution_id_type:
@@ -169,12 +197,14 @@ def get_intent_binance_trades(
     if trades_contains_unmatched:
         db_persistence = {
             "persisted": False,
-            "reason": "trades_contains_unmatched: no se persiste ningún fill hasta que todos los trades estén correctamente vinculados."
+            "inserted": 0,
+            "skipped": 0,
+            "reason": "trades_contains_unmatched"
         }
     elif matched_trades_count > 0:
         try:
             from apps.api.app.services.binance_fill_db import persist_binance_fills_db
-            db_persistence = persist_binance_fills_db(
+            _result = persist_binance_fills_db(
                 db=db,
                 fills=matched_trades,
                 user_id=user_id,
@@ -182,12 +212,25 @@ def get_intent_binance_trades(
                 broker=broker,
                 market=market,
             )
+            db_persistence = {
+                "persisted": True,
+                "inserted": _result.get("inserted", 0),
+                "skipped": _result.get("skipped", 0),
+                "reason": None
+            }
         except Exception as exc:
-            db_persistence = {"error": str(exc)}
+            db_persistence = {
+                "persisted": False,
+                "inserted": 0,
+                "skipped": 0,
+                "reason": str(exc)
+            }
     else:
         db_persistence = {
             "persisted": False,
-            "reason": "No hay matched_trades para persistir."
+            "inserted": 0,
+            "skipped": 0,
+            "reason": "no_matched_trades"
         }
 
     return {
@@ -1108,6 +1151,7 @@ def _run_binance_auto_pick_live_flow(
             symbol=selected["symbol"],
             side=selected["side"],
             qty=selected_qty,
+            intent_key=idempotency_key,
         )
         decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
         if enforce_exit_plan:
@@ -3589,6 +3633,7 @@ def _auto_pick_from_scan(
                     symbol=selected["symbol"],
                     side=selected["side"],
                     qty=selected_qty,
+                    intent_key=idempotency_key,
                 )
                 decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
                 if enforce_exit_plan:
@@ -7360,6 +7405,7 @@ def execution_binance_test_order(
         symbol=payload.symbol,
         side=payload.side,
         qty=payload.qty,
+        intent_key=idempotency_key,
     )
     store_idempotent_response(
         db,
@@ -7414,6 +7460,7 @@ def execution_ibkr_test_order(
         symbol=payload.symbol,
         side=payload.side,
         qty=payload.qty,
+        intent_key=idempotency_key,
     )
     store_idempotent_response(
         db,

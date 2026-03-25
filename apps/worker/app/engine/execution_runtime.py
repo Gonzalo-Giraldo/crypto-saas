@@ -716,6 +716,7 @@ def execute_ibkr_test_order_for_user(
     side: str,
     qty: float,
     account_id: str | None = None,
+    intent_key: str | None = None,
 ):
     db = SessionLocal()
     from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore, build_intent_consumption_key
@@ -731,15 +732,7 @@ def execute_ibkr_test_order_for_user(
                 detail="Missing credentials for IBKR",
             )
 
-        # Enforcement de consumo de intent_key por contexto
-        import inspect
-        intent_key = None
-        try:
-            frame = inspect.currentframe()
-            if frame and frame.f_back and "intent_key" in frame.f_back.f_locals:
-                intent_key = frame.f_back.f_locals["intent_key"]
-        except Exception:
-            pass
+        # Enforcement de consumo de intent_key por contexto (explícito)
         if intent_key:
             store = IntentConsumptionStore()
             # Audit: intent consumption blocked
@@ -787,6 +780,10 @@ def execute_ibkr_test_order_for_user(
 
         order_ref = _build_order_ref(
             api_key=creds["api_key"],
+            intent_key=intent_key,
+            user_id=user_id,
+            broker="IBKR",
+            account_id=account_id,
             symbol=symbol,
             side=side,
             quantity=qty,
