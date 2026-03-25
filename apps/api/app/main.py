@@ -2,6 +2,9 @@ from apps.api.app.api.signals import router as signals_router
 from apps.api.app.api.positions import router as positions_router
 from apps.api.app.routes.auth import router as auth_router
 from contextlib import asynccontextmanager
+from apps.api.app.api.ops_ibkr import router as ops_ibkr_router
+
+app.include_router(ops_ibkr_router)
 
 import apps.api.app.models.signal
 import apps.api.app.models.position

@@ -1,4 +1,6 @@
 
+from apps.worker.app.engine.ibkr_client import get_ibkr_trades
+
 import json
 from urllib import request as urllib_request
 from fastapi import APIRouter, Query, Depends, HTTPException, status
