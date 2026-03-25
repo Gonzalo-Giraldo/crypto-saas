@@ -3,6 +3,9 @@ from apps.api.app.api.positions import router as positions_router
 from apps.api.app.routes.auth import router as auth_router
 from contextlib import asynccontextmanager
 from apps.api.app.api.ops_ibkr import router as ops_ibkr_router
+from fastapi import FastAPI
+
+app = FastAPI()
 
 app.include_router(ops_ibkr_router)
 
@@ -26,7 +29,6 @@ import apps.api.app.models.learning_decision
 import apps.api.app.models.learning_outcome
 import apps.api.app.models.learning_rollup_hourly
 
-from fastapi import FastAPI
 import threading
 import time
 
