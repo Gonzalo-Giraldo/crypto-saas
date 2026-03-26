@@ -189,7 +189,15 @@ def send_ibkr_test_order(
     quantity: float,
     order_ref: str | None = None,
 ) -> dict[str, Any]:
-    _validate_inputs(api_key=api_key, api_secret=api_secret, symbol=symbol, quantity=quantity)
+    # Validación mínima local
+    if not api_key or len(str(api_key).strip()) < 8:
+        raise RuntimeError("ibkr_input_error: api_key missing or too short")
+    if not api_secret or len(str(api_secret).strip()) < 8:
+        raise RuntimeError("ibkr_input_error: api_secret missing or too short")
+    if not symbol or not str(symbol).strip():
+        raise RuntimeError("ibkr_input_error: symbol missing")
+    if not isinstance(quantity, (int, float)) or quantity <= 0:
+        raise RuntimeError("ibkr_input_error: quantity must be > 0")
     if not str(order_ref or "").strip():
         raise RuntimeError("kernel_dispatch_guard: missing order_ref")
 
