@@ -22,12 +22,16 @@ def get_intent_ibkr_trades(
     if broker.lower() != "ibkr":
         return {"success": False, "error": "Only broker=ibkr is supported"}
 
+
+    # Normalizar account_id vacío o whitespace a None
+    normalized_account_id = account_id if account_id and str(account_id).strip() else None
+
     store = IntentConsumptionStore()
     rec = store.get_consumption_record(
         user_id=user_id,
         broker=broker,
         intent_key=intent_key,
-        account_id=account_id,
+        account_id=normalized_account_id,
     )
 
     if not rec.get("found"):
