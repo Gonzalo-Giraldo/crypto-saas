@@ -64,8 +64,11 @@ not yet implemented or wired to any adapter or runtime logic.
 """
 
 from typing import Any
-
 import requests
+from apps.api.app.core.config import settings
+import json
+import hashlib
+import hmac
 
 def send_order(*, api_key: str, api_secret: str, symbol: str, side: str, quantity: float, order_ref: str, **kwargs):
     """
@@ -218,7 +221,11 @@ def send_ibkr_test_order(
         return {"ok": True, "mode": "bridge", "order_ref": order_ref}
 
     # Safe fallback: deterministic local simulation (no money movement).
-    return {"ok": True, "mode": "simulated", "order_ref": order_ref}
+    return {
+        "status": "accepted",
+        "order_ref": order_ref,
+        "mode": "ibkr_simulated_execution"
+    }
 
 
 def get_ibkr_account_status(
