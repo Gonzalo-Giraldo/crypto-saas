@@ -73,15 +73,18 @@ class IntentConsumptionStore:
         try:
 
             from sqlalchemy import text
-
             row = db.execute(
-                text("SELECT execution_ref FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+                text("""
+                    SELECT execution_ref, symbol
+                    FROM intent_consumptions
+                    WHERE intent_id = :intent_id AND consumer = :consumer
+                    LIMIT 1
+                """),
                 {"intent_id": intent_id, "consumer": consumer}
             ).fetchone()
 
             if row is not None:
-                execution_ref = row[0]
-
+                execution_ref, symbol = row
                 result = {
                     "found": True,
                     "intent_key": intent_key,
@@ -93,6 +96,8 @@ class IntentConsumptionStore:
 
                 if execution_ref:
                     result["broker_execution_id"] = execution_ref
+                if symbol:
+                    result["symbol"] = symbol
 
                 return result
 
