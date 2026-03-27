@@ -394,10 +394,23 @@ def execute_binance_test_order_for_user(
             runtime_context["account_id"] = account_id
         # Intent consumption wiring: persist symbol and market if intent_key present
         if intent_key:
-            from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
-            store = IntentConsumptionStore()
-            if not store.has_consumed(user_id, "BINANCE", intent_key, account_id):
-                store.register_consumption(user_id, "BINANCE", intent_key, account_id, symbol=symbol, market=market)
+            def _build_consumer(user_id, broker, account_id=None):
+                acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
+                return f"{user_id}:{broker}:{acc}"
+
+            intent_id = str(intent_key)
+            consumer = _build_consumer(user_id, "BINANCE", account_id)
+            # Check if already consumed
+            result = db.execute(
+                "SELECT 1 FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
+                (intent_id, consumer)
+            ).fetchone()
+            if result is None:
+                db.execute(
+                    "INSERT INTO intent_consumptions (intent_id, consumer) VALUES (%s, %s) ON CONFLICT (intent_id, consumer) DO NOTHING",
+                    (intent_id, consumer)
+                )
+                db.commit()
         try:
             qty_meta = prepare_binance_market_order_quantity(
                 symbol=symbol,
@@ -719,7 +732,7 @@ def execute_ibkr_test_order_for_user(
     intent_key: str | None = None,
 ):
     db = SessionLocal()
-    from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore, build_intent_consumption_key
+    # Implementación directa de consumo de intents en DB
     try:
         creds = get_decrypted_exchange_secret(
             db=db,
@@ -732,11 +745,44 @@ def execute_ibkr_test_order_for_user(
                 detail="Missing credentials for IBKR",
             )
 
+        # Observabilidad: log intent_key recibido
+        print({
+            "event": "ibkr_test_order_intent_key_entry",
+            "intent_key": intent_key,
+            "user_id": user_id,
+            "symbol": symbol,
+            "side": side,
+            "qty": qty,
+            "account_id": account_id,
+        })
+
         # Enforcement de consumo de intent_key por contexto (explícito)
         if intent_key:
-            store = IntentConsumptionStore()
-            # Audit: intent consumption blocked
-            if store.has_consumed(user_id, "IBKR", intent_key, account_id):
+            def _build_consumer(user_id, broker, account_id=None):
+                acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
+                return f"{user_id}:{broker}:{acc}"
+
+            intent_id = str(intent_key)
+            consumer = _build_consumer(user_id, "IBKR", account_id)
+            print({
+                "event": "ibkr_test_order_intent_consumption_check",
+                "intent_id": intent_id,
+                "consumer": consumer,
+            })
+            # Check if already consumed
+            result = db.execute(
+                "SELECT 1 FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
+                (intent_id, consumer)
+            ).fetchone()
+            print({
+                "event": "ibkr_test_order_intent_consumption_select_result",
+                "found": result is not None,
+            })
+            if result is not None:
+                print({
+                    "event": "ibkr_test_order_intent_consumption_blocked_return",
+                    "sent": False,
+                })
                 log_audit_event(
                     db,
                     action="execution.ibkr.intent_consumption.blocked",
@@ -758,11 +804,25 @@ def execute_ibkr_test_order_for_user(
                     "side": side.upper(),
                     "qty": qty,
                     "sent": False,
-                    "order_ref": None,
+                    "order_ref": str(order_ref or ""),
                     "reason": "intent_key already consumed for this context"
                 }
-            # Audit: intent consumption accepted
-            store.register_consumption(user_id, "IBKR", intent_key, account_id)
+            # Registrar consumo
+            print({
+                "event": "ibkr_test_order_intent_consumption_insert",
+                "intent_id": intent_id,
+                "consumer": consumer,
+            })
+            db.execute(
+                "INSERT INTO intent_consumptions (intent_id, consumer) VALUES (%s, %s) ON CONFLICT (intent_id, consumer) DO NOTHING",
+                (intent_id, consumer)
+            )
+            db.commit()
+            print({
+                "event": "ibkr_test_order_intent_consumption_commit",
+                "intent_id": intent_id,
+                "consumer": consumer,
+            })
             log_audit_event(
                 db,
                 action="execution.ibkr.intent_consumption.accepted",
@@ -824,7 +884,7 @@ def execute_ibkr_test_order_for_user(
             )
 
         mode = "paper_bridge_test" if result.get("mode") == "bridge" else "paper_simulated_test"
-        order_ref = result.get("order_ref", "")
+        order_ref = str(result.get("order_ref") or "")
         log_audit_event(
             db,
             action="execution.ibkr.test_order.success",
@@ -847,6 +907,11 @@ def execute_ibkr_test_order_for_user(
                 symbol=symbol,
             )
 
+        print({
+            "event": "ibkr_test_order_return_sent_true",
+            "sent": True,
+            "order_ref": order_ref,
+        })
         return {
             "exchange": "IBKR",
             "mode": mode,

@@ -7518,6 +7518,16 @@ def execution_ibkr_test_order(
         price_estimate=0.0,
     )
     req_payload = payload.model_dump()
+    # Observabilidad: log estructurado de idempotency_key recibido y valor pasado a execute_ibkr_test_order_for_user
+    print({
+        "event": "ibkr_test_order_intent_key_received",
+        "x_idempotency_key": idempotency_key,
+        "intent_key_passed": idempotency_key,
+        "user_id": current_user.id,
+        "symbol": payload.symbol,
+        "side": payload.side,
+        "qty": payload.qty,
+    })
     cached = consume_idempotent_response(
         db,
         user_id=current_user.id,
