@@ -71,9 +71,12 @@ class IntentConsumptionStore:
 
         db = SessionLocal()
         try:
+
+            from sqlalchemy import text
+
             row = db.execute(
-                "SELECT execution_ref FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
-                (intent_id, consumer)
+                text("SELECT execution_ref FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+                {"intent_id": intent_id, "consumer": consumer}
             ).fetchone()
 
             if row is not None:
