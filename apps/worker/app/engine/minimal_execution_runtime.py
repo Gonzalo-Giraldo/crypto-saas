@@ -192,7 +192,7 @@ class IntentConsumptionStore:
 
     def _build_consumer(self, user_id, broker, account_id=None):
         acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
-        return f"{user_id}::{broker}::{acc}"
+        return f"{user_id}:{broker}:{acc}"
 import os
 import json
 class ExecutionResult:
@@ -337,7 +337,7 @@ class MinimalExecutionRuntime:
                 side=side,
                 quantity=quantity,
                 order_ref=order_ref,
-            )
+            )        
         if not isinstance(quantity, (int, float)) or quantity <= 0:
             return self._reject(
                 stage="input_validation",
@@ -347,18 +347,7 @@ class MinimalExecutionRuntime:
                 side=side,
                 quantity=quantity,
                 order_ref=order_ref,
-            )
-        side_norm = str(side).upper()
-        if side_norm not in ("BUY", "SELL"):
-            return self._reject(
-                stage="input_validation",
-                reason=f"unsupported side: {side}",
-                broker=broker,
-                symbol=symbol,
-                side=side,
-                quantity=quantity,
-                order_ref=order_ref,
-            )
+            )        
         # Risk check
         intent = RiskIntent(
             strategy_id=strategy_id,

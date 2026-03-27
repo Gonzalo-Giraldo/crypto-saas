@@ -914,20 +914,21 @@ def execute_ibkr_test_order_for_user(
         # Fix mínimo: actualizar correlación intent -> execution en intent_consumptions
         if intent_key:
             consumer = _build_consumer(user_id, "IBKR", account_id)
-            db.execute(
+            result = db.execute(
                 text("""
                     UPDATE intent_consumptions
-                    SET execution_ref = :order_ref, execution_id_type = :execution_id_type
+                    SET execution_ref = :order_ref
                     WHERE intent_id = :intent_id AND consumer = :consumer
                 """),
                 {
                     "order_ref": order_ref,
-                    "execution_id_type": "client_order_id",
                     "intent_id": str(intent_key),
                     "consumer": consumer,
                 }
             )
             db.commit()
+            if result.rowcount != 1:
+                print({"event": "ibkr_update_intent_consumptions_rowcount_mismatch", "rowcount": result.rowcount, "intent_id": intent_key, "consumer": consumer})
 
         print({
             "event": "ibkr_test_order_return_sent_true",
