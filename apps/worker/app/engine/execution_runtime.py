@@ -910,9 +910,24 @@ def execute_ibkr_test_order_for_user(
         )
         db.commit()
 
-        # Adjuntar correlación intent -> execution si intent_key existe
-        # if intent_key:  # Eliminado: IntentConsumptionStore no es necesario aquí
-        pass
+
+        # Fix mínimo: actualizar correlación intent -> execution en intent_consumptions
+        if intent_key:
+            consumer = _build_consumer(user_id, "IBKR", account_id)
+            db.execute(
+                text("""
+                    UPDATE intent_consumptions
+                    SET execution_ref = :order_ref, execution_id_type = :execution_id_type
+                    WHERE intent_id = :intent_id AND consumer = :consumer
+                """),
+                {
+                    "order_ref": order_ref,
+                    "execution_id_type": "client_order_id",
+                    "intent_id": str(intent_key),
+                    "consumer": consumer,
+                }
+            )
+            db.commit()
 
         print({
             "event": "ibkr_test_order_return_sent_true",

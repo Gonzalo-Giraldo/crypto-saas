@@ -57,39 +57,63 @@ class IntentConsumptionStore:
                 entry['market'] = v['market']
             result.append(entry)
         return result
+
     def get_consumption_record(self, user_id, broker, intent_key, account_id=None):
         """
         Consulta read-only de consumo de intent_key por contexto.
-        Devuelve dict con campos mínimos y estado encontrado/no encontrado, incluyendo symbol y market si existen.
+        Devuelve dict con campos mínimos y estado encontrado/no encontrado.
+        Lee desde DB, no desde JSON local.
         """
-        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
-        record = self._consumption_store.get(key)
-        if record is not None:
-            result = {
-                "found": True,
+        from apps.api.app.db.session import SessionLocal
+
+        intent_id = str(intent_key)
+        consumer = self._build_consumer(user_id, broker, account_id)
+
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                "SELECT execution_ref, execution_id_type, symbol, market FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
+                (intent_id, consumer)
+            ).fetchone()
+
+            if row is not None:
+                execution_ref, execution_id_type, symbol, market = row
+
+                result = {
+                    "found": True,
+                    "intent_key": intent_key,
+                    "user_id": user_id,
+                    "broker": broker,
+                    "account_id": account_id if account_id is not None else "no-account",
+                    "consumed_at": None,
+                }
+
+                if execution_ref:
+                    result["broker_execution_id"] = execution_ref
+
+                if execution_id_type:
+                    result["broker_execution_id_type"] = execution_id_type
+
+                if symbol:
+                    result["symbol"] = symbol
+
+                if market:
+                    result["market"] = market
+
+                return result
+
+            return {
+                "found": False,
                 "intent_key": intent_key,
                 "user_id": user_id,
                 "broker": broker,
                 "account_id": account_id if account_id is not None else "no-account",
-                "consumed_at": record.get("consumed_at") if "consumed_at" in record else None,
+                "consumed_at": None,
             }
-            if "broker_execution_id" in record:
-                result["broker_execution_id"] = record["broker_execution_id"]
-            if "broker_execution_id_type" in record:
-                result["broker_execution_id_type"] = record["broker_execution_id_type"]
-            if "symbol" in record:
-                result["symbol"] = record["symbol"]
-            if "market" in record:
-                result["market"] = record["market"]
-            return result
-        return {
-            "found": False,
-            "intent_key": intent_key,
-            "user_id": user_id,
-            "broker": broker,
-            "account_id": account_id if account_id is not None else "no-account",
-            "consumed_at": None,
-        }
+
+        finally:
+            db.close()
+
     """
     Almacenamiento persistente mínimo para consumo de intent_key por contexto.
     Reutiliza el patrón de idempotencia (archivo json en disco).
@@ -137,20 +161,38 @@ class IntentConsumptionStore:
         except Exception:
             pass
 
+
     def has_consumed(self, user_id, broker, intent_key, account_id=None):
-        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
-        return key in self._consumption_store
+        from apps.api.app.db.session import SessionLocal
+        intent_id = str(intent_key)
+        consumer = self._build_consumer(user_id, broker, account_id)
+        db = SessionLocal()
+        try:
+            result = db.execute(
+                "SELECT 1 FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
+                (intent_id, consumer)
+            ).fetchone()
+            return result is not None
+        finally:
+            db.close()
 
     def register_consumption(self, user_id, broker, intent_key, account_id=None, symbol=None, market=None):
-        import datetime
-        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
-        consumed_at = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z'
-        self._consumption_store[key] = {"consumed": True, "consumed_at": consumed_at}
-        if symbol is not None:
-            self._consumption_store[key]["symbol"] = symbol
-        if market is not None:
-            self._consumption_store[key]["market"] = market
-        self._save_store()
+        from apps.api.app.db.session import SessionLocal
+        intent_id = str(intent_key)
+        consumer = self._build_consumer(user_id, broker, account_id)
+        db = SessionLocal()
+        try:
+            db.execute(
+                "INSERT INTO intent_consumptions (intent_id, consumer) VALUES (%s, %s) ON CONFLICT (intent_id, consumer) DO NOTHING",
+                (intent_id, consumer)
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def _build_consumer(self, user_id, broker, account_id=None):
+        acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
+        return f"{user_id}::{broker}::{acc}"
 import os
 import json
 class ExecutionResult:
