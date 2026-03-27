@@ -72,12 +72,12 @@ class IntentConsumptionStore:
         db = SessionLocal()
         try:
             row = db.execute(
-                "SELECT execution_ref, execution_id_type, symbol, market FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
+                "SELECT execution_ref FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
                 (intent_id, consumer)
             ).fetchone()
 
             if row is not None:
-                execution_ref, execution_id_type, symbol, market = row
+                execution_ref = row[0]
 
                 result = {
                     "found": True,
@@ -90,15 +90,6 @@ class IntentConsumptionStore:
 
                 if execution_ref:
                     result["broker_execution_id"] = execution_ref
-
-                if execution_id_type:
-                    result["broker_execution_id_type"] = execution_id_type
-
-                if symbol:
-                    result["symbol"] = symbol
-
-                if market:
-                    result["market"] = market
 
                 return result
 
