@@ -112,6 +112,7 @@ import re
 from decimal import Decimal
 
 from fastapi import HTTPException, status
+from sqlalchemy import text
 
 from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
@@ -402,13 +403,13 @@ def execute_binance_test_order_for_user(
             consumer = _build_consumer(user_id, "BINANCE", account_id)
             # Check if already consumed
             result = db.execute(
-                "SELECT 1 FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
-                (intent_id, consumer)
+                text("SELECT 1 FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+                {"intent_id": intent_id, "consumer": consumer}
             ).fetchone()
             if result is None:
                 db.execute(
-                    "INSERT INTO intent_consumptions (intent_id, consumer) VALUES (%s, %s) ON CONFLICT (intent_id, consumer) DO NOTHING",
-                    (intent_id, consumer)
+                    text("INSERT INTO intent_consumptions (intent_id, consumer) VALUES (:intent_id, :consumer) ON CONFLICT (intent_id, consumer) DO NOTHING"),
+                    {"intent_id": intent_id, "consumer": consumer}
                 )
                 db.commit()
         try:
@@ -771,8 +772,8 @@ def execute_ibkr_test_order_for_user(
             })
             # Check if already consumed
             result = db.execute(
-                "SELECT 1 FROM intent_consumptions WHERE intent_id = %s AND consumer = %s LIMIT 1",
-                (intent_id, consumer)
+                text("SELECT 1 FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+                {"intent_id": intent_id, "consumer": consumer}
             ).fetchone()
             print({
                 "event": "ibkr_test_order_intent_consumption_select_result",
@@ -814,8 +815,8 @@ def execute_ibkr_test_order_for_user(
                 "consumer": consumer,
             })
             db.execute(
-                "INSERT INTO intent_consumptions (intent_id, consumer) VALUES (%s, %s) ON CONFLICT (intent_id, consumer) DO NOTHING",
-                (intent_id, consumer)
+                text("INSERT INTO intent_consumptions (intent_id, consumer) VALUES (:intent_id, :consumer) ON CONFLICT (intent_id, consumer) DO NOTHING"),
+                {"intent_id": intent_id, "consumer": consumer}
             )
             db.commit()
             print({
