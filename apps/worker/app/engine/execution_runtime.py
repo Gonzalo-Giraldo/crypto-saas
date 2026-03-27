@@ -1,3 +1,29 @@
+import hashlib
+import hmac
+import time
+import uuid
+import requests
+import re
+from decimal import Decimal
+            
+from fastapi import HTTPException, status
+from sqlalchemy import text
+                
+from apps.api.app.core.config import settings
+from apps.api.app.db.session import SessionLocal
+from apps.api.app.services.audit import log_audit_event
+from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+from apps.worker.app.engine import broker_registry
+from apps.worker.app.engine.binance_client import (
+    send_test_order,
+    get_account_status,
+    prepare_binance_market_order_quantity,
+    query_order_status,
+)
+from apps.worker.app.engine.ibkr_client import _build_order_ref, send_ibkr_test_order, get_ibkr_account_status
+
+
 def cancel_broker_order(
     *,
     exchange: str,
@@ -103,30 +129,6 @@ def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, mar
         )
     finally:
         db.close()
-import hashlib
-import hmac
-import time
-import uuid
-import requests
-import re
-from decimal import Decimal
-
-from fastapi import HTTPException, status
-from sqlalchemy import text
-
-from apps.api.app.core.config import settings
-from apps.api.app.db.session import SessionLocal
-from apps.api.app.services.audit import log_audit_event
-from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
-from apps.worker.app.engine import broker_registry
-from apps.worker.app.engine.binance_client import (
-    send_test_order,
-    get_account_status,
-    prepare_binance_market_order_quantity,
-    query_order_status,
-)
-from apps.worker.app.engine.ibkr_client import _build_order_ref, send_ibkr_test_order, get_ibkr_account_status
-
 
 def _mask_api_key(value: str) -> str:
     if len(value) <= 6:
@@ -436,8 +438,20 @@ def execute_binance_test_order_for_user(
                 market=market,
             )
             # Attach broker_execution_id and broker_execution_id_type to the intent consumption record if intent_key is present
+
             if intent_key:
-                from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+                store = IntentConsumptionStore()
+                store.attach_execution(
+                    user_id=user_id,
+                    broker="IBKR",
+                    intent_key=intent_key,
+                    account_id=account_id,
+                    execution_id=order_ref,
+                    execution_id_type="client_order_id",
+                    symbol=symbol,
+                ) 
+
+            if intent_key:
                 store = IntentConsumptionStore()
                 store.attach_execution(
                     user_id=user_id,
@@ -449,6 +463,7 @@ def execute_binance_test_order_for_user(
                     symbol=symbol,
                     market=market,
                 )
+
         except Exception as exc:
             details = {
                 "symbol": symbol,
@@ -896,17 +911,8 @@ def execute_ibkr_test_order_for_user(
         db.commit()
 
         # Adjuntar correlación intent -> execution si intent_key existe
-        if intent_key:
-            store = IntentConsumptionStore()
-            store.attach_execution(
-                user_id=user_id,
-                broker="IBKR",
-                intent_key=intent_key,
-                account_id=account_id,
-                execution_id=order_ref,
-                execution_id_type="client_order_id",
-                symbol=symbol,
-            )
+        # if intent_key:  # Eliminado: IntentConsumptionStore no es necesario aquí
+        pass
 
         print({
             "event": "ibkr_test_order_return_sent_true",
