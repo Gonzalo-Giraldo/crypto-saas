@@ -62,7 +62,7 @@ class IntentConsumptionStore:
         """
         Consulta read-only de consumo de intent_key por contexto.
         Devuelve dict con campos mínimos y estado encontrado/no encontrado.
-        Lee desde DB, no desde JSON local.
+        Lee desde DB, no desde JSON local. Devuelve symbol si existe.
         """
         from apps.api.app.db.session import SessionLocal
 
@@ -71,7 +71,6 @@ class IntentConsumptionStore:
 
         db = SessionLocal()
         try:
-
             from sqlalchemy import text
             row = db.execute(
                 text("""
@@ -93,12 +92,10 @@ class IntentConsumptionStore:
                     "account_id": account_id if account_id is not None else "no-account",
                     "consumed_at": None,
                 }
-
                 if execution_ref:
                     result["broker_execution_id"] = execution_ref
                 if symbol:
                     result["symbol"] = symbol
-
                 return result
 
             return {

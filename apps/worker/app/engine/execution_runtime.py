@@ -917,11 +917,12 @@ def execute_ibkr_test_order_for_user(
             result = db.execute(
                 text("""
                     UPDATE intent_consumptions
-                    SET execution_ref = :order_ref
+                    SET execution_ref = :order_ref, symbol = :symbol
                     WHERE intent_id = :intent_id AND consumer = :consumer
                 """),
                 {
                     "order_ref": order_ref,
+                    "symbol": symbol,
                     "intent_id": str(intent_key),
                     "consumer": consumer,
                 }
