@@ -82,7 +82,16 @@ def get_ibkr_reconciliation_source(
         raise ValueError(f"Modo de reconciliación IBKR no soportado: {mode}")
 
 # --- Lógica de reconciliación IBKR ---
-def reconcile_ibkr_fills(fills):
+def reconcile_ibkr_fills(fills, expected_qty=None):
+    """
+    Reconciles IBKR fills and determines status based on expected_qty:
+    - If no fills: status = not_found
+    - If expected_qty is None: status = filled if total_qty > 0 else not_found
+    - If expected_qty is set:
+        - status = not_found if total_qty == 0
+        - status = partial if 0 < total_qty < expected_qty
+        - status = filled if total_qty >= expected_qty
+    """
     if not fills:
         return {
             "status": "not_found",
@@ -91,12 +100,16 @@ def reconcile_ibkr_fills(fills):
             "fills": []
         }
     total_qty = sum(f.qty for f in fills)
-    if total_qty > 0:
-        avg_price = sum(f.qty * f.price for f in fills) / total_qty
-        status = "filled"
+    avg_price = sum(f.qty * f.price for f in fills) / total_qty if total_qty > 0 else None
+    if expected_qty is None:
+        status = "filled" if total_qty > 0 else "not_found"
     else:
-        avg_price = None
-        status = "not_found"
+        if total_qty == 0:
+            status = "not_found"
+        elif total_qty < expected_qty:
+            status = "partial"
+        else:
+            status = "filled"
     return {
         "status": status,
         "total_qty": total_qty,

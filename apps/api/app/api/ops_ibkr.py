@@ -31,6 +31,7 @@ def ibkr_reconcile_endpoint(
     user_id: str = Query(...),
     account_id: str = Query(...),
     mode: str = Query("dummy_db"),
+    expected_qty: float = Query(None),
     db: Session = Depends(get_db),
 ):
     try:
@@ -41,7 +42,7 @@ def ibkr_reconcile_endpoint(
             db=db,
             mode=mode
         )
-        result = reconcile_ibkr_fills(fills)
+        result = reconcile_ibkr_fills(fills, expected_qty=expected_qty)
         return {"success": True, "reconciliation": result}
     except Exception as exc:
         return {"success": False, "error": str(exc)}

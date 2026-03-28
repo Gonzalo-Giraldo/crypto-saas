@@ -344,6 +344,28 @@ class MinimalExecutionRuntime:
                 quantity=quantity,
                 order_ref=order_ref,
             )        
+        # --- Validación y normalización explícita de side ---
+        if not isinstance(side, str):
+            return self._reject(
+                stage="input_validation",
+                reason="side must be a string",
+                broker=broker,
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_ref=order_ref,
+            )
+        side_norm = side.strip().lower()
+        if side_norm not in ("buy", "sell"):
+            return self._reject(
+                stage="input_validation",
+                reason="side must be 'buy' or 'sell' (case-insensitive)",
+                broker=broker,
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_ref=order_ref,
+            )
         # Risk check
         intent = RiskIntent(
             strategy_id=strategy_id,
