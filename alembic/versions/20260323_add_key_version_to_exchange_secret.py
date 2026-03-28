@@ -2,7 +2,6 @@
 Revision ID: 20260323_add_key_version_to_exchange_secret
 Revises: 20260322_create_binance_fills_table
 Create Date: 2026-03-23
-
 Adds key_version column to exchange_secret table.
 """
 from alembic import op

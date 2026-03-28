@@ -117,7 +117,7 @@ def cancel_order(*, api_key: str, api_secret: str, symbol: str, client_order_id:
 
 def _post_bridge(url: str, *, payload_raw: str, headers: dict, timeout: int = 12) -> requests.Response:
     try:
-        return requests.post(url, data=payload_raw, headers=headers, timeout=timeout)
+        return requests.post(url, json=json.loads(payload_raw), headers=headers, timeout=timeout)
     except requests.RequestException:
         raise RuntimeError("ibkr_upstream_unreachable")
 

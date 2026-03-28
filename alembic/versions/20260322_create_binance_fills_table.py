@@ -2,6 +2,7 @@
 Revision ID: 20260322_create_binance_fills_table
 Revises: 
 Create Date: 2026-03-22
+Create binance_fills table
 """
 from alembic import op
 import sqlalchemy as sa
