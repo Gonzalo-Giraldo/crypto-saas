@@ -181,6 +181,9 @@ def _build_order_ref(
         **kwargs,
     )
 
+def _format_bridge_error(status_code: int, body: str) -> str:
+    return f"ibkr_bridge_error: status={status_code} body={body}"
+
 def send_ibkr_test_order(
     api_key: str,
     api_secret: str,

@@ -854,6 +854,103 @@ def execute_ibkr_test_order_for_user(
             )
             db.commit()
 
+
+        # --- IBKR SELL GUARD: Prevent over-selling ---
+        if str(side).upper() == "SELL":
+            # 1. Get reconciled position for user/account/symbol
+            reconciled_position_qty = 0.0
+            try:
+                acct_status = get_ibkr_account_status_for_user(user_id)
+                # Find position for this symbol (case-insensitive match)
+                for pos in acct_status.get("positions", []):
+                    if str(pos.get("symbol", "")).upper() == str(symbol).upper():
+                        reconciled_position_qty = float(pos.get("qty") or 0.0)
+                        break
+            except Exception as exc:
+                log_audit_event(
+                    db,
+                    action="execution.ibkr.sell_guard.error",
+                    user_id=user_id,
+                    entity_type="execution",
+                    details={
+                        "symbol": symbol,
+                        "side": side,
+                        "qty": qty,
+                        "error": f"account_status_error: {exc}",
+                    },
+                )
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"IBKR sell guard failed to fetch account status: {exc}",
+                )
+
+            # 2. Query open SELL dossiers for this user/account/symbol
+            # Only consider dossiers with side=SELL and open/partial/unknown lifecycle status
+            reserved_sell_qty_open = 0.0
+            open_statuses = (
+                "open",
+                "partial_active",
+                "partial_stale",
+                "unknown_broker_state",
+            )
+            # Query intent_consumptions for open SELLs
+            rows = db.execute(
+                text("""
+                    SELECT expected_qty, filled_qty, remaining_qty, lifecycle_status
+                    FROM intent_consumptions
+                    WHERE user_id = :user_id
+                      AND broker = 'IBKR'
+                      AND symbol = :symbol
+                      AND side = 'SELL'
+                      AND account_id IS NOT DISTINCT FROM :account_id
+                      AND lifecycle_status IN :open_statuses
+                """),
+                {
+                    "user_id": user_id,
+                    "symbol": str(symbol).upper(),
+                    "account_id": account_id if account_id is not None else None,
+                    "open_statuses": tuple(open_statuses),
+                },
+            ).fetchall()
+            for row in rows:
+                # Use remaining_qty if present, else fallback to expected_qty - filled_qty, else expected_qty
+                rq = row[2] if row[2] is not None else (
+                    (row[0] or 0.0) - (row[1] or 0.0) if row[0] is not None and row[1] is not None else (row[0] or 0.0)
+                )
+                reserved_sell_qty_open += float(rq or 0.0)
+
+            available_sell_qty = max(reconciled_position_qty - reserved_sell_qty_open, 0.0)
+            if float(qty) > available_sell_qty:
+                log_audit_event(
+                    db,
+                    action="execution.ibkr.sell_guard.blocked",
+                    user_id=user_id,
+                    entity_type="execution",
+                    details={
+                        "symbol": symbol,
+                        "side": side,
+                        "qty": qty,
+                        "reconciled_position_qty": reconciled_position_qty,
+                        "reserved_sell_qty_open": reserved_sell_qty_open,
+                        "available_sell_qty": available_sell_qty,
+                        "reason": "SELL qty exceeds available position after reserving open SELLs",
+                    },
+                )
+                db.commit()
+                return {
+                    "exchange": "IBKR",
+                    "mode": "blocked_sell_guard",
+                    "symbol": symbol.upper(),
+                    "side": side.upper(),
+                    "qty": qty,
+                    "sent": False,
+                    "reason": "SELL qty exceeds available position after reserving open SELLs",
+                    "reconciled_position_qty": reconciled_position_qty,
+                    "reserved_sell_qty_open": reserved_sell_qty_open,
+                    "available_sell_qty": available_sell_qty,
+                }
+
         order_ref = _build_order_ref(
             api_key=creds["api_key"],
             intent_key=intent_key,
@@ -936,6 +1033,31 @@ def execute_ibkr_test_order_for_user(
             "sent": True,
             "order_ref": order_ref,
         })
+        # --- Integración de reconciliación IBKR ---
+        from apps.api.app.services.ibkr_reconciliation import get_ibkr_reconciliation_source, reconcile_ibkr_fills
+        fills = get_ibkr_reconciliation_source(
+            execution_ref=order_ref,
+            user_id=user_id,
+            account_id=account_id,
+            db=db,
+            mode="dummy_db",  # O configurable si se requiere real
+        )
+        reconciliation = reconcile_ibkr_fills(fills, expected_qty=qty)
+        reconciliation_status = reconciliation["status"] 
+        total_qty = reconciliation.get("total_qty", 0)
+        expected_qty = qty
+        remaining_qty = None
+        if expected_qty is not None:
+            remaining_qty = max(0, expected_qty - total_qty)
+        execution_complete = reconciliation_status == "filled"
+        requires_manual_review = reconciliation_status == "partial"        
+
+        # Add broker_trade_time: earliest fill timestamp, or None if no fills
+        broker_trade_time = None
+        if fills and hasattr(fills[0], "timestamp"):
+            # Use the earliest fill's timestamp (trade.time from IBKR)
+            broker_trade_time = fills[0].timestamp
+
         return {
             "exchange": "IBKR",
             "mode": mode,
@@ -944,6 +1066,14 @@ def execute_ibkr_test_order_for_user(
             "qty": qty,
             "sent": True,
             "order_ref": order_ref,
+            "reconciliation_status": reconciliation_status,            
+            "execution_complete": execution_complete,
+            "expected_qty": expected_qty,
+            "filled_qty": total_qty,
+            "remaining_qty": remaining_qty,
+            "requires_manual_review": requires_manual_review,
+            "broker_trade_time": broker_trade_time,  # Sourced from first fill's trade.time (fill event, not order ack)
+            "reconciliation": reconciliation,
         }
     finally:
         db.close()
