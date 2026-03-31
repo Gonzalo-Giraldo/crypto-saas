@@ -813,6 +813,7 @@ def execute_ibkr_test_order_for_user(
                     },
                 )
                 db.commit()
+                order_ref = ""
                 return {
                     "exchange": "IBKR",
                     "mode": "blocked_duplicate_intent_key",
@@ -820,7 +821,7 @@ def execute_ibkr_test_order_for_user(
                     "side": side.upper(),
                     "qty": qty,
                     "sent": False,
-                    "order_ref": str(order_ref or ""),
+                    "order_ref": str(order_ref),
                     "reason": "intent_key already consumed for this context"
                 }
             # Registrar consumo
@@ -1237,6 +1238,15 @@ def get_ibkr_account_status_for_user(user_id: str):
                 api_key=creds["api_key"],
                 api_secret=creds["api_secret"],
             )
+            # VALIDACIÓN CRÍTICA: no permitir estado incompleto
+            if raw.get("mode") == "bridge":
+                if "positions" not in raw:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="ibkr_runtime_incomplete: positions not available",
+                    )
+        except HTTPException:
+            raise
         except Exception as exc:
             err_detail = _sanitize_ibkr_error(exc)
             log_audit_event(

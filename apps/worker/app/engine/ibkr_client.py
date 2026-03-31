@@ -238,7 +238,6 @@ def send_ibkr_test_order(
         "mode": "ibkr_simulated_execution"
     }
 
-
 def get_ibkr_account_status(
     api_key: str,
     api_secret: str,
@@ -249,35 +248,33 @@ def get_ibkr_account_status(
         raise RuntimeError("ibkr_input_error field=api_secret reason=too_short")
 
     if settings.IBKR_BRIDGE_BASE_URL:
-        payload = {"mode": "paper_status"}
-        payload_raw = json.dumps(payload, separators=(",", ":"))
-        signature = hmac.new(
-            api_secret.encode("utf-8"),
-            payload_raw.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-        headers = {
-            "X-API-KEY": api_key,
-            "X-SIGNATURE": signature,
-            "Content-Type": "application/json",
-        }
         url = f"{settings.IBKR_BRIDGE_BASE_URL.rstrip('/')}/ibkr/paper/account-status"
-        response = _post_bridge(url, payload_raw=payload_raw, headers=headers, timeout=12)
-        if response.status_code >= 400:
-            raise RuntimeError(_format_bridge_error(response.status_code, response.text))
-        body = response.json()
-        body["mode"] = "bridge"
-        return body
 
-    # Safe fallback while bridge is not configured.
+        try:
+            response = requests.get(url, timeout=5)
+
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"ibkr_bridge_account_status_error {response.status_code}: {response.text}"
+                )
+
+            body = response.json()
+
+            # VALIDACIÓN CRÍTICA → no mentir sobre estado
+            if not body.get("success") or not body.get("connected"):
+                raise RuntimeError(
+                    f"ibkr_not_ready: {body.get('error') or 'not_connected'}"
+                )
+
+            body["mode"] = "bridge"
+            return body
+
+        except requests.RequestException as e:
+            raise RuntimeError(f"ibkr_bridge_unreachable: {type(e).__name__}: {e}")
+
+    # Fallback explícito (NO operativo real)
     return {
         "mode": "simulated",
-        "account_id": "paper-simulated",
-        "currency": "USD",
-        "can_trade": True,
-        "cash": None,
-        "buying_power": None,
-        "net_liquidation": None,
-        "positions": [],
-        "open_orders": [],
+        "connected": False,
+        "error": "ibkr_bridge_not_configured",
     }
