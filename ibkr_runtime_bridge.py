@@ -113,3 +113,18 @@ def ibkr_account_status():
             "error": "ibkr_runtime_not_running",
             "positions": [],
         })
+
+from fastapi import Request
+
+
+@app.post("/ibkr/paper/test-order")
+async def ibkr_test_order(request: Request):
+    return JSONResponse(
+        status_code=501,
+        content={
+            "success": False,
+            "error": "ibkr_test_order_not_implemented",
+            "message": "Bridge connected to runtime but test-order not implemented yet",
+        },
+    )
+
