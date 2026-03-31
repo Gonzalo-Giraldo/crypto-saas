@@ -24,6 +24,7 @@ def _read_runtime_status():
         return {
             "connected": False,
             "error": f"status_file_parse_error: {type(e).__name__}: {e}",
+            "positions": [],
         }
 
 
@@ -71,6 +72,7 @@ def ibkr_account_status():
                 "connected": False,
                 "source": "runtime",
                 "error": "ibkr_runtime_not_running",
+                "positions": [],
             })
 
         if not status_payload:
@@ -79,6 +81,7 @@ def ibkr_account_status():
                 "connected": False,
                 "source": "runtime",
                 "error": "ibkr_runtime_status_missing",
+                "positions": [],
             })
 
         if not status_payload.get("connected", False):
@@ -88,6 +91,7 @@ def ibkr_account_status():
                 "source": "runtime",
                 "client_id": status_payload.get("client_id"),
                 "error": status_payload.get("error") or "ibkr_runtime_not_connected",
+                "positions": status_payload.get("positions") or [],
             })
 
         return JSONResponse(status_code=200, content={
@@ -98,6 +102,7 @@ def ibkr_account_status():
             "host": status_payload.get("host"),
             "port": status_payload.get("port"),
             "updated_at": status_payload.get("updated_at"),
+            "positions": status_payload.get("positions") or [],
         })
 
     except subprocess.CalledProcessError:
@@ -106,4 +111,5 @@ def ibkr_account_status():
             "connected": False,
             "source": "runtime",
             "error": "ibkr_runtime_not_running",
+            "positions": [],
         })
