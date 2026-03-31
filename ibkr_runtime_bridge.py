@@ -1,6 +1,10 @@
+import json
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 import subprocess
+
+STATUS_FILE = Path("/tmp/ibkr_runtime_status.json")
 
 app = FastAPI(title="IBKR Runtime Bridge", docs_url="/docs", openapi_url="/openapi.json")
 
@@ -19,10 +23,23 @@ def ibkr_status():
 
         pids = [line.strip() for line in result.splitlines() if line.strip()]
 
+        runtime_running = len(pids) > 0
+
+        status_payload = None
+        if STATUS_FILE.exists():
+            try:
+                status_payload = json.loads(STATUS_FILE.read_text())
+            except Exception as e:
+                status_payload = {
+                    "connected": False,
+                    "error": f"status_file_parse_error: {type(e).__name__}: {e}",
+                }
+
         return JSONResponse(status_code=200, content={
-            "runtime_running": True,
+            "runtime_running": runtime_running,
             "pids": pids,
             "process_count": len(pids),
+            "runtime_status": status_payload,
         })
 
     except subprocess.CalledProcessError:
@@ -30,4 +47,5 @@ def ibkr_status():
             "runtime_running": False,
             "pids": [],
             "process_count": 0,
+            "runtime_status": None,
         })
