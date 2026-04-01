@@ -115,16 +115,115 @@ def ibkr_account_status():
         })
 
 from fastapi import Request
+import os
+import time
+import uuid
+
+COMMAND_FILE = "/tmp/ibkr_runtime_command.json"
+RESULT_FILE = "/tmp/ibkr_runtime_result.json"
+
+
+def atomic_write_json(path: str, data: dict) -> None:
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(data, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def safe_remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
 
 
 @app.post("/ibkr/paper/test-order")
 async def ibkr_test_order(request: Request):
+    try:
+        result = subprocess.check_output(
+            ["pgrep", "-f", "ibkr_persistent_runtime.py"]
+        ).decode().strip()
+        pids = [line.strip() for line in result.splitlines() if line.strip()]
+        runtime_running = len(pids) > 0
+    except subprocess.CalledProcessError:
+        runtime_running = False
+
+    if not runtime_running:
+        return JSONResponse(
+            status_code=503,
+            content={"success": False, "error": "ibkr_runtime_not_running"},
+        )
+
+    status_payload = _read_runtime_status()
+    if not status_payload or not status_payload.get("connected", False):
+        return JSONResponse(
+            status_code=503,
+            content={"success": False, "error": "ibkr_runtime_not_connected"},
+        )
+
+    data = await request.json()
+    symbol = data.get("symbol")
+    side = data.get("side")
+    qty = data.get("qty")
+    order_ref = data.get("order_ref")
+
+    if not symbol or not isinstance(symbol, str):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "invalid_symbol"},
+        )
+
+    if side not in ("BUY", "SELL"):
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "invalid_side"},
+        )
+
+    try:
+        qty_val = float(qty)
+        if qty_val <= 0:
+            raise ValueError()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "invalid_qty"},
+        )
+
+    request_id = str(uuid.uuid4())
+    command = {
+        "request_id": request_id,
+        "symbol": symbol,
+        "side": side,
+        "qty": qty_val,
+    }
+    if order_ref is not None:
+        command["order_ref"] = order_ref
+
+    atomic_write_json(COMMAND_FILE, command)
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if os.path.exists(RESULT_FILE):
+            try:
+                with open(RESULT_FILE, "r") as f:
+                    result_payload = json.load(f)
+            except Exception:
+                time.sleep(0.05)
+                continue
+
+            if result_payload.get("request_id") == request_id:
+                safe_remove(RESULT_FILE)
+                return JSONResponse(status_code=200, content=result_payload)
+
+        time.sleep(0.05)
+
     return JSONResponse(
-        status_code=501,
+        status_code=504,
         content={
             "success": False,
-            "error": "ibkr_test_order_not_implemented",
-            "message": "Bridge connected to runtime but test-order not implemented yet",
+            "error": "timeout_waiting_result",
+            "request_id": request_id,
         },
     )
-
