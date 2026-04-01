@@ -68,11 +68,32 @@ def handle_order(data: dict):
     store = load_store()
 
     if request_id in store:
-        return {
-            "success": False,
-            "error": "duplicate_request_id",
-            "existing": store[request_id],
-        }
+        existing = store[request_id]
+        existing_status = existing.get("status")
+        created_at = float(existing.get("created_at", 0) or 0)
+        age_seconds = time.time() - created_at if created_at else None
+
+        if existing_status in ("completed", "failed", "PendingSubmit"):
+            return {
+                "success": False,
+                "error": "duplicate_request_id",
+                "existing": existing,
+            }
+
+        if existing_status == "in_progress":
+            if age_seconds is not None and age_seconds <= 30:
+                return {
+                    "success": False,
+                    "error": "duplicate_request_id",
+                    "existing": existing,
+                }
+
+            store[request_id] = {
+                **existing,
+                "status": "recovered",
+                "recovered_at": time.time(),
+            }
+            save_store(store)
 
     command = {
         "request_id": request_id,
