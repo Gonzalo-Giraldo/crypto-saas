@@ -131,9 +131,10 @@ def handle_order(data: dict):
 
             if result_payload.get("request_id") == request_id:
                 store[request_id] = {
-                    "status": "completed",
-                    "updated_at": time.time(),
                     **result_payload,
+                    "status": "completed",
+                    "broker_status": result_payload.get("status"),
+                    "updated_at": time.time(),
                 }
                 save_store(store)
 
