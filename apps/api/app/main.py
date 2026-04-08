@@ -4,8 +4,8 @@ from apps.api.app.routes.auth import router as auth_router
 from contextlib import asynccontextmanager
 from apps.api.app.api.ops_ibkr import router as ops_ibkr_router
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
 
  
 
@@ -56,6 +56,14 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="crypto-saas API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5500"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 def health():

@@ -1,0 +1,175 @@
+/* Responsibility: Standardized styles for broker-connectivity module aligned with testing-center. */
+
+.broker-connectivity {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.broker-connectivity-header {
+  padding: 20px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+  border: 1px solid #d9e1e8;
+  border-radius: 18px;
+}
+
+.broker-connectivity-header h3 {
+  margin: 0;
+  font-size: 1.35rem;
+  color: #16202a;
+}
+
+.broker-connectivity-header p {
+  margin: 8px 0 0;
+  max-width: 720px;
+  color: #5f6c7b;
+  line-height: 1.5;
+}
+
+.broker-connectivity-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.broker-panel {
+  padding: 20px;
+  background: #ffffff;
+  border: 1px solid #d9e1e8;
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+}
+
+.broker-card-label {
+  display: inline-block;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #e8eef5;
+  color: #1f3a5f;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.broker-panel h4 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+  color: #16202a;
+}
+
+.broker-panel-copy {
+  margin: 0 0 10px;
+  color: #5f6c7b;
+  line-height: 1.5;
+}
+
+.broker-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 18px 0 16px;
+}
+
+.broker-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #16202a;
+}
+
+.broker-select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #cfd8e3;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #16202a;
+  font: inherit;
+}
+
+.broker-actions {
+  margin-bottom: 20px;
+}
+
+.broker-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 160px;
+  padding: 12px 16px;
+  border: 1px solid #1f3a5f;
+  border-radius: 12px;
+  background: #1f3a5f;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.broker-button:hover {
+  transform: translateY(-1px);
+}
+
+.broker-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+  transform: none;
+}
+
+.broker-execution-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px solid #d9e1e8;
+  border-radius: 14px;
+}
+
+.broker-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.broker-summary-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #5f6c7b;
+}
+
+.broker-summary-value {
+  color: #16202a;
+  word-break: break-word;
+}
+
+.broker-response-console {
+  min-height: 320px;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.broker-response-console.is-error {
+  border-color: #7f1d1d;
+  color: #fecaca;
+}
+
+@media (max-width: 900px) {
+  .broker-connectivity-layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,56 @@
+<section class="testing-center" aria-label="Testing Center module">
+  <!-- Responsibility: Minimal real GET test runner UI for selected backend health endpoints -->
+  <header class="testing-center-header">
+    <div>
+      <h3>Testing Center</h3>
+      <p>Run controlled GET health checks against the live backend and inspect the response.</p>
+    </div>
+  </header>
+
+  <div class="testing-center-layout">
+    <section class="testing-panel testing-panel-control" aria-label="Test control panel">
+      <span class="testing-card-label">Control</span>
+      <h4>Execution Panel</h4>
+
+      <div class="testing-form-row">
+        <label for="test-select" class="testing-label">Available Test</label>
+        <select id="test-select" class="testing-select">
+          <option value="health">Health → /health</option>
+          <option value="healthz">Healthz → /healthz</option>
+          <option value="ops-health">Ops Health → /ops/health</option>
+        </select>
+      </div>
+
+      <div class="testing-actions">
+        <button id="run-test-button" type="button" class="testing-button">Run GET Test</button>
+      </div>
+
+      <div id="execution-summary" class="execution-summary" aria-live="polite">
+        <div class="summary-row">
+          <span class="summary-label">Test</span>
+          <span id="summary-test" class="summary-value">Not executed</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Endpoint</span>
+          <span id="summary-endpoint" class="summary-value">—</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Status</span>
+          <span id="summary-status" class="summary-value">—</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Duration</span>
+          <span id="summary-duration" class="summary-value">—</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="testing-panel testing-panel-result" aria-label="Execution result panel">
+      <span class="testing-card-label">Response</span>
+      <h4>Response Body</h4>
+      <p class="testing-panel-copy">The raw response body or execution error is shown below.</p>
+
+      <pre id="response-output" class="response-console">No execution yet.</pre>
+    </section>
+  </div>
+</section>

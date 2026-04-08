@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control Center</title>
+  <!-- Responsibility: Shell visual mínimo del módulo principal y contenedor del módulo activo -->
+  <link rel="stylesheet" href="../css/control-center.css">
+  <link rel="stylesheet" href="../../modules/testing-center/css/testing-center.css">
+  <link rel="stylesheet" href="../../modules/broker-connectivity/css/broker-connectivity.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark">CC</div>
+        <div class="brand-copy">
+          <h1>Control Center</h1>
+          <p>Operational frontend shell</p>
+        </div>
+      </div>
+
+      <div class="session-card" aria-label="Mock session information">
+        <span class="session-status"></span>
+        <div class="session-copy">
+          <strong>Mock Session</strong>
+          <span>operator.local</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar" aria-label="Module navigation">
+        <div class="sidebar-header">
+          <span class="sidebar-label">Modules</span>
+        </div>
+
+        <nav class="module-nav">
+          <button
+            type="button"
+            class="nav-item is-active"
+            data-module="testing-center"
+            aria-current="page">
+            Testing Center
+          </button>
+        </nav>
+      </aside>
+
+      <main class="content-area" aria-label="Active module content">
+        <section class="content-panel">
+          <div class="content-panel-header">
+            <span class="eyebrow">Active Module</span>
+            <h2 id="active-module-title">Testing Center</h2>
+          </div>
+
+          <div id="active-module-root" class="module-root"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="../../shared/js/config.js"></script>
+  <script src="../../shared/js/api-client.js"></script>
+  <script src="../../shared/js/request-runner.js"></script>
+  <script src="../../modules/testing-center/js/testing-center.js"></script>
+  <script src="../js/control-center.js"></script>
+  <script src="../../modules/broker-connectivity/js/broker-connectivity.js"></script>
+</body>
+</html>
