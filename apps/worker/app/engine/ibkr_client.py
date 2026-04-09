@@ -192,7 +192,6 @@ def send_ibkr_test_order(
     quantity: float,
     order_ref: str | None = None,
 ) -> dict[str, Any]:
-    # Validación mínima local
     if not api_key or len(str(api_key).strip()) < 8:
         raise RuntimeError("ibkr_input_error: api_key missing or too short")
     if not api_secret or len(str(api_secret).strip()) < 8:
@@ -204,16 +203,17 @@ def send_ibkr_test_order(
     if not str(order_ref or "").strip():
         raise RuntimeError("kernel_dispatch_guard: missing order_ref")
 
-    # Optional external bridge mode for teams that expose an IBKR paper gateway.
+    # --- MODO REAL VIA BRIDGE ---
     if settings.IBKR_BRIDGE_BASE_URL:
         payload = {
-            "symbol": symbol.upper(),
-            "side": side.upper(),
+            "symbol": str(symbol).upper(),
+            "side": str(side).upper(),
             "qty": quantity,
-            "order_ref": order_ref,
-            "mode": "paper_test",
+            "order_ref": str(order_ref),
         }
+
         payload_raw = json.dumps(payload, separators=(",", ":"))
+
         signature = hmac.new(
             api_secret.encode("utf-8"),
             payload_raw.encode("utf-8"),
@@ -225,17 +225,50 @@ def send_ibkr_test_order(
             "X-SIGNATURE": signature,
             "Content-Type": "application/json",
         }
+
         url = f"{settings.IBKR_BRIDGE_BASE_URL.rstrip('/')}/ibkr/paper/test-order"
-        response = _post_bridge(url, payload_raw=payload_raw, headers=headers, timeout=12)
+
+        try:
+            response = _post_bridge(
+                url,
+                payload_raw=payload_raw,
+                headers=headers,
+                timeout=12,
+            )
+        except RuntimeError:
+            raise RuntimeError("ibkr_bridge_unreachable")
+
         if response.status_code >= 400:
             raise RuntimeError(_format_bridge_error(response.status_code, response.text))
-        return {"ok": True, "mode": "bridge", "order_ref": order_ref}
 
-    # Safe fallback: deterministic local simulation (no money movement).
+        try:
+            body = response.json()
+        except ValueError:
+            raise RuntimeError("ibkr_bridge_invalid_json")
+
+        # VALIDACIÓN SEMÁNTICA FUERTE
+        if not isinstance(body, dict):
+            raise RuntimeError("ibkr_bridge_invalid_payload")
+
+        if not body.get("success"):
+            raise RuntimeError(f"ibkr_bridge_rejected: {body}")
+
+        # VALIDACIÓN DE CAMPOS MÍNIMOS
+        if "order_id" not in body and "status" not in body:
+            raise RuntimeError("ibkr_bridge_missing_fields")
+
+        return {
+            "ok": True,
+            "mode": "bridge",
+            "order_ref": order_ref,
+            "bridge_response": body,
+        }
+
+    # --- FALLBACK EXPLÍCITO ---
     return {
         "status": "accepted",
         "order_ref": order_ref,
-        "mode": "ibkr_simulated_execution"
+        "mode": "ibkr_simulated_execution",
     }
 
 def get_ibkr_account_status(
