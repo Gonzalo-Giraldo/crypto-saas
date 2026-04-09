@@ -7463,6 +7463,12 @@ def execution_binance_test_order(
         price_estimate=0.0,
     )
     req_payload = payload.model_dump()
+    if not str(idempotency_key or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="idempotency_key (intent_key) is required for execution",
+        )
+
     cached = consume_idempotent_response(
         db,
         user_id=current_user.id,

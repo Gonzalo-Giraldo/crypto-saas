@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import time
-import uuid
 import requests
 import re
 from decimal import Decimal
@@ -566,7 +565,9 @@ def _build_binance_client_order_id(
         return f"csi{digest[:33]}"
 
     # Legacy behavior outside hardened live auto-pick flow.
-    seed = f"{user_id}|{symbol.upper()}|{side.upper()}|{qty}|{uuid.uuid4().hex[:10]}"
+    if not key:
+        raise RuntimeError("kernel_dispatch_guard: missing intent_key for deterministic client_order_id")
+    seed = f"{user_id}|{symbol.upper()}|{side.upper()}|{qty}|{key}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
     return f"cs{digest}"
 
