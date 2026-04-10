@@ -10,6 +10,7 @@ from apps.api.app.db.session import get_db
 
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+from apps.api.app.services.ibkr_intent_service import generate_internal_ibkr_intent_key
 from apps.worker.app.engine.ibkr_client import query_order_status as ibkr_query_order_status
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -7526,9 +7527,9 @@ def execution_ibkr_test_order(
     req_payload = payload.model_dump()
     # Observabilidad: log estructurado de idempotency_key recibido y valor pasado a execute_ibkr_test_order_for_user
     print({
-        "event": "ibkr_test_order_intent_key_received",
+        "event": "ibkr_direct_test_order_http_idempotency_received",
         "x_idempotency_key": idempotency_key,
-        "intent_key_passed": idempotency_key,
+        "x_idempotency_key_present": bool(str(idempotency_key or "").strip()),
         "user_id": current_user.id,
         "symbol": payload.symbol,
         "side": payload.side,
@@ -7544,12 +7545,25 @@ def execution_ibkr_test_order(
     if cached is not None:
         return cached
 
+    internal_intent_key = generate_internal_ibkr_intent_key(
+        user_id=current_user.id,
+        account_id=None,
+        symbol=payload.symbol,
+        side=payload.side,
+    )
+
+    print({
+        "event": "ibkr_direct_test_order_internal_intent_key_generated",
+        "x_idempotency_key_present": bool(str(idempotency_key or "").strip()),
+        "internal_intent_key": internal_intent_key,
+    })
+
     result = execute_ibkr_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
         side=payload.side,
         qty=payload.qty,
-        intent_key=idempotency_key,
+        intent_key=internal_intent_key,
     )
     store_idempotent_response(
         db,
