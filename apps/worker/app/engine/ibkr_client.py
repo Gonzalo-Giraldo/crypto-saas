@@ -284,7 +284,7 @@ def get_ibkr_account_status(
         url = f"{settings.IBKR_BRIDGE_BASE_URL.rstrip('/')}/ibkr/paper/account-status"
 
         try:
-            response = requests.get(url, timeout=5)
+            response = requests.post(url, json={}, timeout=5)
 
             if response.status_code != 200:
                 raise RuntimeError(
@@ -293,11 +293,18 @@ def get_ibkr_account_status(
 
             body = response.json()
 
-            # VALIDACIÓN CRÍTICA → no mentir sobre estado
-            if not body.get("success") or not body.get("connected"):
+            # VALIDACIÓN CRÍTICA → aceptar contrato real del bridge
+            if not body.get("success"):
                 raise RuntimeError(
-                    f"ibkr_not_ready: {body.get('error') or 'not_connected'}"
+                    f"ibkr_not_ready: {body.get('error') or 'not_ready'}"
                 )
+
+            # Normalización mínima para alinear contrato con runtime
+            body.setdefault("positions", [])
+            body.setdefault("open_orders", [])
+            body.setdefault("net_liquidation", body.get("balance"))
+            body.setdefault("cash", body.get("balance"))
+            body.setdefault("buying_power", body.get("balance"))
 
             body["mode"] = "bridge"
             return body
