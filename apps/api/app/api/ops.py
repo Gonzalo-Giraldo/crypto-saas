@@ -70,6 +70,7 @@ def get_intent_ibkr_status(
     return {
         "success": True,
         "broker_execution_id": broker_execution_id,
+        "order_ref": broker_execution_id,
         "broker_execution_id_type": broker_execution_id_type,
         "symbol": symbol,
         "broker_status": status_payload.get("status"),

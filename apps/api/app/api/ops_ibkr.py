@@ -77,11 +77,12 @@ def get_intent_ibkr_trades(
     if not creds:
         return {"success": False, "error": "No IBKR credentials"}
     try:
+        order_ref = broker_execution_id
         result = get_ibkr_trades(
             api_key=creds["api_key"],
             api_secret=creds["api_secret"],
             symbol=symbol,
-            client_order_id=broker_execution_id,
+            client_order_id=order_ref,
         )
         # Persistencia mínima e idempotente de fills IBKR
         fills = []
@@ -133,6 +134,6 @@ def get_intent_ibkr_trades(
                 })
 
                 # Check if fill already exists
-        return {"success": True, "payload": result, "fills": fills}
+        return {"success": True, "order_ref": order_ref, "payload": result, "fills": fills}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
