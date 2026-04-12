@@ -1036,14 +1036,17 @@ def execute_ibkr_test_order_for_user(
             "order_ref": order_ref,
         })
         # --- Integración de reconciliación IBKR ---
-        from apps.api.app.services.ibkr_reconciliation import get_ibkr_reconciliation_source, reconcile_ibkr_fills
+        from apps.api.app.services.ibkr_reconciliation import get_ibkr_reconciliation_source, reconcile_ibkr_fills, persist_ibkr_fills
         fills = get_ibkr_reconciliation_source(
             execution_ref=order_ref,
             user_id=user_id,
             account_id=account_id,
             db=db,
-            mode="dummy_db",  # O configurable si se requiere real
+            mode="ibkr_real",
         )
+
+        persist_ibkr_fills(db, fills)
+
         reconciliation = reconcile_ibkr_fills(fills, expected_qty=qty)
         reconciliation_status = reconciliation["status"] 
         total_qty = reconciliation.get("total_qty", 0)
