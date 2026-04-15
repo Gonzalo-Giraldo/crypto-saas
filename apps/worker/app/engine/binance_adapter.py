@@ -7,7 +7,7 @@ from apps.worker.app.engine.broker_adapter import BrokerAdapter
 
 
 class BinanceBrokerAdapter(BrokerAdapter):
-    def __init__(self, *, api_key: str, api_secret: str) -> None:
+    def __init__(self, *, api_key: str | None = None, api_secret: str | None = None) -> None:
         self._api_key = api_key
         self._api_secret = api_secret
 
@@ -54,13 +54,32 @@ class BinanceBrokerAdapter(BrokerAdapter):
         self,
         *,
         symbol: str,
-        client_order_id: str,
+        client_order_id: str | None = None,
         market: str = "SPOT",
         **kwargs,
     ):
+        if client_order_id is None:
+            client_order_id = kwargs.get("orig_client_order_id")
+
+        if client_order_id is None:
+            raise ValueError("client_order_id is required")
+
+        resolved_api_key = kwargs.get("api_key") or self._api_key
+        resolved_api_secret = kwargs.get("api_secret") or self._api_secret
+        client = getattr(self, "binance_client", None)
+
+        if client is not None:
+            return client.cancel_order(
+                api_key=resolved_api_key,
+                api_secret=resolved_api_secret,
+                symbol=symbol,
+                orig_client_order_id=(client_order_id or ""),
+                market=market,
+            )
+
         return cancel_order(
-            api_key=self.api_key,
-            api_secret=self.api_secret,
+            api_key=resolved_api_key,
+            api_secret=resolved_api_secret,
             symbol=symbol,
             orig_client_order_id=(client_order_id or ""),
             market=market,

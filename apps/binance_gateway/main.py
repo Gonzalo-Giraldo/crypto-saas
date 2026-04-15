@@ -185,18 +185,31 @@ def binance_cancel_order(
     x_internal_token: str = Header(default="")
 ):
     _authorize_internal_request(x_internal_token)
-    market = str(payload.market or "SPOT").upper()
+
+    market = _resolve_market(payload.market)
+    base_url = _base_url_for_market(market)
     endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
-    return _signed_request(
-        "DELETE",
-        endpoint,
-        {
-            "symbol": payload.symbol,
-            "origClientOrderId": payload.orig_client_order_id,
-        },
-        api_key=payload.api_key,
-        api_secret=payload.api_secret,
-    )
+
+    params = {
+        "symbol": payload.symbol.upper(),
+        "origClientOrderId": payload.orig_client_order_id,
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": payload.api_key}
+    response = _request_upstream("DELETE", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+    data = response.json()
+    mode = f"gateway_cancel_order_{market.lower()}"
+    return {"ok": True, "mode": mode, "data": data}
 
 @app.post("/binance/order-status")
 def binance_order_status(payload: BinanceOrderStatusIn, x_internal_token: str = Header(default="")):
