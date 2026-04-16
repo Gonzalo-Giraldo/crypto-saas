@@ -67,14 +67,16 @@ def get_ibkr_reconciliation_source(
             fills = []
             for t in trades:
                 fills.append(type("BridgeFill", (), {
-                    "fill_id": t.get("fill_id"),
+                    "fill_id": t.get("trade_id"),
                     "execution_ref": t.get("execution_ref") or execution_ref,
                     "symbol": t.get("symbol"),
                     "qty": t.get("qty"),
                     "price": t.get("price"),
                     "timestamp": t.get("timestamp"),
                     "user_id": user_id,
-                    "broker": "ibkr"
+                    "broker": "ibkr",
+                    "order_id": t.get("order_id"),
+                    "order_ref": t.get("order_ref"),
                 })())
 
             return fills
@@ -174,7 +176,9 @@ def persist_ibkr_fills(db, fills):
                     price,
                     timestamp,
                     user_id,
-                    broker
+                    broker,
+                    order_id,
+                    order_ref
                 ) VALUES (
                     :fill_id,
                     :execution_ref,
@@ -183,7 +187,9 @@ def persist_ibkr_fills(db, fills):
                     :price,
                     :timestamp,
                     :user_id,
-                    :broker
+                    :broker,
+                    :order_id,
+                    :order_ref
                 )
             """),
             {
@@ -195,6 +201,8 @@ def persist_ibkr_fills(db, fills):
                 "timestamp": timestamp,
                 "user_id": user_id,
                 "broker": "ibkr",
+                "order_id": getattr(f, "order_id", None),
+                "order_ref": getattr(f, "order_ref", None),
             },
         )
         inserted += 1
