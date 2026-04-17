@@ -91,6 +91,7 @@ def get_intent_ibkr_trades(
             if not fill_id:
                 continue
             try:
+
                 fill = IbkrFill(
                     fill_id=fill_id,
                     symbol=trade.get("symbol"),
@@ -100,6 +101,14 @@ def get_intent_ibkr_trades(
                     user_id=user_id,
                     broker="ibkr",
                     execution_ref=broker_execution_id,
+                    account_id=trade.get("account_id"),
+                    side=trade.get("side"),
+                    order_id=trade.get("order_id"),
+                    perm_id=trade.get("perm_id"),
+                    client_id=trade.get("client_id"),
+                    order_ref=trade.get("order_ref"),
+                    cum_qty=trade.get("cum_qty"),
+                    avg_price=trade.get("avg_price"),
                 )
                 db.add(fill)
                 db.commit()
@@ -114,6 +123,14 @@ def get_intent_ibkr_trades(
                     "user_id": fill.user_id,
                     "broker": fill.broker,
                     "execution_ref": fill.execution_ref,
+                    "account_id": fill.account_id,
+                    "side": fill.side,
+                    "order_id": fill.order_id,
+                    "perm_id": fill.perm_id,
+                    "client_id": fill.client_id,
+                    "order_ref": fill.order_ref,
+                    "cum_qty": fill.cum_qty,
+                    "avg_price": fill.avg_price,
                 })
 
             except IntegrityError:
@@ -131,6 +148,14 @@ def get_intent_ibkr_trades(
                     "user_id": existing.user_id,
                     "broker": existing.broker,
                     "execution_ref": existing.execution_ref,
+                    "account_id": existing.account_id,
+                    "side": existing.side,
+                    "order_id": existing.order_id,
+                    "perm_id": existing.perm_id,
+                    "client_id": existing.client_id,
+                    "order_ref": existing.order_ref,
+                    "cum_qty": existing.cum_qty,
+                    "avg_price": existing.avg_price,
                 })
 
                 # Check if fill already exists

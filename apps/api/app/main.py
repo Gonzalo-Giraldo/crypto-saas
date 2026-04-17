@@ -121,9 +121,35 @@ def _ensure_exchange_secret_columns():
                 )
             )
 
+def _ensure_ibkr_fills_columns():
+    insp = inspect(engine)
+    try:
+        tables = set(insp.get_table_names())
+        if "ibkr_fills" not in tables:
+            return
+        cols = {c["name"] for c in insp.get_columns("ibkr_fills")}
+    except Exception:
+        return
+    with engine.begin() as conn:
+        if "account_id" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS account_id VARCHAR"))
+        if "side" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS side VARCHAR"))
+        if "order_id" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS order_id VARCHAR"))
+        if "perm_id" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS perm_id VARCHAR"))
+        if "client_id" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS client_id VARCHAR"))
+        if "order_ref" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS order_ref VARCHAR"))
+        if "cum_qty" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS cum_qty DOUBLE PRECISION"))
+        if "avg_price" not in cols:
+            conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS avg_price DOUBLE PRECISION"))
 
 _ensure_exchange_secret_columns()
-
+_ensure_ibkr_fills_columns()
 
 app.include_router(ops_router)
 app.include_router(users_router)
