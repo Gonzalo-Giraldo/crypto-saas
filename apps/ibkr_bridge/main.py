@@ -20,7 +20,7 @@ def get_ib_connection():
         asyncio.set_event_loop(loop)
 
     ib = IB()
-    ib.connect("127.0.0.1", 4002, clientId=1)
+    ib.connect("127.0.0.1", 7497, clientId=1)
     return ib
 
 @app.post("/ibkr/paper/account-status")
@@ -163,6 +163,14 @@ def trades(payload: dict = Body(...)):
                 "qty": trade.shares,
                 "price": trade.price,
                 "timestamp": datetime.utcfromtimestamp(trade.time).isoformat() if isinstance(trade.time, (int, float)) else str(trade.time),
+                "side": getattr(trade, "side", None),
+                "account_id": getattr(trade, "acctNumber", None),
+                "order_id": getattr(trade, "orderId", None),
+                "perm_id": getattr(trade, "permId", None),
+                "client_id": getattr(trade, "clientId", None),
+                "order_ref": getattr(trade, "orderRef", None),
+                "cum_qty": getattr(trade, "cumQty", None),
+                "avg_price": getattr(trade, "avgPrice", None),
             })
         ib.disconnect()
         return JSONResponse(content={

@@ -1,6 +1,6 @@
 
 from apps.worker.app.engine.broker_adapter import BrokerAdapter
-from apps.worker.app.engine.ibkr_client import send_order, query_order_status, cancel_order
+import apps.worker.app.engine.ibkr_client as ibkr_client
 
 class IBKRBrokerAdapter(BrokerAdapter):
     def __init__(self, api_key: str, api_secret: str, **kwargs):
@@ -9,7 +9,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         # Accept and ignore extra kwargs for compatibility
 
     def send_order(self, symbol: str, side: str, quantity: float, client_order_id: str = None, market: str = None, **kwargs):
-        return send_order(
+        return ibkr_client.send_order(
             api_key=self.api_key,
             api_secret=self.api_secret,
             symbol=symbol,
@@ -21,7 +21,7 @@ class IBKRBrokerAdapter(BrokerAdapter):
         )
 
     def query_order(self, symbol: str, client_order_id: str, market: str = None, **kwargs):
-        return query_order_status(
+        return ibkr_client.query_order_status(
             api_key=self.api_key,
             api_secret=self.api_secret,
             symbol=symbol,
@@ -31,11 +31,4 @@ class IBKRBrokerAdapter(BrokerAdapter):
         )
 
     def cancel_order(self, *, symbol: str, client_order_id: str, market: str = "SPOT", **kwargs):
-        return cancel_order(
-            api_key=self.api_key,
-            api_secret=self.api_secret,
-            symbol=symbol,
-            client_order_id=client_order_id,
-            market=market,
-            **kwargs,
-        )
+        raise NotImplementedError("IBKR cancel_order not supported yet")
