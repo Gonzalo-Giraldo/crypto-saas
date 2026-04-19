@@ -3,6 +3,7 @@ from apps.api.app.api.positions import router as positions_router
 from apps.api.app.routes.auth import router as auth_router
 from contextlib import asynccontextmanager
 from apps.api.app.api.ops_ibkr import router as ops_ibkr_router
+from apps.api.app.api.binance_ping import router as binance_ping_router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -156,6 +157,7 @@ app.include_router(users_router)
 app.include_router(signals_router)
 app.include_router(positions_router)
 app.include_router(ops_ibkr_router)
+app.include_router(binance_ping_router)
 
 @app.get("/healthz")
 def healthz():
