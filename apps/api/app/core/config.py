@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     AUTH_TOTP_VALID_WINDOW: int = 2
     ENFORCE_2FA_FOR_ADMINS: bool = False
     ENFORCE_2FA_EMAILS: str = ""
+    ADMIN_RECOVERY_ENABLED: bool = False
+    ADMIN_RECOVERY_TOKEN: str = ""
     SUPERUSER_EMAILS: str = "gonzalogiraldo@yahoo.com"
     PASSWORD_MAX_AGE_DAYS: int = 0
     ENFORCE_PASSWORD_MAX_AGE: bool = False

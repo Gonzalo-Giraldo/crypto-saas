@@ -41,6 +41,7 @@ from apps.api.app.api.ops import (
     run_learning_pipeline_tick,
 )
 from apps.api.app.api.users import router as users_router
+from apps.api.app.api.admin_recovery import router as admin_recovery_router
 
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
@@ -158,6 +159,7 @@ app.include_router(signals_router)
 app.include_router(positions_router)
 app.include_router(ops_ibkr_router)
 app.include_router(binance_ping_router)
+app.include_router(admin_recovery_router)
 
 @app.get("/healthz")
 def healthz():
