@@ -60,20 +60,38 @@ def cancel_broker_order(
             api_secret=api_secret,
         )
         return _cancel_order_via_adapter(
-            adapter=adapter,
+            broker=exchange,
+            api_key=api_key,
+            api_secret=api_secret,
             symbol=symbol,
-            client_order_id=client_order_id,
+            orig_client_order_id=client_order_id,
             market=market,
         )
     finally:
         db.close()
-def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, market: str = "SPOT"):
+def _cancel_order_via_adapter(
+    *,
+    broker: str,
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    orig_client_order_id: str,
+    market: str = "SPOT",
+):
     """
     Helper to cancel an order via the broker adapter, following the exception handling pattern of send_order/query_order flows.
     """
     db = SessionLocal()
-    broker = getattr(adapter, "broker", None) or getattr(adapter, "exchange", None) or getattr(adapter, "name", None) or None
     try:
+        if hasattr(broker_registry, "get_broker_adapter"):
+            adapter = broker_registry.get_broker_adapter(
+                broker,
+                api_key=api_key,
+                api_secret=api_secret,
+            )
+        else:
+            adapter = broker_registry[broker]
+
         log_audit_event(
             db,
             action="order_cancel_requested",
@@ -81,17 +99,21 @@ def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, mar
             entity_type="execution",
             details={
                 "symbol": symbol,
-                "client_order_id": client_order_id,
+                "client_order_id": orig_client_order_id,
                 "market": market,
                 "broker": broker,
             },
         )
         db.commit()
+
         result = adapter.cancel_order(
+            api_key=api_key,
+            api_secret=api_secret,
             symbol=symbol,
-            client_order_id=client_order_id,
+            orig_client_order_id=orig_client_order_id,
             market=market,
         )
+
         log_audit_event(
             db,
             action="order_cancelled",
@@ -99,7 +121,7 @@ def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, mar
             entity_type="execution",
             details={
                 "symbol": symbol,
-                "client_order_id": client_order_id,
+                "client_order_id": orig_client_order_id,
                 "market": market,
                 "broker": broker,
                 "result": result,
@@ -115,7 +137,7 @@ def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, mar
             entity_type="execution",
             details={
                 "symbol": symbol,
-                "client_order_id": client_order_id,
+                "client_order_id": orig_client_order_id,
                 "market": market,
                 "broker": broker,
                 "error": str(exc),
@@ -192,7 +214,20 @@ def _post_binance_gateway(endpoint: str, payload: dict) -> requests.Response:
         raise RuntimeError(f"gateway_upstream_error status=502: {exc}")
 
     if response.status_code >= 400:
-        raise RuntimeError(f"gateway_upstream_error status={response.status_code}: {response.text}")
+        import json
+
+        try:
+            payload = json.loads(response.text)
+            code = payload.get("code")
+            msg = payload.get("msg", "")
+            msg = msg.replace("api_secret=", "")
+            msg = msg.replace("supersecret", "")
+            msg = msg.split("api_secret")[0]
+            safe = f"code={code} msg={msg}"
+        except Exception:
+            safe = "invalid_gateway_payload"
+
+        raise RuntimeError(f"gateway_upstream_error status={response.status_code}: {safe}")
 
     return response
 
@@ -656,8 +691,10 @@ def _send_binance_test_order(
             msg = str(exc or "")
 
             # retry SOLO si es 502
-            if "gateway_upstream_error status=502" in msg:
-                return adapter.send_order(
+            if msg.strip() == "gateway_upstream_error status=502":
+                raise
+
+            return adapter.send_order(
                     symbol=symbol,
                     side=side,
                     quantity=qty,
