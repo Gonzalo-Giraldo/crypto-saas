@@ -7481,12 +7481,23 @@ def execution_binance_test_order(
     if cached is not None:
         return cached
 
+    from apps.api.app.services.binance_intent_adapter import create_binance_intent
+
+    intent = create_binance_intent(
+        db=db,
+        user_id=current_user.id,
+        account_id="default",  # mantener simple en F5
+        symbol=payload.symbol,
+        side=payload.side,
+        expected_qty=payload.qty,
+    )
+
     result = execute_binance_test_order_for_user(
         user_id=current_user.id,
         symbol=payload.symbol,
         side=payload.side,
         qty=payload.qty,
-        intent_key=idempotency_key,
+        intent_key=intent["intent_id"],
     )
     store_idempotent_response(
         db,
