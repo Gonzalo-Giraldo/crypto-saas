@@ -9,7 +9,10 @@ def create_binance_intent(
     side: str,
     expected_qty,
     order_type: str = "MARKET",
-    source: str = "binance_adapter"
+    source: str = "binance_adapter",
+    entry_price=None,
+    stop_loss=None,
+    take_profit=None,
 ) -> dict:
     if db is None:
         raise ValueError("db is required")
@@ -38,6 +41,9 @@ def create_binance_intent(
         expected_qty=expected_qty,
         order_type=order_type,
         source=source,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
     )
 
     return {
@@ -50,4 +56,7 @@ def create_binance_intent(
         "order_type": intent.order_type,
         "source": intent.source,
         "lifecycle_status": intent.lifecycle_status,
+        "entry_price": str(intent.entry_price) if intent.entry_price is not None else None,
+        "stop_loss": str(intent.stop_loss) if intent.stop_loss is not None else None,
+        "take_profit": str(intent.take_profit) if intent.take_profit is not None else None,
     }

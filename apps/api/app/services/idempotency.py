@@ -182,6 +182,7 @@ def reserve_idempotent_intent(
             )
 
         existing_data = _parse_response_json(existing.response_json)
+        existing_data["_idempotency_status_code"] = existing.status_code
         if existing_data.get("status") == "in_progress":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

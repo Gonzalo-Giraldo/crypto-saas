@@ -45,6 +45,9 @@ class BinanceTestOrderRequest(BaseModel):
     side: str
     qty: float
     account_id: Optional[str] = None
+    entry_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
 
     @field_validator("side")
     @classmethod

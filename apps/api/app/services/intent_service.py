@@ -29,6 +29,9 @@ def create_intent(
     expected_qty,
     order_type: str,
     source: str,
+    entry_price=None,
+    stop_loss=None,
+    take_profit=None,
 ):
     if not user_id or not isinstance(user_id, str):
         raise ValueError("user_id is required and must be a string")
@@ -68,7 +71,14 @@ def create_intent(
         order_type=order_type,
         source=source,
         lifecycle_status="CREATED",
+
+        entry_price=float(entry_price) if entry_price is not None else None,
+        stop_loss=float(stop_loss) if stop_loss is not None else None,
+        take_profit=float(take_profit) if take_profit is not None else None,
     )
+
+
+
 
     db.add(intent)
     db.commit()

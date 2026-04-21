@@ -1,5 +1,7 @@
 
 from apps.worker.app.engine.ibkr_client import get_ibkr_trades
+from apps.api.app.services.binance_intent_adapter import create_binance_intent
+from apps.api.app.services.ibkr_intent_adapter import create_ibkr_intent
 
 import json
 from urllib import request as urllib_request
@@ -10,7 +12,6 @@ from apps.api.app.db.session import get_db
 
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
-from apps.api.app.services.ibkr_intent_service import generate_internal_ibkr_intent_key
 from apps.worker.app.engine.ibkr_client import query_order_status as ibkr_query_order_status
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -622,7 +623,6 @@ from apps.api.app.services.idempotency import (
     consume_idempotent_response,
     reserve_idempotent_intent,
     finalize_idempotent_intent,
-    store_idempotent_response,
 )
 from apps.api.app.services.decision_engine import (
     rank_scan_rows,
@@ -1221,13 +1221,26 @@ def _run_binance_auto_pick_live_flow(
     idempotency_reserved = True
 
     try:
+
+        intent = create_binance_intent(
+            db=db,
+            user_id=current_user.id,
+            account_id="default",
+            symbol=selected["symbol"],
+            side=selected["side"],
+            expected_qty=selected_qty,
+            entry_price=exit_plan["entry_price"] if exit_plan else None,
+            stop_loss=exit_plan["stop_loss"] if exit_plan else None,
+            take_profit=exit_plan["take_profit"] if exit_plan else None,
+        )
+
         execution = execute_binance_test_order_for_user(
             user_id=current_user.id,
             symbol=selected["symbol"],
             side=selected["side"],
             qty=selected_qty,
-            intent_key=idempotency_key,
-        )
+            intent_key=intent["intent_id"],
+        )   
         decision = "executed_test_order_gray" if liquidity_state == "gray" else "executed_test_order"
         if enforce_exit_plan:
             execution = {**(execution or {}), "exit_plan": exit_plan}
@@ -5177,32 +5190,67 @@ def pretrade_ibkr_check(
         price_estimate=0.0,
     )
     req_payload = payload.model_dump()
-    cached = consume_idempotent_response(
-        db,
+    cached_response = reserve_idempotent_intent(
+        db=db,
         user_id=current_user.id,
-        endpoint="/ops/execution/pretrade/ibkr/check",
+        endpoint="/ops/execution/ibkr/test-order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
     )
-    if cached is not None:
-        return cached
+    if cached_response is not None:
+        if isinstance(cached_response, dict) and "detail" in cached_response:
+            raise HTTPException(
+                status_code=int(cached_response.get("_idempotency_status_code", 400)),
+                detail=cached_response["detail"],
+            )
+        return cached_response
 
-    result = _evaluate_pretrade_for_user(
+    from apps.api.app.services.binance_intent_adapter import create_binance_intent
+
+    intent = create_binance_intent(
         db=db,
-        current_user=current_user,
-        exchange="IBKR",
-        payload=payload,
-    )
-    store_idempotent_response(
-        db,
         user_id=current_user.id,
-        endpoint="/ops/execution/pretrade/ibkr/check",
+        account_id="default",
+        symbol=payload.symbol,
+        side=payload.side,
+        expected_qty=payload.qty,
+    )
+
+    try:
+        result = execute_ibkr_test_order_for_user(
+            user_id=current_user.id,
+            symbol=payload.symbol,
+            side=payload.side,
+            qty=payload.qty,
+            intent_key=intent["intent_id"],
+        )
+    except HTTPException as exc:
+        error_payload = {
+            "detail": str(exc.detail),
+            "intent_id": intent["intent_id"],
+        }
+        finalize_idempotent_intent(
+            db=db,
+            user_id=current_user.id,
+            endpoint="/ops/execution/ibkr/test-order",
+            idempotency_key=idempotency_key,
+            request_payload=req_payload,
+            response_payload=error_payload,
+            status_code=exc.status_code,
+        )
+        raise
+
+    finalize_idempotent_intent(
+        db=db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/ibkr/test-order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
         response_payload=result,
+        status_code=200,
     )
-    return result
 
+    return result
 
 @router.post("/execution/pretrade/binance/scan", response_model=PretradeScanOut)
 def pretrade_binance_scan(
@@ -7471,44 +7519,69 @@ def execution_binance_test_order(
             detail="idempotency_key (intent_key) is required for execution",
         )
 
-    cached = consume_idempotent_response(
-        db,
+    cached_response = reserve_idempotent_intent(
+        db=db,
         user_id=current_user.id,
         endpoint="/ops/execution/binance/test-order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
     )
-    if cached is not None:
-        return cached
 
-    from apps.api.app.services.binance_intent_adapter import create_binance_intent
+    if cached_response is not None:
+        if isinstance(cached_response, dict) and "detail" in cached_response:
+            raise HTTPException(
+                status_code=int(cached_response.get("_idempotency_status_code", 400)),
+                detail=cached_response["detail"],
+            )
+        return cached_response
 
     intent = create_binance_intent(
         db=db,
         user_id=current_user.id,
-        account_id="default",  # mantener simple en F5
+        account_id="default",
         symbol=payload.symbol,
         side=payload.side,
         expected_qty=payload.qty,
+        entry_price=getattr(payload, "entry_price", None),
+        stop_loss=getattr(payload, "stop_loss", None),
+        take_profit=getattr(payload, "take_profit", None),
     )
 
-    result = execute_binance_test_order_for_user(
-        user_id=current_user.id,
-        symbol=payload.symbol,
-        side=payload.side,
-        qty=payload.qty,
-        intent_key=intent["intent_id"],
-    )
-    store_idempotent_response(
-        db,
+    try:
+        result = execute_binance_test_order_for_user(
+            user_id=current_user.id,
+            symbol=payload.symbol,
+            side=payload.side,
+            qty=payload.qty,
+            intent_key=intent["intent_id"],
+        )
+    except HTTPException as exc:
+        error_payload = {
+            "detail": str(exc.detail),
+            "intent_id": intent["intent_id"],
+        }
+        finalize_idempotent_intent(
+            db=db,
+            user_id=current_user.id,
+            endpoint="/ops/execution/binance/test-order",
+            idempotency_key=idempotency_key,
+            request_payload=req_payload,
+            response_payload=error_payload,
+            status_code=exc.status_code,
+        )
+        raise
+
+    finalize_idempotent_intent(
+        db=db,
         user_id=current_user.id,
         endpoint="/ops/execution/binance/test-order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
         response_payload=result,
+        status_code=200,
     )
-    return result
 
+    return result
 
 @router.post("/execution/ibkr/test-order", response_model=IbkrTestOrderOut)
 def execution_ibkr_test_order(
@@ -7538,55 +7611,68 @@ def execution_ibkr_test_order(
     )
     req_payload = payload.model_dump()
     # Observabilidad: log estructurado de idempotency_key recibido y valor pasado a execute_ibkr_test_order_for_user
-    print({
-        "event": "ibkr_direct_test_order_http_idempotency_received",
-        "x_idempotency_key": idempotency_key,
-        "x_idempotency_key_present": bool(str(idempotency_key or "").strip()),
-        "user_id": current_user.id,
-        "symbol": payload.symbol,
-        "side": payload.side,
-        "qty": payload.qty,
-    })
-    cached = consume_idempotent_response(
-        db,
+    req_payload = payload.model_dump()
+    cached_response = reserve_idempotent_intent(
+        db=db,
         user_id=current_user.id,
         endpoint="/ops/execution/ibkr/test-order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
     )
-    if cached is not None:
-        return cached
+    if cached_response is not None:
+        if isinstance(cached_response, dict) and "detail" in cached_response:
+            raise HTTPException(
+                status_code=int(cached_response.get("_idempotency_status_code", 400)),
+                detail=cached_response["detail"],
+            )
+        return cached_response
 
-    internal_intent_key = generate_internal_ibkr_intent_key(
+    intent = create_ibkr_intent(
+        db=db,
         user_id=current_user.id,
-        account_id=None,
+        account_id="default",
         symbol=payload.symbol,
         side=payload.side,
-    )
+        expected_qty=payload.qty,
+        entry_price=getattr(payload, "entry_price", None),
+        stop_loss=getattr(payload, "stop_loss", None),
+        take_profit=getattr(payload, "take_profit", None),
+    )    
 
-    print({
-        "event": "ibkr_direct_test_order_internal_intent_key_generated",
-        "x_idempotency_key_present": bool(str(idempotency_key or "").strip()),
-        "internal_intent_key": internal_intent_key,
-    })
+    try:
+        result = execute_ibkr_test_order_for_user(
+            user_id=current_user.id,
+            symbol=payload.symbol,
+            side=payload.side,
+            qty=payload.qty,
+            intent_key=intent["intent_id"],
+        )
+    except HTTPException as exc:
+        error_payload = {
+            "detail": str(exc.detail),
+            "intent_id": intent["intent_id"],
+        }
+        finalize_idempotent_intent(
+            db=db,
+            user_id=current_user.id,
+            endpoint="/ops/execution/ibkr/test-order",
+            idempotency_key=idempotency_key,
+            request_payload=req_payload,
+            response_payload=error_payload,
+            status_code=exc.status_code,
+        )
+        raise
 
-    result = execute_ibkr_test_order_for_user(
-        user_id=current_user.id,
-        symbol=payload.symbol,
-        side=payload.side,
-        qty=payload.qty,
-        intent_key=internal_intent_key,
-    )
-    store_idempotent_response(
-        db,
+    finalize_idempotent_intent(
+        db=db,
         user_id=current_user.id,
         endpoint="/ops/execution/ibkr/test-order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
         response_payload=result,
+        status_code=200,
     )
     return result
-
 
 @router.get("/execution/binance/account-status", response_model=AccountStatusOut)
 def execution_binance_account_status(
