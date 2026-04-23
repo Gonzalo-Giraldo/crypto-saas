@@ -262,16 +262,10 @@ def get_intent_binance_trades(
     # 4. Señal explícita de mezcla
     trades_contains_unmatched = matched_trades_count != total_trades_count
 
-    # 5. Persistencia durable SOLO si no hay mezcla
+    # 5. Persistencia durable de los trades vinculados a esta orden.
+    # Binance puede devolver historico amplio; los trades no vinculados no deben bloquear matched_trades.
     db_persistence = None
-    if trades_contains_unmatched:
-        db_persistence = {
-            "persisted": False,
-            "inserted": 0,
-            "skipped": 0,
-            "reason": "trades_contains_unmatched"
-        }
-    elif matched_trades_count > 0:
+    if matched_trades_count > 0:
         try:
             from apps.api.app.services.binance_fill_db import persist_binance_fills_db
             _result = persist_binance_fills_db(
