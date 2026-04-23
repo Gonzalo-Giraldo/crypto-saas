@@ -20,17 +20,33 @@ class IntentConsumptionStore:
         symbol=None,
         market=None,
     ):
-        key = build_intent_consumption_key(user_id, broker, intent_key, account_id)
-        if key not in self._consumption_store:
-            return False
-        self._consumption_store[key]["broker_execution_id"] = execution_id
-        self._consumption_store[key]["broker_execution_id_type"] = execution_id_type
-        if symbol is not None:
-            self._consumption_store[key]["symbol"] = symbol
-        if market is not None:
-            self._consumption_store[key]["market"] = market
-        self._save_store()
-        return True
+        from apps.api.app.db.session import SessionLocal
+        from sqlalchemy import text
+
+        intent_id = str(intent_key)
+        consumer = self._build_consumer(user_id, broker, account_id)
+
+        db = SessionLocal()
+        try:
+            result = db.execute(
+                text("""
+                    UPDATE intent_consumptions
+                    SET execution_ref = :execution_ref,
+                        symbol = COALESCE(:symbol, symbol)
+                    WHERE intent_id = :intent_id
+                      AND consumer = :consumer
+                """),
+                {
+                    "execution_ref": execution_id,
+                    "symbol": symbol,
+                    "intent_id": intent_id,
+                    "consumer": consumer,
+                }
+            )
+            db.commit()
+            return result.rowcount == 1
+        finally:
+            db.close()
     def list_recent_consumptions(self, limit=10):
         """
         Devuelve una lista de los consumos recientes de intent_key.
