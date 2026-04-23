@@ -21,6 +21,10 @@ def persist_binance_fills_db(db, fills: list, user_id: str, account_id: str, bro
         if exists:
             skipped += 1
             continue
+        raw_side = fill.get("side")
+        if raw_side is None and "isBuyer" in fill:
+            raw_side = "BUY" if bool(fill.get("isBuyer")) else "SELL"
+
         obj = BinanceFill(
             user_id=user_id,
             account_id=account_id,
@@ -29,7 +33,7 @@ def persist_binance_fills_db(db, fills: list, user_id: str, account_id: str, bro
             trade_id=trade_id,
             order_id=fill.get("orderId"),
             symbol=fill.get("symbol"),
-            side=fill.get("side"),
+            side=raw_side,
             raw_payload=fill
         )
         db.add(obj)
