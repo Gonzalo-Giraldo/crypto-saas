@@ -1,14 +1,14 @@
 """add market and broker_execution_id_type to intent_consumptions
 
 Revision ID: 20260423_add_market_and_execution_id_type_to_intent_consumptions
-Revises: 20260327_add_symbol_to_intent_consumptions
+Revises: 20260420_create_intents_table
 Create Date: 2026-04-23
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "20260423_add_market_and_execution_id_type_to_intent_consumptions"
-down_revision = "20260327_add_symbol_to_intent_consumptions"
+down_revision = "20260420_create_intents_table"
 branch_labels = None
 depends_on = None
 

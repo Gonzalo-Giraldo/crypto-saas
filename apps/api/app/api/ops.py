@@ -246,7 +246,7 @@ def get_intent_binance_trades(
         match = False
         if broker_execution_id_type == "orderId" and order_id is not None and str(order_id) == str(broker_execution_id):
             match = True
-        elif broker_execution_id_type == "clientOrderId" and client_order_id is not None and str(client_order_id) == str(broker_execution_id):
+        elif broker_execution_id_type in ("clientOrderId", "client_order_id") and client_order_id is not None and str(client_order_id) == str(broker_execution_id):
             match = True
         if match:
             matched_trades.append(trade)
