@@ -669,7 +669,7 @@ def execute_binance_real_order_for_user(
                 "qty_requested": qty,
                 "qty_normalized": qty_meta["normalized_qty"],
                 "client_order_id": client_order_id,
-                "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+                "mode": "live_order_futures" if market == "FUTURES" else "live_order_spot",
                 "market": market,
             },
         )
@@ -677,7 +677,7 @@ def execute_binance_real_order_for_user(
 
         return {
             "exchange": "BINANCE",
-            "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+            "mode": "live_order_futures" if market == "FUTURES" else "live_order_spot",
             "symbol": symbol.upper(),
             "side": side.upper(),
             "qty": float(qty_meta["normalized_qty"]),
