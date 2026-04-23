@@ -437,7 +437,17 @@ def execute_binance_test_order_for_user(
                 client_order_id=client_order_id,
                 market=market,
             )
-            # Attach broker_execution_id and broker_execution_id_type to the intent consumption record if intent_key is present
+
+            order_status = query_order_status(
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+                symbol=symbol,
+                orig_client_order_id=client_order_id,
+                market=market,
+            )
+            broker_order_id = order_status.get("orderId")
+            if broker_order_id is None:
+                raise RuntimeError("binance_order_status_missing_orderId")
 
             if intent_key:
                 store = IntentConsumptionStore()
@@ -446,8 +456,8 @@ def execute_binance_test_order_for_user(
                     broker="BINANCE",
                     intent_key=intent_key,
                     account_id=account_id,
-                    execution_id=client_order_id,
-                    execution_id_type="client_order_id",
+                    execution_id=str(broker_order_id),
+                    execution_id_type="orderId",
                     symbol=symbol,
                     market=market,
                 )
