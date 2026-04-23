@@ -1,0 +1,17 @@
+INCIDENTE: exposicion de credencial Render / DB oficial
+
+FECHA: 2026-04-22
+ACCION REQUERIDA: rotacion inmediata
+ESTADO ANTERIOR: credencial expuesta en conversacion
+DECISION: credencial anterior queda revocada y no reutilizable
+
+CHECKLIST
+1. Generar nueva credencial / nueva DATABASE_URL
+2. Actualizar variable en Render
+3. Reiniciar servicio en Render
+4. Validar conexion y salud
+5. Eliminar referencias locales viejas
+6. Confirmar cierre del incidente
+
+REGLA:
+Toda credencial expuesta se considera comprometida y debe rotarse el mismo dia.

@@ -13,7 +13,12 @@ app = FastAPI()
 
 INTERNAL_TOKEN = os.getenv("BINANCE_GATEWAY_TOKEN", "")
 _legacy_base = os.getenv("BINANCE_BASE_URL", "").rstrip("/")
-BINANCE_SPOT_BASE = os.getenv("BINANCE_SPOT_BASE_URL", _legacy_base or "https://testnet.binance.vision").rstrip("/")
+BINANCE_SPOT_BASE = (
+    os.getenv("BINANCE_SPOT_BASE_URL")
+    or os.getenv("BINANCE_TESTNET_BASE_URL")
+    or _legacy_base
+    or "https://testnet.binance.vision"
+).rstrip("/")
 BINANCE_FUTURES_BASE = os.getenv("BINANCE_FUTURES_BASE_URL", "https://testnet.binancefuture.com").rstrip("/")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("BINANCE_GATEWAY_TIMEOUT_SECONDS", "12"))
 HEALTHZ_CHECK_BINANCE = os.getenv("BINANCE_GATEWAY_HEALTHZ_CHECK_BINANCE", "false").lower() == "true"

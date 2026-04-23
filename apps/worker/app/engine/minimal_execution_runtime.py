@@ -94,7 +94,6 @@ class IntentConsumptionStore:
                 }
                 if execution_ref:
                     result["broker_execution_id"] = execution_ref
-                    result["order_ref"] = execution_ref
                 if symbol:
                     result["symbol"] = symbol
                 return result

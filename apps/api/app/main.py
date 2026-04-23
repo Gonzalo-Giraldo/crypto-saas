@@ -72,7 +72,7 @@ def health():
     return {"status": "ok"}
 
 # OJO: users_router ya importa el modelo User, así que el modelo ya queda registrado.
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 
 def _ensure_runtime_policy_columns():

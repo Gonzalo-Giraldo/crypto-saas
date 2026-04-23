@@ -1,0 +1,17 @@
+INCIDENTE: rotacion de credencial Render / DB oficial
+FECHA: 2026-04-22
+ESTADO: CERRADO
+
+VALIDACIONES OK:
+1. SELECT now() contra Render OK
+2. Tablas criticas visibles en Render OK:
+   - intents
+   - intent_consumptions
+   - idempotency_keys
+   - ibkr_fills
+   - binance_fills
+3. Credencial anterior queda revocada y fuera de uso
+
+DECISION OPERATIVA:
+- Render sigue como DB oficial
+- Docker local sigue como entorno de trabajo

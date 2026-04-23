@@ -1,0 +1,5 @@
+DB OFICIAL: Render
+DUMP OFICIAL: ./backups/render_crypto_saas_20260422_081611.sql
+DB LOCAL ACTIVA: newproject4_postgres_data (solo trabajo local)
+DB LEGACY: crypto-saas_postgres_data
+DB DESCARTABLE: repo_postgres_data

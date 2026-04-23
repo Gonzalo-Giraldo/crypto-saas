@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import time
+import uuid
 import requests
 import re
 from decimal import Decimal
@@ -60,38 +61,20 @@ def cancel_broker_order(
             api_secret=api_secret,
         )
         return _cancel_order_via_adapter(
-            broker=exchange,
-            api_key=api_key,
-            api_secret=api_secret,
+            adapter=adapter,
             symbol=symbol,
-            orig_client_order_id=client_order_id,
+            client_order_id=client_order_id,
             market=market,
         )
     finally:
         db.close()
-def _cancel_order_via_adapter(
-    *,
-    broker: str,
-    api_key: str,
-    api_secret: str,
-    symbol: str,
-    orig_client_order_id: str,
-    market: str = "SPOT",
-):
+def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, market: str = "SPOT"):
     """
     Helper to cancel an order via the broker adapter, following the exception handling pattern of send_order/query_order flows.
     """
     db = SessionLocal()
+    broker = getattr(adapter, "broker", None) or getattr(adapter, "exchange", None) or getattr(adapter, "name", None) or None
     try:
-        if hasattr(broker_registry, "get_broker_adapter"):
-            adapter = broker_registry.get_broker_adapter(
-                broker,
-                api_key=api_key,
-                api_secret=api_secret,
-            )
-        else:
-            adapter = broker_registry[broker]
-
         log_audit_event(
             db,
             action="order_cancel_requested",
@@ -99,21 +82,17 @@ def _cancel_order_via_adapter(
             entity_type="execution",
             details={
                 "symbol": symbol,
-                "client_order_id": orig_client_order_id,
+                "client_order_id": client_order_id,
                 "market": market,
                 "broker": broker,
             },
         )
         db.commit()
-
         result = adapter.cancel_order(
-            api_key=api_key,
-            api_secret=api_secret,
             symbol=symbol,
-            orig_client_order_id=orig_client_order_id,
+            client_order_id=client_order_id,
             market=market,
         )
-
         log_audit_event(
             db,
             action="order_cancelled",
@@ -121,7 +100,7 @@ def _cancel_order_via_adapter(
             entity_type="execution",
             details={
                 "symbol": symbol,
-                "client_order_id": orig_client_order_id,
+                "client_order_id": client_order_id,
                 "market": market,
                 "broker": broker,
                 "result": result,
@@ -137,7 +116,7 @@ def _cancel_order_via_adapter(
             entity_type="execution",
             details={
                 "symbol": symbol,
-                "client_order_id": orig_client_order_id,
+                "client_order_id": client_order_id,
                 "market": market,
                 "broker": broker,
                 "error": str(exc),
@@ -193,43 +172,22 @@ def _build_gateway_runtime_error(status_code: int, body_text: str) -> str:
 
 
 def _post_binance_gateway(endpoint: str, payload: dict) -> requests.Response:
-    base = str(settings.BINANCE_GATEWAY_BASE_URL or "").rstrip("/")
-    if not base:
-        raise RuntimeError("gateway_upstream_error status=502: missing_gateway_base_url")
-
+    base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
     url = f"{base}{endpoint}"
     headers = {"Content-Type": "application/json"}
-    token = str(settings.BINANCE_GATEWAY_TOKEN or "").strip()
-    if token:
-        headers["X-Internal-Token"] = token
-
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            json=payload,
-            timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
-        )
-    except Exception as exc:
-        raise RuntimeError(f"gateway_upstream_error status=502: {exc}")
-
+    if settings.BINANCE_GATEWAY_TOKEN:
+        headers["X-Internal-Token"] = settings.BINANCE_GATEWAY_TOKEN
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+    )
     if response.status_code >= 400:
-        import json
-
-        try:
-            payload = json.loads(response.text)
-            code = payload.get("code")
-            msg = payload.get("msg", "")
-            msg = msg.replace("api_secret=", "")
-            msg = msg.replace("supersecret", "")
-            msg = msg.split("api_secret")[0]
-            safe = f"code={code} msg={msg}"
-        except Exception:
-            safe = "invalid_gateway_payload"
-
-        raise RuntimeError(f"gateway_upstream_error status={response.status_code}: {safe}")
-
+        detail = _build_gateway_runtime_error(response.status_code, response.text)
+        raise RuntimeError(detail)
     return response
+
 
 def _sanitize_ibkr_error(exc: Exception) -> str:
     msg = str(exc or "").strip()
@@ -445,23 +403,17 @@ def execute_binance_test_order_for_user(
 
             intent_id = str(intent_key)
             consumer = _build_consumer(user_id, "BINANCE", account_id)
-
-            if hasattr(db, "execute"):
-                # Check if already consumed
-                result = db.execute(
-                    text("SELECT 1 FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+            # Check if already consumed
+            result = db.execute(
+                text("SELECT 1 FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+                {"intent_id": intent_id, "consumer": consumer}
+            ).fetchone()
+            if result is None:
+                db.execute(
+                    text("INSERT INTO intent_consumptions (intent_id, consumer) VALUES (:intent_id, :consumer) ON CONFLICT (intent_id, consumer) DO NOTHING"),
                     {"intent_id": intent_id, "consumer": consumer}
-                ).fetchone()
-                if result is None:
-                    db.execute(
-                        text("INSERT INTO intent_consumptions (intent_id, consumer) VALUES (:intent_id, :consumer) ON CONFLICT (intent_id, consumer) DO NOTHING"),
-                        {"intent_id": intent_id, "consumer": consumer}
-                    )
-                    db.commit()
-            else:
-                # Entorno sin soporte de SQL execution explícita (por ejemplo, FakeDB de tests).
-                # Continuar sin consumo persistente de intent_key en este contexto.
-                pass
+                )
+                db.commit()
         try:
             qty_meta = prepare_binance_market_order_quantity(
                 symbol=symbol,
@@ -486,6 +438,19 @@ def execute_binance_test_order_for_user(
                 market=market,
             )
             # Attach broker_execution_id and broker_execution_id_type to the intent consumption record if intent_key is present
+
+            if intent_key:
+                store = IntentConsumptionStore()
+                store.attach_execution(
+                    user_id=user_id,
+                    broker="IBKR",
+                    intent_key=intent_key,
+                    account_id=account_id,
+                    execution_id=order_ref,
+                    execution_id_type="client_order_id",
+                    symbol=symbol,
+                ) 
+
             if intent_key:
                 store = IntentConsumptionStore()
                 store.attach_execution(
@@ -601,9 +566,7 @@ def _build_binance_client_order_id(
         return f"csi{digest[:33]}"
 
     # Legacy behavior outside hardened live auto-pick flow.
-    if not key:
-        raise RuntimeError("kernel_dispatch_guard: missing intent_key for deterministic client_order_id")
-    seed = f"{user_id}|{symbol.upper()}|{side.upper()}|{qty}|{key}"
+    seed = f"{user_id}|{symbol.upper()}|{side.upper()}|{qty}|{uuid.uuid4().hex[:10]}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
     return f"cs{digest}"
 
@@ -674,54 +637,58 @@ def _send_binance_test_order(
     adapter = _build_binance_broker_adapter(api_key=api_key, api_secret=api_secret)
 
     gateway_enabled = bool(settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL)
+    if not gateway_enabled:
+        _retry_once_on_gateway_502(
+            adapter.send_order,
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+            client_order_id=client_order_id,
+            market=market,
+        )
+        return
 
-    if gateway_enabled:
-        try:
-            _send_binance_test_order_via_gateway(
-                api_key=api_key,
-                api_secret=api_secret,
-                symbol=symbol,
-                side=side,
-                qty=qty,
-                client_order_id=client_order_id,
-                market=market,
-            )
-            return
-        except Exception as exc:
-            msg = str(exc or "")
+    try:
+        _send_binance_test_order_via_gateway(
+            api_key=api_key,
+            api_secret=api_secret,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            client_order_id=client_order_id,
+            market=market,
+        )
+    except Exception as exc:
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            raise
+        if "gateway_upstream_error status=" in str(exc or ""):
+            raise
+        _retry_once_on_gateway_502(
+            adapter.send_order,
+            symbol=symbol,
+            side=side,
+            quantity=qty,
+            client_order_id=client_order_id,
+            market=market,
+        )
 
-            # retry SOLO si es 502
-            if msg.strip() == "gateway_upstream_error status=502":
-                raise
+# Refactored helper for single retry on gateway 502
+def _retry_once_on_gateway_502(send_func, *args, **kwargs):
+    """
+    Calls send_func, retries once only if error contains 'gateway_upstream_error status=502'.
+    No retry for timeout/timed out. No retry for reconciliation/query.
+    """
+    try:
+        return send_func(*args, **kwargs)
+    except Exception as exc:
+        msg = str(exc or "")
+        if "gateway_upstream_error status=502" in msg and not ("timeout" in msg or "timed out" in msg):
+            try:
+                return send_func(*args, **kwargs)
+            except Exception as exc2:
+                raise exc2
+        raise exc
 
-            return adapter.send_order(
-                    symbol=symbol,
-                    side=side,
-                    quantity=qty,
-                    client_order_id=client_order_id,
-                    market=market,
-                )
-
-            if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                raise
-
-            # fallback controlado
-            return adapter.send_order(
-                symbol=symbol,
-                side=side,
-                quantity=qty,
-                client_order_id=client_order_id,
-                market=market,
-            )
-
-    # sin gateway
-    return adapter.send_order(
-        symbol=symbol,
-        side=side,
-        quantity=qty,
-        client_order_id=client_order_id,
-        market=market,
-    )
 
 
 def _send_binance_test_order_via_gateway(
@@ -743,6 +710,7 @@ def _send_binance_test_order_via_gateway(
         "market": str(market or "SPOT").upper(),
     }
     _post_binance_gateway("/binance/test-order", payload)
+
 
 def _get_binance_account_status(
     api_key: str,
@@ -1067,17 +1035,14 @@ def execute_ibkr_test_order_for_user(
             "order_ref": order_ref,
         })
         # --- Integración de reconciliación IBKR ---
-        from apps.api.app.services.ibkr_reconciliation import get_ibkr_reconciliation_source, reconcile_ibkr_fills, persist_ibkr_fills
+        from apps.api.app.services.ibkr_reconciliation import get_ibkr_reconciliation_source, reconcile_ibkr_fills
         fills = get_ibkr_reconciliation_source(
             execution_ref=order_ref,
             user_id=user_id,
             account_id=account_id,
             db=db,
-            mode="ibkr_real",
+            mode="dummy_db",  # O configurable si se requiere real
         )
-
-        persist_ibkr_fills(db, fills)
-
         reconciliation = reconcile_ibkr_fills(fills, expected_qty=qty)
         reconciliation_status = reconciliation["status"] 
         total_qty = reconciliation.get("total_qty", 0)

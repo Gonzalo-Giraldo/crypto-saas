@@ -1516,7 +1516,7 @@ def _fetch_binance_ticker_rows() -> list[dict]:
             with _binance_ticker_cache_lock:
                 return list(_binance_ticker_cache_rows)
 
-    base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
+    base = (settings.BINANCE_SPOT_BASE_URL or settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
     url = f"{base}/api/v3/ticker/24hr"
     req = urllib_request.Request(url, method="GET")
     rows = _run_request(req, timeout=6)
@@ -1565,7 +1565,7 @@ def _fetch_binance_klines(symbol: str, interval: str, limit: int) -> list[list]:
                 return []
 
     if not rows:
-        base = (settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
+        base = (settings.BINANCE_SPOT_BASE_URL or settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
         url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': iv, 'limit': lim})}"
         try:
             req = urllib_request.Request(url, method="GET")

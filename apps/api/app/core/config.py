@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY_VERSION: str = "v1"
     ENCRYPTION_KEY_PREVIOUS: str = ""
     ENCRYPTION_KEY_PREVIOUS_VERSION: str = ""
+    BINANCE_SPOT_BASE_URL: str = ""
     BINANCE_TESTNET_BASE_URL: str = "https://testnet.binance.vision"
     BINANCE_FUTURES_BASE_URL: str = "https://testnet.binancefuture.com"
     BINANCE_GATEWAY_ENABLED: bool = False

@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Query, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 
 from apps.api.app.db.session import get_db
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
@@ -77,12 +76,11 @@ def get_intent_ibkr_trades(
     if not creds:
         return {"success": False, "error": "No IBKR credentials"}
     try:
-        order_ref = broker_execution_id
         result = get_ibkr_trades(
             api_key=creds["api_key"],
             api_secret=creds["api_secret"],
             symbol=symbol,
-            client_order_id=order_ref,
+            client_order_id=broker_execution_id,
         )
         # Persistencia mínima e idempotente de fills IBKR
         fills = []
@@ -90,75 +88,25 @@ def get_intent_ibkr_trades(
             fill_id = trade.get("trade_id")
             if not fill_id:
                 continue
-            try:
-
+            # Check if fill already exists
+            exists = db.execute(select(IbkrFill).where(IbkrFill.fill_id == fill_id)).scalar_one_or_none()
+            if not exists:
                 fill = IbkrFill(
                     fill_id=fill_id,
+                    execution_ref=broker_execution_id,
                     symbol=trade.get("symbol"),
                     qty=trade.get("qty"),
                     price=trade.get("price"),
                     timestamp=trade.get("timestamp"),
                     user_id=user_id,
                     broker="ibkr",
-                    execution_ref=broker_execution_id,
-                    account_id=trade.get("account_id"),
-                    side=trade.get("side"),
-                    order_id=trade.get("order_id"),
-                    perm_id=trade.get("perm_id"),
-                    client_id=trade.get("client_id"),
-                    order_ref=trade.get("order_ref"),
-                    cum_qty=trade.get("cum_qty"),
-                    avg_price=trade.get("avg_price"),
                 )
                 db.add(fill)
                 db.commit()
                 db.refresh(fill)
-
-                fills.append({
-                    "fill_id": fill.fill_id,
-                    "symbol": fill.symbol,
-                    "qty": fill.qty,
-                    "price": fill.price,
-                    "timestamp": fill.timestamp,
-                    "user_id": fill.user_id,
-                    "broker": fill.broker,
-                    "execution_ref": fill.execution_ref,
-                    "account_id": fill.account_id,
-                    "side": fill.side,
-                    "order_id": fill.order_id,
-                    "perm_id": fill.perm_id,
-                    "client_id": fill.client_id,
-                    "order_ref": fill.order_ref,
-                    "cum_qty": fill.cum_qty,
-                    "avg_price": fill.avg_price,
-                })
-
-            except IntegrityError:
-                db.rollback()
-                existing = db.execute(
-                    select(IbkrFill).where(IbkrFill.fill_id == fill_id)
-                ).scalar_one()
-
-                fills.append({
-                    "fill_id": existing.fill_id,
-                    "symbol": existing.symbol,
-                    "qty": existing.qty,
-                    "price": existing.price,
-                    "timestamp": existing.timestamp,
-                    "user_id": existing.user_id,
-                    "broker": existing.broker,
-                    "execution_ref": existing.execution_ref,
-                    "account_id": existing.account_id,
-                    "side": existing.side,
-                    "order_id": existing.order_id,
-                    "perm_id": existing.perm_id,
-                    "client_id": existing.client_id,
-                    "order_ref": existing.order_ref,
-                    "cum_qty": existing.cum_qty,
-                    "avg_price": existing.avg_price,
-                })
-
-                # Check if fill already exists
-        return {"success": True, "order_ref": order_ref, "payload": result, "fills": fills}
+                fills.append({"fill_id": fill.fill_id, "symbol": fill.symbol, "qty": fill.qty, "price": fill.price, "timestamp": fill.timestamp, "user_id": fill.user_id, "broker": fill.broker, "execution_ref": fill.execution_ref})
+            else:
+                fills.append({"fill_id": exists.fill_id, "symbol": exists.symbol, "qty": exists.qty, "price": exists.price, "timestamp": exists.timestamp, "user_id": exists.user_id, "broker": exists.broker, "execution_ref": exists.execution_ref})
+        return {"success": True, "payload": result, "fills": fills}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
