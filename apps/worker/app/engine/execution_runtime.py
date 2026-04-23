@@ -368,7 +368,161 @@ def resolve_execution_quantity_preview(
     }
 
 
+
 def execute_binance_test_order_for_user(
+    user_id: str,
+    symbol: str,
+    side: str,
+    qty: float,
+    intent_key: str | None = None,
+    account_id: str | None = None,
+):
+    db = SessionLocal()
+    try:
+        _assert_binance_gateway_policy()
+        creds = get_decrypted_exchange_secret(
+            db=db,
+            user_id=user_id,
+            exchange="BINANCE",
+        )
+        if not creds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing credentials for BINANCE",
+            )
+
+        market = "FUTURES" if str(side or "").upper() == "SELL" else "SPOT"
+        runtime_context = {}
+        if account_id is not None and str(account_id).strip():
+            runtime_context["account_id"] = account_id
+
+        if intent_key:
+            def _build_consumer(user_id, broker, account_id=None):
+                acc = account_id if (account_id is not None and str(account_id).strip()) else "no-account"
+                return f"{user_id}:{broker}:{acc}"
+
+            intent_id = str(intent_key)
+            consumer = _build_consumer(user_id, "BINANCE", account_id)
+            result = db.execute(
+                text("SELECT 1 FROM intent_consumptions WHERE intent_id = :intent_id AND consumer = :consumer LIMIT 1"),
+                {"intent_id": intent_id, "consumer": consumer}
+            ).fetchone()
+            if result is None:
+                db.execute(
+                    text("INSERT INTO intent_consumptions (intent_id, consumer) VALUES (:intent_id, :consumer) ON CONFLICT (intent_id, consumer) DO NOTHING"),
+                    {"intent_id": intent_id, "consumer": consumer}
+                )
+                db.commit()
+
+        try:
+            qty_meta = prepare_binance_market_order_quantity(
+                symbol=symbol,
+                requested_qty=qty,
+                market=market,
+            )
+            client_order_id = _build_binance_client_order_id(
+                user_id=user_id,
+                symbol=symbol,
+                side=side,
+                qty=float(qty_meta["normalized_qty"]),
+                market=market,
+                intent_key=intent_key,
+            )
+            _send_binance_test_order_with_retry(
+                api_key=creds["api_key"],
+                api_secret=creds["api_secret"],
+                symbol=symbol,
+                side=side,
+                qty=float(qty_meta["normalized_qty"]),
+                client_order_id=client_order_id,
+                market=market,
+            )
+
+            if intent_key:
+                store = IntentConsumptionStore()
+                store.attach_execution(
+                    user_id=user_id,
+                    broker="BINANCE",
+                    intent_key=intent_key,
+                    account_id=account_id,
+                    execution_id=client_order_id,
+                    execution_id_type="client_order_id",
+                    symbol=symbol,
+                    market=market,
+                )
+
+        except Exception as exc:
+            details = {
+                "symbol": symbol,
+                "side": side,
+                "qty": qty,
+                "client_order_id": locals().get("client_order_id"),
+                "normalized_qty": (locals().get("qty_meta") or {}).get("normalized_qty"),
+                "market": market,
+                "error": str(exc),
+            }
+            if locals().get("client_order_id") and _is_uncertain_binance_timeout_error(exc):
+                reconciliation_attempt = {
+                    "client_order_id": client_order_id,
+                    **_reconcile_binance_test_order_best_effort(
+                        api_key=creds["api_key"],
+                        api_secret=creds["api_secret"],
+                        symbol=symbol,
+                        client_order_id=client_order_id,
+                        market=market,
+                    ),
+                }
+                details["reconciliation_attempt"] = reconciliation_attempt
+                details["reconciliation_classification"] = _classify_binance_reconciliation(
+                    result=reconciliation_attempt.get("result"),
+                    error=reconciliation_attempt.get("error"),
+                )
+            log_audit_event(
+                db,
+                action="execution.binance.test_order.error",
+                user_id=user_id,
+                entity_type="execution",
+                details=details,
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Binance test order failed: {exc}",
+            )
+
+        log_audit_event(
+            db,
+            action="execution.binance.test_order.success",
+            user_id=user_id,
+            entity_type="execution",
+            details={
+                "symbol": symbol,
+                "side": side,
+                "qty_requested": qty,
+                "qty_normalized": qty_meta["normalized_qty"],
+                "client_order_id": client_order_id,
+                "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+                "market": market,
+            },
+        )
+        db.commit()
+
+        return {
+            "exchange": "BINANCE",
+            "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "qty": float(qty_meta["normalized_qty"]),
+            "qty_requested": float(qty),
+            "client_order_id": client_order_id,
+            "validation": qty_meta,
+            "sent": True,
+        }
+    finally:
+        db.close()
+
+
+def execute_binance_real_order_for_user(
     user_id: str,
     symbol: str,
     side: str,

@@ -661,6 +661,7 @@ from apps.worker.app.engine.execution_runtime import (
     get_binance_spot_usdt_free_for_user,
     get_ibkr_account_status_for_user,
     execute_binance_test_order_for_user,
+    execute_binance_real_order_for_user,
     execute_ibkr_test_order_for_user,
     prepare_execution_for_user,
     resolve_execution_quantity_preview,
@@ -7575,6 +7576,104 @@ def execution_binance_test_order(
         db=db,
         user_id=current_user.id,
         endpoint="/ops/execution/binance/test-order",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+        response_payload=result,
+        status_code=200,
+    )
+
+    return result
+
+
+@router.post("/execution/binance/order", response_model=BinanceTestOrderOut)
+def execution_binance_order(
+    payload: BinanceTestOrderRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    assert_trading_enabled(
+        db=db,
+        current_user=current_user,
+        action="order",
+        exchange="BINANCE",
+    )
+    _assert_exchange_enabled(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+    )
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+        symbol=payload.symbol,
+        qty=payload.qty,
+        price_estimate=0.0,
+    )
+    req_payload = payload.model_dump()
+    if not str(idempotency_key or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="idempotency_key (intent_key) is required for execution",
+        )
+
+    cached_response = reserve_idempotent_intent(
+        db=db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/binance/order",
+        idempotency_key=idempotency_key,
+        request_payload=req_payload,
+    )
+
+    if cached_response is not None:
+        if isinstance(cached_response, dict) and "detail" in cached_response:
+            raise HTTPException(
+                status_code=int(cached_response.get("_idempotency_status_code", 400)),
+                detail=cached_response["detail"],
+            )
+        return cached_response
+
+    intent = create_binance_intent(
+        db=db,
+        user_id=current_user.id,
+        account_id="default",
+        symbol=payload.symbol,
+        side=payload.side,
+        expected_qty=payload.qty,
+        entry_price=getattr(payload, "entry_price", None),
+        stop_loss=getattr(payload, "stop_loss", None),
+        take_profit=getattr(payload, "take_profit", None),
+    )
+
+    try:
+        result = execute_binance_real_order_for_user(
+            user_id=current_user.id,
+            symbol=payload.symbol,
+            side=payload.side,
+            qty=payload.qty,
+            intent_key=intent["intent_id"],
+        )
+    except HTTPException as exc:
+        error_payload = {
+            "detail": str(exc.detail),
+            "intent_id": intent["intent_id"],
+        }
+        finalize_idempotent_intent(
+            db=db,
+            user_id=current_user.id,
+            endpoint="/ops/execution/binance/order",
+            idempotency_key=idempotency_key,
+            request_payload=req_payload,
+            response_payload=error_payload,
+            status_code=exc.status_code,
+        )
+        raise
+
+    finalize_idempotent_intent(
+        db=db,
+        user_id=current_user.id,
+        endpoint="/ops/execution/binance/order",
         idempotency_key=idempotency_key,
         request_payload=req_payload,
         response_payload=result,
