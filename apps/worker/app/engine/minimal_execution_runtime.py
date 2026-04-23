@@ -32,13 +32,17 @@ class IntentConsumptionStore:
                 text("""
                     UPDATE intent_consumptions
                     SET execution_ref = :execution_ref,
-                        symbol = COALESCE(:symbol, symbol)
+                        broker_execution_id_type = COALESCE(:broker_execution_id_type, broker_execution_id_type),
+                        symbol = COALESCE(:symbol, symbol),
+                        market = COALESCE(:market, market)
                     WHERE intent_id = :intent_id
                       AND consumer = :consumer
                 """),
                 {
                     "execution_ref": execution_id,
+                    "broker_execution_id_type": execution_id_type,
                     "symbol": symbol,
+                    "market": market,
                     "intent_id": intent_id,
                     "consumer": consumer,
                 }
@@ -90,7 +94,7 @@ class IntentConsumptionStore:
             from sqlalchemy import text
             row = db.execute(
                 text("""
-                    SELECT execution_ref, symbol
+                    SELECT execution_ref, broker_execution_id_type, symbol, market
                     FROM intent_consumptions
                     WHERE intent_id = :intent_id AND consumer = :consumer
                     LIMIT 1
@@ -99,7 +103,7 @@ class IntentConsumptionStore:
             ).fetchone()
 
             if row is not None:
-                execution_ref, symbol = row
+                execution_ref, broker_execution_id_type, symbol, market = row
                 result = {
                     "found": True,
                     "intent_key": intent_key,
@@ -110,8 +114,12 @@ class IntentConsumptionStore:
                 }
                 if execution_ref:
                     result["broker_execution_id"] = execution_ref
+                if broker_execution_id_type:
+                    result["broker_execution_id_type"] = broker_execution_id_type
                 if symbol:
                     result["symbol"] = symbol
+                if market:
+                    result["market"] = market
                 return result
 
             return {
