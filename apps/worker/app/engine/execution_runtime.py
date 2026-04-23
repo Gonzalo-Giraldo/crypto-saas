@@ -443,18 +443,6 @@ def execute_binance_test_order_for_user(
                 store = IntentConsumptionStore()
                 store.attach_execution(
                     user_id=user_id,
-                    broker="IBKR",
-                    intent_key=intent_key,
-                    account_id=account_id,
-                    execution_id=order_ref,
-                    execution_id_type="client_order_id",
-                    symbol=symbol,
-                ) 
-
-            if intent_key:
-                store = IntentConsumptionStore()
-                store.attach_execution(
-                    user_id=user_id,
                     broker="BINANCE",
                     intent_key=intent_key,
                     account_id=account_id,
