@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.worker.app.engine.binance_client import cancel_order, query_order_status, send_test_order
+from apps.worker.app.engine.binance_client import cancel_order, query_order_status, send_test_order, send_order_real
 from apps.worker.app.engine.broker_adapter import BrokerAdapter
 
 
@@ -21,7 +21,7 @@ class BinanceBrokerAdapter(BrokerAdapter):
         client_order_id: str | None = None,
         market: str | None = None,
     ) -> dict[str, Any]:
-        return send_test_order(
+        return send_order_real(
             api_key=self._api_key,
             api_secret=self._api_secret,
             symbol=symbol,

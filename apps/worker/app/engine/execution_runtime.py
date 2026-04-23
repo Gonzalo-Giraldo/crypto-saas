@@ -428,12 +428,15 @@ def execute_binance_test_order_for_user(
                 market=market,
                 intent_key=intent_key,
             )
-            _send_binance_test_order_with_retry(
+            adapter = _build_binance_broker_adapter(
                 api_key=creds["api_key"],
                 api_secret=creds["api_secret"],
+            )
+            adapter.send_order(
                 symbol=symbol,
                 side=side,
-                qty=float(qty_meta["normalized_qty"]),
+                quantity=float(qty_meta["normalized_qty"]),
+                order_type="MARKET",
                 client_order_id=client_order_id,
                 market=market,
             )
