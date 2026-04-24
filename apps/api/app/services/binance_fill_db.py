@@ -155,6 +155,7 @@ def persist_binance_fills_db(db, fills: list, user_id: str, account_id: str, bro
             commission_asset=fill.get("commissionAsset"),
             commission_price_usdt=commission_price_usdt,
             commission_usdt=commission_usdt,
+            realized_pnl=_to_decimal(fill.get("realizedPnl")),
             executed_at_ms=fill.get("time"),
         )
 

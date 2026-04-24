@@ -21,6 +21,7 @@ class BinanceFill(Base):
     commission_asset = Column(String, nullable=True)
     commission_price_usdt = Column(Numeric, nullable=True)
     commission_usdt = Column(Numeric, nullable=True)
+    realized_pnl = Column(Numeric, nullable=True)
     executed_at_ms = Column(BigInteger, nullable=True)
 
     __table_args__ = (
