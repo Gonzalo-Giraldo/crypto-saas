@@ -419,3 +419,40 @@ def _enforce_rate_limit(key: str) -> None:
         _rate_state[key] = (minute, count)
         if count > RATE_LIMIT_PER_MIN:
             raise HTTPException(status_code=429, detail="rate_limit_exceeded")
+
+class BinanceFuturesAccountIn(BaseModel):
+    api_key: str
+    api_secret: str
+
+
+@app.post("/binance/futures-account")
+def binance_futures_account(payload: BinanceFuturesAccountIn, x_internal_token: str = Header(default="")):
+    _authorize_internal_request(x_internal_token)
+
+    params = {
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{BINANCE_FUTURES_BASE}/fapi/v2/account?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": payload.api_key}
+
+    response = _request_upstream("GET", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="invalid_futures_account_payload")
+
+    return {
+        "mode": "gateway_futures_account",
+        "assets": data.get("assets", []),
+        "positions": data.get("positions", []),
+    }
+
