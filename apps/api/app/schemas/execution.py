@@ -39,11 +39,11 @@ class ExecutionPrepareOut(BaseModel):
     api_key_masked: str
     signature_preview: str
 
-
 class BinanceTestOrderRequest(BaseModel):
     symbol: str
     side: str
     qty: float
+    market: Optional[str] = None
     account_id: Optional[str] = None
     entry_price: Optional[float] = None
     stop_loss: Optional[float] = None
@@ -57,6 +57,15 @@ class BinanceTestOrderRequest(BaseModel):
             raise ValueError("side must be BUY or SELL")
         return normalized
 
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, value):
+        if value is None:
+            return value
+        v = value.upper()
+        if v not in ("SPOT", "FUTURES"):
+            raise ValueError("market must be SPOT or FUTURES")
+        return v
 
 class BinanceTestOrderOut(BaseModel):
     exchange: str

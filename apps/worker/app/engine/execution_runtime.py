@@ -529,6 +529,7 @@ def execute_binance_real_order_for_user(
     qty: float,
     intent_key: str | None = None,
     account_id: str | None = None,
+    market: str | None = None,
 ):
     db = SessionLocal()
     try:
@@ -544,7 +545,8 @@ def execute_binance_real_order_for_user(
                 detail="Missing credentials for BINANCE",
             )
 
-        market = "FUTURES" if str(side or "").upper() == "SELL" else "SPOT"
+        requested_market = str(market or "").upper().strip() if market is not None else ""
+        market = requested_market if requested_market in {"SPOT", "FUTURES"} else ("FUTURES" if str(side or "").upper() == "SELL" else "SPOT")
         # Contexto interno del runtime
         runtime_context = {}
         if account_id is not None and str(account_id).strip():

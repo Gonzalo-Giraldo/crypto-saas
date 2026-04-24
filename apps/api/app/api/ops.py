@@ -7723,6 +7723,7 @@ def execution_binance_order(
             side=payload.side,
             qty=payload.qty,
             intent_key=intent["intent_id"],
+            market=payload.market,
         )
     except HTTPException as exc:
         error_payload = {
