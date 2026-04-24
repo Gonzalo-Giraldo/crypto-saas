@@ -142,6 +142,31 @@ def send_order_real(
     market: str = "SPOT",
 ):
     market_norm = _normalize_market(market)
+
+    if _gateway_enabled():
+        body = _post_gateway(
+            "/binance/order",
+            {
+                "api_key": api_key,
+                "api_secret": api_secret,
+                "symbol": symbol.upper(),
+                "side": side.upper(),
+                "qty": quantity,
+                "client_order_id": client_order_id,
+                "market": market_norm,
+            },
+            timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+        )
+        if not isinstance(body, dict):
+            raise RuntimeError("invalid_binance_gateway_order_response")
+        data = body.get("data") if isinstance(body.get("data"), dict) else body
+        if not isinstance(data, dict):
+            raise RuntimeError("invalid_binance_gateway_order_data")
+        return data
+
+    if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+        raise RuntimeError("binance_gateway_disabled_and_direct_fallback_disabled")
+
     base_url = _base_url_for_market(market_norm)
     endpoint = "/fapi/v1/order" if market_norm == "FUTURES" else "/api/v3/order"
 

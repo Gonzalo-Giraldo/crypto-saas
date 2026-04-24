@@ -139,6 +139,46 @@ def healthz():
         return {"status": "degraded", "binance_check": "unreachable"}
 
 
+
+
+@app.post("/binance/order")
+def binance_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
+    _authorize_internal_request(x_internal_token)
+
+    market = _resolve_market(payload.market)
+    base_url = _base_url_for_market(market)
+    endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
+
+    params = {
+        "symbol": payload.symbol.upper(),
+        "side": payload.side.upper(),
+        "type": "MARKET",
+        "quantity": payload.qty,
+        "timestamp": int(time.time() * 1000),
+    }
+    if payload.client_order_id:
+        params["newClientOrderId"] = str(payload.client_order_id)[:36]
+
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": payload.api_key}
+    response = _request_upstream("POST", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
+
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="invalid_order_payload")
+
+    return {"ok": True, "mode": f"gateway_order_{market.lower()}", "data": data}
+
 @app.post("/binance/test-order")
 def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
     _authorize_internal_request(x_internal_token)
