@@ -29,6 +29,16 @@ RATE_LIMIT_PER_MIN = int(os.getenv("BINANCE_GATEWAY_RATE_LIMIT_PER_MIN", "60"))
 
 _RATE_LOCK = threading.Lock()
 _rate_state: dict[str, tuple[int, int]] = {}
+# Circuit breaker state
+_CIRCUIT_LOCK = threading.Lock()
+_circuit_state = {
+    "fail_count": 0,
+    "open_until": 0.0,
+}
+
+CIRCUIT_BREAKER_THRESHOLD = int(os.getenv("BINANCE_CB_THRESHOLD", "5"))
+CIRCUIT_BREAKER_COOLDOWN_SEC = int(os.getenv("BINANCE_CB_COOLDOWN", "10"))
+
 
 
 class BinanceTestOrderIn(BaseModel):
@@ -113,7 +123,15 @@ def _sanitize_upstream_log_url(url: object) -> str:
 
 
 def _request_upstream(*args, **kwargs):
-    timestamp = time.time()
+    now = time.time()
+    with _CIRCUIT_LOCK:
+        if _circuit_state["open_until"] > now:
+            raise HTTPException(
+                status_code=503,
+                detail="binance_circuit_open",
+            )
+
+    timestamp = now
     started = time.perf_counter()
     status_code = None
     method = kwargs.get("method")
@@ -133,13 +151,30 @@ def _request_upstream(*args, **kwargs):
 
     try:
         result = _request_upstream_raw(*args, **kwargs)
+
         if hasattr(result, "status_code"):
             status_code = result.status_code
         elif isinstance(result, dict):
             status_code = result.get("status_code") or result.get("status")
+
+        if isinstance(status_code, int) and status_code >= 400:
+            with _CIRCUIT_LOCK:
+                _circuit_state["fail_count"] += 1
+                if _circuit_state["fail_count"] >= CIRCUIT_BREAKER_THRESHOLD:
+                    _circuit_state["open_until"] = time.time() + CIRCUIT_BREAKER_COOLDOWN_SEC
+        else:
+            with _CIRCUIT_LOCK:
+                _circuit_state["fail_count"] = 0
+
         return result
     except Exception as exc:
         status_code = getattr(exc, "code", None) or getattr(exc, "status", None)
+
+        with _CIRCUIT_LOCK:
+            _circuit_state["fail_count"] += 1
+            if _circuit_state["fail_count"] >= CIRCUIT_BREAKER_THRESHOLD:
+                _circuit_state["open_until"] = time.time() + CIRCUIT_BREAKER_COOLDOWN_SEC
+
         raise
     finally:
         duration_ms = round((time.perf_counter() - started) * 1000, 3)
