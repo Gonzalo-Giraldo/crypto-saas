@@ -67,6 +67,8 @@ class BinanceKlinesIn(BaseModel):
     interval: str = "1h"
     limit: int = 120
     market: str | None = None
+    start_time_ms: int | None = None
+    end_time_ms: int | None = None
 
 
 class BinanceExchangeInfoIn(BaseModel):
@@ -343,10 +345,16 @@ def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(defa
     limit = max(10, min(int(payload.limit or 120), 1000))
     if not symbol:
         raise HTTPException(status_code=400, detail="symbol_required")
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+    if payload.start_time_ms is not None:
+        params["startTime"] = int(payload.start_time_ms)
+    if payload.end_time_ms is not None:
+        params["endTime"] = int(payload.end_time_ms)
+
     if market == "FUTURES":
-        url = f"{BINANCE_FUTURES_BASE}/fapi/v1/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
+        url = f"{BINANCE_FUTURES_BASE}/fapi/v1/klines?{urlencode(params)}"
     else:
-        url = f"{BINANCE_SPOT_BASE}/api/v3/klines?{urlencode({'symbol': symbol, 'interval': interval, 'limit': limit})}"
+        url = f"{BINANCE_SPOT_BASE}/api/v3/klines?{urlencode(params)}"
     data = _request_upstream_json("GET", url, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
     if not isinstance(data, list):
         raise HTTPException(status_code=502, detail="invalid_klines_payload")

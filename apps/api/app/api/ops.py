@@ -1521,7 +1521,7 @@ def _fetch_binance_ticker_rows() -> list[dict]:
         return list(_binance_ticker_cache_rows)
 
 
-def _fetch_binance_klines(symbol: str, interval: str, limit: int) -> list[list]:
+def _fetch_binance_klines(symbol: str, interval: str, limit: int, start_time_ms: int | None = None, end_time_ms: int | None = None) -> list[list]:
     sym = str(symbol or "").upper().strip()
     iv = str(interval or "1h").strip()
     if not sym:
@@ -1529,7 +1529,7 @@ def _fetch_binance_klines(symbol: str, interval: str, limit: int) -> list[list]:
     lim = max(30, min(int(limit), 500))
     cache_ttl = max(5, int(settings.BINANCE_MTF_CACHE_SECONDS or 60))
     now_ts = time.time()
-    key = (sym, iv)
+    key = (sym, iv, start_time_ms, end_time_ms)
     with _binance_klines_cache_lock:
         cached = _binance_klines_cache.get(key)
         if cached and now_ts < cached[0]:
@@ -1541,7 +1541,12 @@ def _fetch_binance_klines(symbol: str, interval: str, limit: int) -> list[list]:
         try:
             base = settings.BINANCE_GATEWAY_BASE_URL.rstrip("/")
             url = f"{base}/binance/klines"
-            body = json.dumps({"symbol": sym, "interval": iv, "limit": lim}).encode("utf-8")
+            gateway_payload = {"symbol": sym, "interval": iv, "limit": lim}
+            if start_time_ms is not None:
+                gateway_payload["start_time_ms"] = int(start_time_ms)
+            if end_time_ms is not None:
+                gateway_payload["end_time_ms"] = int(end_time_ms)
+            body = json.dumps(gateway_payload).encode("utf-8")
             req = urllib_request.Request(
                 url,
                 method="POST",
@@ -1561,7 +1566,12 @@ def _fetch_binance_klines(symbol: str, interval: str, limit: int) -> list[list]:
 
     if not rows:
         base = (settings.BINANCE_SPOT_BASE_URL or settings.BINANCE_TESTNET_BASE_URL or "https://testnet.binance.vision").rstrip("/")
-        url = f"{base}/api/v3/klines?{urllib_parse.urlencode({'symbol': sym, 'interval': iv, 'limit': lim})}"
+        params = {"symbol": sym, "interval": iv, "limit": lim}
+        if start_time_ms is not None:
+            params["startTime"] = int(start_time_ms)
+        if end_time_ms is not None:
+            params["endTime"] = int(end_time_ms)
+        url = f"{base}/api/v3/klines?{urllib_parse.urlencode(params)}"
         try:
             req = urllib_request.Request(url, method="GET")
             with urllib_request.urlopen(req, timeout=6) as resp:  # noqa: S310
