@@ -8,6 +8,9 @@ import threading
 import requests
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
+import inspect
+import json
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 app = FastAPI()
 
@@ -92,7 +95,71 @@ def _base_url_for_market(market: str) -> str:
     return BINANCE_FUTURES_BASE if market == "FUTURES" else BINANCE_SPOT_BASE
 
 
-def _request_upstream(method: str, url: str, **kwargs) -> requests.Response:
+
+def _sanitize_upstream_log_url(url: object) -> str:
+    raw = str(url)
+    try:
+        parts = urlsplit(raw)
+        filtered_query = urlencode(
+            [
+                (key, value)
+                for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                if key.lower() not in {"api_key", "apikey", "signature"}
+            ]
+        )
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, filtered_query, parts.fragment))
+    except Exception:
+        return "<unparseable_url_redacted>"
+
+
+def _request_upstream(*args, **kwargs):
+    timestamp = time.time()
+    started = time.perf_counter()
+    status_code = None
+    method = kwargs.get("method")
+    url = kwargs.get("url")
+
+    try:
+        bound = inspect.signature(_request_upstream_raw).bind_partial(*args, **kwargs)
+        if method is None:
+            method = bound.arguments.get("method")
+        if url is None:
+            url = bound.arguments.get("url")
+    except Exception:
+        if args and method is None:
+            method = args[0]
+        if len(args) > 1 and url is None:
+            url = args[1]
+
+    try:
+        result = _request_upstream_raw(*args, **kwargs)
+        if hasattr(result, "status_code"):
+            status_code = result.status_code
+        elif isinstance(result, dict):
+            status_code = result.get("status_code") or result.get("status")
+        return result
+    except Exception as exc:
+        status_code = getattr(exc, "code", None) or getattr(exc, "status", None)
+        raise
+    finally:
+        duration_ms = round((time.perf_counter() - started) * 1000, 3)
+        print(
+            json.dumps(
+                {
+                    "event": "binance_gateway_upstream_request",
+                    "method": str(method or "GET").upper(),
+                    "url": _sanitize_upstream_log_url(url),
+                    "timestamp": timestamp,
+                    "status_code": status_code,
+                    "duration_ms": duration_ms,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
+
+def _request_upstream_raw(method: str, url: str, **kwargs) -> requests.Response:
     try:
         return requests.request(method=method.upper(), url=url, **kwargs)
     except requests.RequestException:
