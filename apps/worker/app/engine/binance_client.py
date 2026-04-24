@@ -100,36 +100,26 @@ def send_test_order(
     market: str = "SPOT",
 ):
     market_norm = _normalize_market(market)
-    endpoint = _order_test_endpoint_for_market(market_norm)
-    base_url = _base_url_for_market(market_norm)
 
-    params = {
-        "symbol": symbol.upper(),
-        "side": side.upper(),
-        "type": order_type.upper(),
-        "quantity": quantity,
-        "timestamp": int(time.time() * 1000),
-    }
-    if client_order_id:
-        params["newClientOrderId"] = client_order_id[:36]
+    if not _gateway_enabled():
+        raise RuntimeError("binance_gateway_required_for_test_order")
 
-    query = urlencode(params)
-    signature = hmac.new(
-        api_secret.encode("utf-8"),
-        query.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-    signed_query = f"{query}&signature={signature}"
-    url = f"{base_url}{endpoint}?{signed_query}"
-    headers = {"X-MBX-APIKEY": api_key}
-
-    response = requests.post(url, headers=headers, timeout=10)
-    if response.status_code >= 400:
-        detail = response.text
-        raise RuntimeError(f"Binance testnet error {response.status_code}: {detail}")
-
-    return {"ok": True}
+    body = _post_gateway(
+        "/binance/test-order",
+        {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "symbol": symbol.upper(),
+            "side": side.upper(),
+            "qty": quantity,
+            "client_order_id": client_order_id,
+            "market": market_norm,
+        },
+        timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+    )
+    if not isinstance(body, dict):
+        raise RuntimeError("invalid_binance_gateway_test_order_response")
+    return body
 
 def send_order_real(
     api_key: str,
@@ -340,6 +330,8 @@ def _fetch_exchange_info_rows_with_gateway_fallback(
             if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
                 raise
     if rows is None:
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            raise RuntimeError("binance_direct_exchange_info_disabled")
         response = requests.get(direct_url, timeout=10)
         if response.status_code >= 400:
             detail = response.text
@@ -404,8 +396,10 @@ def _fetch_ticker_price_body_with_gateway_fallback(
                 body = row
         except Exception:
             if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
-                return None
+                raise
     if body is None:
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            raise RuntimeError("binance_direct_ticker_price_disabled")
         response = requests.get(direct_url, timeout=8)
         if response.status_code >= 400:
             return None
@@ -556,6 +550,8 @@ def get_account_status(
     api_key: str,
     api_secret: str,
 ):
+    if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+        raise RuntimeError("binance_direct_account_status_disabled")
     endpoint = "/api/v3/account"
     base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
     params = {
