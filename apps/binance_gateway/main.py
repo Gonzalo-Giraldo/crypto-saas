@@ -187,10 +187,20 @@ def _request_upstream_json(method: str, url: str, timeout: int) -> object:
     return response.json()
 
 
-def _authorize_internal_request(x_internal_token: str) -> None:
+def _endpoint_weight(path: str) -> int:
+    weights = {
+        "/binance/order": 5,
+        "/binance/test-order": 1,
+        "/binance/ticker-price": 1,
+        "/binance/klines": 2,
+    }
+    return int(weights.get(path, 1))
+
+
+def _authorize_internal_request(x_internal_token: str, endpoint_path: str = "") -> None:
     if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
         raise HTTPException(status_code=403, detail="forbidden")
-    _enforce_rate_limit(x_internal_token)
+    _enforce_rate_limit(x_internal_token, weight=_endpoint_weight(endpoint_path))
 
 
 @app.get("/healthz")
@@ -210,7 +220,7 @@ def healthz():
 
 @app.post("/binance/order")
 def binance_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
-    _authorize_internal_request(x_internal_token)
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/order")
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
@@ -248,7 +258,7 @@ def binance_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(de
 
 @app.post("/binance/test-order")
 def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
-    _authorize_internal_request(x_internal_token)
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/test-order")
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
@@ -444,7 +454,7 @@ def binance_ticker_24hr(payload: BinanceTicker24hIn, x_internal_token: str = Hea
 
 @app.post("/binance/klines")
 def binance_klines(payload: BinanceKlinesIn, x_internal_token: str = Header(default="")):
-    _authorize_internal_request(x_internal_token)
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/klines")
 
     market = _resolve_market(payload.market)
     symbol = str(payload.symbol or "").upper().strip()
@@ -497,7 +507,7 @@ def binance_exchange_info(payload: BinanceExchangeInfoIn, x_internal_token: str 
 
 @app.post("/binance/ticker-price")
 def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = Header(default="")):
-    _authorize_internal_request(x_internal_token)
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/ticker-price")
 
     market = _resolve_market(payload.market)
     symbol = str(payload.symbol or "").upper().strip()
@@ -514,18 +524,28 @@ def binance_ticker_price(payload: BinanceTickerPriceIn, x_internal_token: str = 
     return {"row": data, "mode": f"gateway_ticker_price_{market.lower()}"}
 
 
-def _enforce_rate_limit(key: str) -> None:
+def _enforce_rate_limit(key: str, weight: int = 1) -> None:
     if RATE_LIMIT_PER_MIN <= 0:
         return
+    safe_weight = max(1, int(weight or 1))
     now_minute = int(time.time() // 60)
     with _RATE_LOCK:
-        minute, count = _rate_state.get(key, (now_minute, 0))
+        minute, used_weight = _rate_state.get(key, (now_minute, 0))
         if minute != now_minute:
-            minute, count = now_minute, 0
-        count += 1
-        _rate_state[key] = (minute, count)
-        if count > RATE_LIMIT_PER_MIN:
-            raise HTTPException(status_code=429, detail="rate_limit_exceeded")
+            minute, used_weight = now_minute, 0
+        next_weight = used_weight + safe_weight
+        _rate_state[key] = (minute, next_weight)
+        if next_weight > RATE_LIMIT_PER_MIN:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "rate_limit_exceeded",
+                    "limit_per_min": RATE_LIMIT_PER_MIN,
+                    "used_weight": used_weight,
+                    "requested_weight": safe_weight,
+                    "next_weight": next_weight,
+                },
+            )
 
 class BinanceFuturesAccountIn(BaseModel):
     api_key: str
