@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, JSON, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Integer, JSON, Numeric, String, UniqueConstraint
 
 from apps.api.app.db.session import Base
 
@@ -8,12 +8,20 @@ class BinanceFill(Base):
     user_id = Column(String, nullable=False)
     account_id = Column(String, nullable=False)
     broker = Column(String, nullable=False, default="binance")
-    market = Column(String, nullable=False)  # "SPOT" or "FUTURES"
+    market = Column(String, nullable=False)
     trade_id = Column(String, nullable=False)
     order_id = Column(String, nullable=True)
     symbol = Column(String, nullable=True)
     side = Column(String, nullable=True)
     raw_payload = Column(JSON, nullable=True)
+    price = Column(Numeric, nullable=True)
+    qty = Column(Numeric, nullable=True)
+    quote_qty = Column(Numeric, nullable=True)
+    commission = Column(Numeric, nullable=True)
+    commission_asset = Column(String, nullable=True)
+    commission_price_usdt = Column(Numeric, nullable=True)
+    commission_usdt = Column(Numeric, nullable=True)
+    executed_at_ms = Column(BigInteger, nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
