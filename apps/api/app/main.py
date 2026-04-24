@@ -50,6 +50,7 @@ from apps.api.app.core.config import settings
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _safe_startup_schema_ensures()
     _start_auto_pick_scheduler()
     try:
         yield
@@ -105,7 +106,6 @@ def _ensure_runtime_policy_columns():
             )
 
 
-_ensure_runtime_policy_columns()
 
 
 def _ensure_exchange_secret_columns():
@@ -150,8 +150,18 @@ def _ensure_ibkr_fills_columns():
         if "avg_price" not in cols:
             conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS avg_price DOUBLE PRECISION"))
 
-_ensure_exchange_secret_columns()
-_ensure_ibkr_fills_columns()
+
+def _safe_startup_schema_ensures():
+    for ensure_func in (
+        _ensure_runtime_policy_columns,
+        _ensure_exchange_secret_columns,
+        _ensure_ibkr_fills_columns,
+    ):
+        try:
+            ensure_func()
+        except Exception as exc:
+            print(f"WARNING startup schema ensure failed: {ensure_func.__name__}: {exc}")
+
 
 app.include_router(ops_router)
 app.include_router(users_router)
