@@ -11,6 +11,13 @@ from apps.api.app.core.config import settings
 
 
 def ping_binance_credentials(api_key: str, api_secret: str) -> dict:
+    if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+        return {
+            "success": False,
+            "exchange": "BINANCE",
+            "can_authenticate": False,
+            "detail": "binance_direct_ping_disabled",
+        }
     base_url = settings.BINANCE_TESTNET_BASE_URL.rstrip("/")
     params = {"timestamp": int(time.time() * 1000)}
     query_string = urlencode(params)

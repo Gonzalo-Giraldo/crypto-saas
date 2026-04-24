@@ -65,6 +65,8 @@ def _fetch_historical_usdt_price(symbol: str, timestamp_ms: int):
             rows = None
 
     if rows is None:
+        if not settings.BINANCE_GATEWAY_FALLBACK_DIRECT:
+            return None
         try:
             base = (settings.BINANCE_SPOT_BASE_URL or settings.BINANCE_TESTNET_BASE_URL or "https://api.binance.com").rstrip("/")
             url = f"{base}/api/v3/klines?{urllib_parse.urlencode(params)}"
