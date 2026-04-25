@@ -7718,7 +7718,7 @@ def execution_binance_order(
             momentum_score=0.0,
         )
 
-        runtime_policy = get_strategy_runtime_policy(
+        runtime_policy = resolve_runtime_policy(
             db=db,
             strategy_id="SWING_V1",
             exchange="BINANCE",
