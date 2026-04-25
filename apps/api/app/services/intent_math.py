@@ -58,3 +58,43 @@ def build_fixed_reward_risk_plan(
         stop_loss=stop_loss,
         take_profit=take_profit,
     )
+
+
+def infer_market_risk_level(
+    *,
+    confidence: float,
+    atr_pct: float,
+    spread_bps: float,
+    slippage_bps: float,
+    max_spread: float,
+    max_slippage: float,
+) -> str:
+    try:
+        c = float(confidence or 0.0)
+        atr = float(atr_pct or 0.0)
+        sp = float(spread_bps or 0.0)
+        sl = float(slippage_bps or 0.0)
+        max_sp = float(max_spread or 1.0)
+        max_sl = float(max_slippage or 1.0)
+    except Exception:
+        return "medium"
+
+    # LOW risk
+    if (
+        c >= 70.0
+        and atr <= 3.0
+        and sp <= max_sp * 0.7
+        and sl <= max_sl * 0.7
+    ):
+        return "low"
+
+    # HIGH risk
+    if (
+        c < 55.0
+        or atr > 6.0
+        or sp > max_sp * 0.9
+        or sl > max_sl * 0.9
+    ):
+        return "high"
+
+    return "medium"
