@@ -13,6 +13,7 @@ def create_binance_intent(
     entry_price=None,
     stop_loss=None,
     take_profit=None,
+    risk_profile: dict | None = None,
 ) -> dict:
     if db is None:
         raise ValueError("db is required")
@@ -31,7 +32,14 @@ def create_binance_intent(
     if not source or not isinstance(source, str):
         raise ValueError("source is required and must be a string")
 
-    # --- F24.5 financial validation ---
+    # --- F24.5/F25.1 financial validation ---
+    profile = risk_profile or {}
+    stop_loss_required = bool(profile.get("stop_loss_required", False))
+    min_rr = float(profile.get("min_rr", 0) or 0)
+
+    if stop_loss_required and stop_loss is None:
+        raise ValueError("stop_loss required by risk profile")
+
     if entry_price is not None and stop_loss is not None and take_profit is not None:
         try:
             entry = float(entry_price)
@@ -45,9 +53,23 @@ def create_binance_intent(
         if side_norm == "BUY":
             if not (sl < entry < tp):
                 raise ValueError("invalid SL/TP for BUY: must be stop_loss < entry_price < take_profit")
+            risk = entry - sl
+            reward = tp - entry
         elif side_norm == "SELL":
             if not (tp < entry < sl):
                 raise ValueError("invalid SL/TP for SELL: must be take_profit < entry_price < stop_loss")
+            risk = sl - entry
+            reward = entry - tp
+        else:
+            risk = 0
+            reward = 0
+
+        if min_rr > 0:
+            if risk <= 0:
+                raise ValueError("invalid risk distance in intent")
+            rr = reward / risk
+            if rr < min_rr:
+                raise ValueError(f"risk/reward below profile minimum: rr={rr:.4f} min_rr={min_rr:.4f}")
 
     intent = create_intent(
         db=db,

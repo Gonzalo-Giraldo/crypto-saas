@@ -7705,6 +7705,38 @@ def execution_binance_order(
         return cached_response
 
     try:
+        # --- F25.2 market regime + runtime policy ---
+        risk_profile = resolve_risk_profile(
+            db=db,
+            user_id=current_user.id,
+            email=current_user.email,
+        )
+
+        market_regime, _ = infer_market_regime(
+            trend_score=0.0,
+            atr_pct=0.0,
+            momentum_score=0.0,
+        )
+
+        runtime_policy = get_strategy_runtime_policy(
+            db=db,
+            strategy_id="SWING_V1",
+            exchange="BINANCE",
+        )
+
+        allow_regime = bool(runtime_policy.get(f"allow_{market_regime}", True))
+        if not allow_regime:
+            raise HTTPException(
+                status_code=400,
+                detail=f"market regime not allowed: {market_regime}"
+            )
+
+        rr_min = float(runtime_policy.get(f"rr_min_{market_regime}", 1.5))
+        risk_profile["min_rr"] = max(
+            float(risk_profile.get("min_rr", 0)),
+            rr_min
+        )
+
         intent = create_binance_intent(
             db=db,
             user_id=current_user.id,
@@ -7715,6 +7747,7 @@ def execution_binance_order(
             entry_price=getattr(payload, "entry_price", None),
             stop_loss=getattr(payload, "stop_loss", None),
             take_profit=getattr(payload, "take_profit", None),
+            risk_profile=risk_profile,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
