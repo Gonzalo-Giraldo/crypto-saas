@@ -7,7 +7,7 @@ from sqlalchemy import (
     Index,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
 from apps.api.app.models.base import Base
 
@@ -24,6 +24,10 @@ class Intent(Base):
     entry_price = Column(Numeric(24, 8), nullable=True)
     stop_loss = Column(Numeric(24, 8), nullable=True)
     take_profit = Column(Numeric(24, 8), nullable=True)
+    strategy_id = Column(String, nullable=True)
+    risk_pct = Column(Numeric(10, 4), nullable=True)
+    risk_abs = Column(Numeric(24, 8), nullable=True)
+    policy_snapshot = Column(JSONB, nullable=True)
     order_type = Column(String, nullable=False)
     source = Column(String, nullable=False)
     lifecycle_status = Column(String, nullable=False, index=True)

@@ -71,6 +71,28 @@ def create_binance_intent(
             if rr < min_rr:
                 raise ValueError(f"risk/reward below profile minimum: rr={rr:.4f} min_rr={min_rr:.4f}")
 
+    # --- F26 snapshot persist ---
+    risk_abs = None
+    if entry_price is not None and stop_loss is not None:
+        try:
+            entry = float(entry_price)
+            sl = float(stop_loss)
+            risk_abs = abs(entry - sl)
+        except Exception:
+            risk_abs = None
+
+    risk_pct = None
+    if entry_price and risk_abs:
+        try:
+            risk_pct = (risk_abs / float(entry_price)) * 100.0
+        except Exception:
+            risk_pct = None
+
+    policy_snapshot = {
+        "risk_profile": profile,
+        "min_rr": min_rr,
+    }
+
     intent = create_intent(
         db=db,
         user_id=user_id,
@@ -84,6 +106,11 @@ def create_binance_intent(
         entry_price=entry_price,
         stop_loss=stop_loss,
         take_profit=take_profit,
+
+        strategy_id="SWING_V1",
+        risk_pct=risk_pct,
+        risk_abs=risk_abs,
+        policy_snapshot=policy_snapshot,
     )
 
     return {

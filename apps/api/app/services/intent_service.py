@@ -32,6 +32,10 @@ def create_intent(
     entry_price=None,
     stop_loss=None,
     take_profit=None,
+    strategy_id=None,
+    risk_pct=None,
+    risk_abs=None,
+    policy_snapshot=None,
 ):
     if not user_id or not isinstance(user_id, str):
         raise ValueError("user_id is required and must be a string")
@@ -75,6 +79,11 @@ def create_intent(
         entry_price=float(entry_price) if entry_price is not None else None,
         stop_loss=float(stop_loss) if stop_loss is not None else None,
         take_profit=float(take_profit) if take_profit is not None else None,
+
+        strategy_id=str(strategy_id) if strategy_id is not None else None,
+        risk_pct=float(risk_pct) if risk_pct is not None else None,
+        risk_abs=float(risk_abs) if risk_abs is not None else None,
+        policy_snapshot=policy_snapshot,
     )
 
 
