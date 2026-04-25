@@ -7826,6 +7826,8 @@ def execution_binance_order(
         )
         raise
 
+    mark_intent_executed(db, intent["intent_id"])
+
     finalize_idempotent_intent(
         db=db,
         user_id=current_user.id,
