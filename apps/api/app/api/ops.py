@@ -7712,11 +7712,25 @@ def execution_binance_order(
             email=current_user.email,
         )
 
-        market_regime, _ = infer_market_regime(
-            trend_score=0.0,
-            atr_pct=0.0,
-            momentum_score=0.0,
+        snapshot = (
+            db.query(MarketTrendSnapshot)
+            .filter(
+                MarketTrendSnapshot.tenant_id == "default",
+                MarketTrendSnapshot.exchange == "BINANCE",
+                MarketTrendSnapshot.symbol == payload.symbol,
+            )
+            .order_by(MarketTrendSnapshot.created_at.desc())
+            .first()
         )
+
+        if snapshot:
+            market_regime = snapshot.regime
+        else:
+            market_regime, _ = infer_market_regime(
+                trend_score=0.0,
+                atr_pct=0.0,
+                momentum_score=0.0,
+            )
 
         runtime_policy = resolve_runtime_policy(
             db=db,
