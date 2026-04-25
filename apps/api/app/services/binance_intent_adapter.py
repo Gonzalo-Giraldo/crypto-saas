@@ -31,6 +31,24 @@ def create_binance_intent(
     if not source or not isinstance(source, str):
         raise ValueError("source is required and must be a string")
 
+    # --- F24.5 financial validation ---
+    if entry_price is not None and stop_loss is not None and take_profit is not None:
+        try:
+            entry = float(entry_price)
+            sl = float(stop_loss)
+            tp = float(take_profit)
+        except Exception:
+            raise ValueError("invalid financial fields in intent")
+
+        side_norm = side.upper()
+
+        if side_norm == "BUY":
+            if not (sl < entry < tp):
+                raise ValueError("invalid SL/TP for BUY: must be stop_loss < entry_price < take_profit")
+        elif side_norm == "SELL":
+            if not (tp < entry < sl):
+                raise ValueError("invalid SL/TP for SELL: must be take_profit < entry_price < stop_loss")
+
     intent = create_intent(
         db=db,
         user_id=user_id,
