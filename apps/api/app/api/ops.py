@@ -626,7 +626,7 @@ from apps.api.app.services.exit_policy_engine import (
     sort_exit_candidates,
     resolve_policy_skip_reason_basic,
 )
-from apps.api.app.services.intent_math import build_fixed_reward_risk_plan
+from apps.api.app.services.intent_math import build_fixed_reward_risk_plan, infer_market_risk_level
 from apps.api.app.services.learning_pipeline_engine import (
     compute_rate,
     validate_choice_param,
@@ -1059,6 +1059,39 @@ def _evaluate_real_execution_pre_dispatch_gate(
     if enforce_exit_plan:
         rr_estimate = float(candidate.rr_estimate) if candidate else None
         atr_pct = float(candidate.atr_pct) if candidate else None
+        
+        # --- F25.3 risk_level cap ---
+        if candidate:
+            try:
+                confidence = (
+                    abs(float(candidate.market_trend_score or 0.0)) * 50.0 +
+                    abs(float(candidate.momentum_score or 0.0)) * 50.0
+                )
+
+                risk_level = infer_market_risk_level(
+                    confidence=confidence,
+                    atr_pct=float(candidate.atr_pct or 0.0),
+                    spread_bps=float(candidate.spread_bps or 0.0),
+                    slippage_bps=float(candidate.slippage_bps or 0.0),
+                    max_spread=10.0,
+                    max_slippage=15.0,
+                )
+
+                # cap conservador
+                risk_level_cap_map = {
+                    "low": 2.0,
+                    "medium": 1.2,
+                    "high": 0.6,
+                }
+
+                risk_level_cap = risk_level_cap_map.get(risk_level, 1.2)
+
+                # aplicar cap sobre atr_pct (sin romper lógica existente)
+                atr_pct = min(float(candidate.atr_pct or 0.0), risk_level_cap)
+
+            except Exception:
+                pass
+
         exit_plan, plan_reason = _build_auto_pick_exit_plan(
             exchange=exchange,
             symbol=symbol,
