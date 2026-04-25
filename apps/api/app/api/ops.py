@@ -7704,17 +7704,20 @@ def execution_binance_order(
             )
         return cached_response
 
-    intent = create_binance_intent(
-        db=db,
-        user_id=current_user.id,
-        account_id="default",
-        symbol=payload.symbol,
-        side=payload.side,
-        expected_qty=payload.qty,
-        entry_price=getattr(payload, "entry_price", None),
-        stop_loss=getattr(payload, "stop_loss", None),
-        take_profit=getattr(payload, "take_profit", None),
-    )
+    try:
+        intent = create_binance_intent(
+            db=db,
+            user_id=current_user.id,
+            account_id="default",
+            symbol=payload.symbol,
+            side=payload.side,
+            expected_qty=payload.qty,
+            entry_price=getattr(payload, "entry_price", None),
+            stop_loss=getattr(payload, "stop_loss", None),
+            take_profit=getattr(payload, "take_profit", None),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     try:
         result = execute_binance_real_order_for_user(
