@@ -626,6 +626,7 @@ from apps.api.app.services.exit_policy_engine import (
     sort_exit_candidates,
     resolve_policy_skip_reason_basic,
 )
+from apps.api.app.services.intent_math import build_fixed_reward_risk_plan
 from apps.api.app.services.learning_pipeline_engine import (
     compute_rate,
     validate_choice_param,
@@ -1014,22 +1015,23 @@ def _build_auto_pick_exit_plan(
     if risk_frac <= 0:
         return None, "real_guard_exit_plan_invalid_risk"
 
-    side_u = str(side or "BUY").upper()
-    risk_abs = float(entry_price) * risk_frac
-    if side_u == "SELL":
-        stop_loss = float(entry_price) + risk_abs
-        take_profit = float(entry_price) - (risk_abs * rr)
-    else:
-        stop_loss = float(entry_price) - risk_abs
-        take_profit = float(entry_price) + (risk_abs * rr)
+    try:
+        risk_plan = build_fixed_reward_risk_plan(
+            side=str(side or "BUY").upper(),
+            entry_price=float(entry_price),
+            risk_pct=float(risk_pct),
+            reward_risk_ratio=float(rr),
+        )
+    except ValueError:
+        return None, "real_guard_exit_plan_invalid_math"
 
     plan = {
         "active": True,
-        "entry_price": round(float(entry_price), 8),
-        "stop_loss": round(float(stop_loss), 8),
-        "take_profit": round(float(take_profit), 8),
-        "rr_estimate": round(rr, 4),
-        "risk_pct": round(risk_pct, 4),
+        "entry_price": round(float(risk_plan.entry_price), 8),
+        "stop_loss": round(float(risk_plan.stop_loss), 8),
+        "take_profit": round(float(risk_plan.take_profit), 8),
+        "rr_estimate": round(float(risk_plan.reward_risk_ratio), 4),
+        "risk_pct": round(float(risk_plan.risk_pct), 4),
         "max_hold_minutes": int(max(5, settings.AUTO_PICK_REAL_EXIT_PLAN_MAX_HOLD_MINUTES or 240)),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
