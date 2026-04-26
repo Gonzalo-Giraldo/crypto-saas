@@ -1,6 +1,7 @@
 
 from apps.worker.app.engine.ibkr_client import get_ibkr_trades
 from apps.api.app.services.binance_intent_adapter import create_binance_intent
+from apps.api.app.services.intent_service import mark_intent_executed
 from apps.api.app.services.ibkr_intent_adapter import create_ibkr_intent
 
 import json
