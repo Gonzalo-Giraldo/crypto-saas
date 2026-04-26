@@ -6,6 +6,8 @@ def simulate_trailing_for_position(position: dict) -> dict | None:
     """
     Recibe una posición (dict) y devuelve qué haría el trailing.
     NO ejecuta nada.
+
+    Rechaza explícitamente contexto financiero incoherente.
     """
 
     try:
@@ -14,11 +16,21 @@ def simulate_trailing_for_position(position: dict) -> dict | None:
         entry = position.get("entry_price")
         stop_loss = position.get("stop_loss")
         current_price = position.get("current_price")
+        intent_entry = position.get("intent_entry_price")
     except Exception:
         return None
 
     if not all([symbol, side, entry, stop_loss, current_price]):
         return None
+
+    if intent_entry is not None:
+        broker_entry = float(entry)
+        intent_entry_f = float(intent_entry)
+        if broker_entry <= 0 or intent_entry_f <= 0:
+            return None
+        entry_diff_pct = abs(broker_entry - intent_entry_f) / broker_entry
+        if entry_diff_pct > 0.01:
+            return None
 
     new_sl = compute_trailing_stop(
         side=side,
