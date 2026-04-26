@@ -138,18 +138,24 @@ def get_intent_binance_trades(
     if broker.lower() != "binance":
         return {"success": False, "error": "Only broker=binance is supported in this endpoint"}
     # 2. Obtener consumption record
-    rec = intent_consumption_store.get_consumption_record(
-        user_id=user_id,
-        broker=broker,
-        intent_key=intent_key,
-        account_id=account_id,
-    )
-    if not rec.get("found"):
+    row = db.execute(
+        """
+        SELECT execution_ref, broker_execution_id_type, symbol, market
+        FROM intent_consumptions
+        WHERE intent_id = :intent_id
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        {"intent_id": intent_key},
+    ).fetchone()
+
+    if not row:
         return {"success": False, "error": "No consumption record found for this intent"}
-    broker_execution_id = rec.get("broker_execution_id")
-    broker_execution_id_type = rec.get("broker_execution_id_type")
-    symbol = rec.get("symbol")
-    market = rec.get("market")
+
+    broker_execution_id = row[0]
+    broker_execution_id_type = row[1]
+    symbol = row[2]
+    market = row[3]
 
     try:
         market = _normalize_binance_market_for_gateway(market=market, symbol=symbol)
@@ -173,7 +179,6 @@ def get_intent_binance_trades(
     # 3. Obtener credenciales
     from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
     creds = get_decrypted_exchange_secret(db=db, user_id=user_id, exchange="BINANCE")
-    print("DEBUG creds:", creds)
     if not creds:
         return {"success": False, "error": "No Binance credentials found for user"}
     # 4. Llamar get_my_trades

@@ -423,8 +423,6 @@ def binance_my_trades(payload: BinanceMyTradesIn, x_internal_token: str = Header
     headers = {"X-MBX-APIKEY": payload.api_key}
     response = _request_upstream("GET", url, headers=headers, timeout=max(3, REQUEST_TIMEOUT_SECONDS))
 
-    print("DEBUG /binance/my-trades status=", response.status_code)
-    print("DEBUG /binance/my-trades body=", response.text)
 
     if response.status_code >= 400:
         _raise_upstream_http_error(response)
@@ -618,3 +616,52 @@ def binance_futures_account(payload: BinanceFuturesAccountIn, x_internal_token: 
         "positions": data.get("positions", []),
     }
 
+@app.post("/binance/position-risk")
+def binance_position_risk(payload: BinanceFuturesAccountIn, x_internal_token: str = Header(default="")):
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/position-risk")
+
+    try:
+        timestamp = int(time.time() * 1000)
+        params = {
+            "timestamp": timestamp,
+        }
+
+        query_string = urlencode(params)
+        signature = hmac.new(
+            payload.api_secret.encode("utf-8"),
+            query_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        url = f"{BINANCE_FUTURES_BASE}/fapi/v2/positionRisk?{query_string}&signature={signature}"
+
+        headers = {
+            "X-MBX-APIKEY": payload.api_key,
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"binance_upstream_unreachable error={type(exc).__name__} msg={str(exc)[:160]}",
+        )
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"binance_upstream_error status={response.status_code}"
+        )
+
+    try:
+        data = response.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="binance_upstream_invalid_payload")
+
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="invalid_position_risk_payload")
+
+    return {
+        "mode": "gateway_position_risk",
+        "positions": data,
+    }
