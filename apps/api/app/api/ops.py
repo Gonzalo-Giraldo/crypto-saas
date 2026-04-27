@@ -157,6 +157,28 @@ def get_intent_binance_trades(
     symbol = row[2]
     market = row[3]
 
+    expected_qty_row = db.execute(
+        """
+        SELECT expected_qty
+        FROM intents
+        WHERE intent_id = :intent_id
+        LIMIT 1
+        """,
+        {"intent_id": intent_key},
+    ).fetchone()
+
+    if not expected_qty_row:
+        return {
+            "success": False,
+            "error": "No intent found for expected_qty reconciliation",
+            "broker_execution_id": broker_execution_id,
+            "broker_execution_id_type": broker_execution_id_type,
+            "symbol": symbol,
+            "market": market,
+        }
+
+    expected_qty = expected_qty_row[0]
+
     try:
         market = _normalize_binance_market_for_gateway(market=market, symbol=symbol)
     except ValueError as exc:
@@ -219,6 +241,15 @@ def get_intent_binance_trades(
             "market": market,
         }
     if len(trades) == 0:
+        fill_reconciliation = reconcile_binance_order_fills(
+            execution_ref=broker_execution_id,
+            execution_ref_type=broker_execution_id_type,
+            expected_qty=expected_qty,
+            symbol=symbol,
+            market=market,
+            fills=[],
+        )
+
         return {
             "broker_execution_id": broker_execution_id,
             "broker_execution_id_type": broker_execution_id_type,
@@ -232,6 +263,7 @@ def get_intent_binance_trades(
             "total_trades_count": 0,
             "matched_trades_count": 0,
             "all_trades_match": False,
+            "fill_reconciliation": fill_reconciliation,
             "trades_empty": True,
             "success": True,
         }
@@ -303,6 +335,14 @@ def get_intent_binance_trades(
             "reason": "no_matched_trades"
         }
 
+    fill_reconciliation = reconcile_binance_order_fills(
+        execution_ref=broker_execution_id,
+        execution_ref_type=broker_execution_id_type,
+        expected_qty=expected_qty,
+        symbol=symbol,
+        market=market,
+        fills=matched_trades,
+    )
     return {
         "broker_execution_id": broker_execution_id,
         "broker_execution_id_type": broker_execution_id_type,
@@ -317,6 +357,7 @@ def get_intent_binance_trades(
         "total_trades_count": total_trades_count,
         "matched_trades_count": matched_trades_count,
         "all_trades_match": all_trades_match,
+        "fill_reconciliation": fill_reconciliation,
         "trades_contains_unmatched": trades_contains_unmatched,
         "db_persistence": db_persistence,
         "success": True,
@@ -634,6 +675,7 @@ from apps.api.app.services.exit_policy_engine import (
 )
 from apps.api.app.services.intent_math import build_fixed_reward_risk_plan, infer_market_risk_level
 from apps.api.app.services.binance_f36_sizing import compute_binance_f36_sizing
+from apps.api.app.services.binance_fill_reconciliation import reconcile_binance_order_fills
 from apps.api.app.services.learning_pipeline_engine import (
     compute_rate,
     validate_choice_param,
