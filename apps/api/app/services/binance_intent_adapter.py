@@ -1,3 +1,5 @@
+from apps.api.app.services.tp_builder import compute_take_profit
+from apps.api.app.services.risk_level_resolver import resolve_risk_level
 from apps.api.app.services.intent_service import create_intent
 
 def create_binance_intent(
@@ -34,6 +36,27 @@ def create_binance_intent(
 
     # --- F24.5/F25.1 financial validation ---
     profile = risk_profile or {}
+    # --- F34 + F33 integration ---
+    risk_level = profile.get("risk_level")
+
+    if take_profit is None and entry_price is not None and stop_loss is not None and risk_level:
+        try:
+            rl = resolve_risk_level(risk_level)
+
+            tp_result = compute_take_profit(
+                entry_price=float(entry_price),
+                stop_loss=float(stop_loss),
+                side=side,
+                target_rr=rl["target_rr"],
+                min_rr=rl["min_rr"],
+            )
+
+            take_profit = tp_result["tp"]
+            profile["min_rr"] = rl["min_rr"]
+
+        except Exception as e:
+            raise ValueError(f"auto TP generation failed: {str(e)}")
+
     stop_loss_required = bool(profile.get("stop_loss_required", False))
     min_rr = float(profile.get("min_rr", 0) or 0)
 
