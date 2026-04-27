@@ -37,6 +37,9 @@ def create_binance_intent(
     stop_loss_required = bool(profile.get("stop_loss_required", False))
     min_rr = float(profile.get("min_rr", 0) or 0)
 
+    if stop_loss is None:
+        raise ValueError("stop_loss required for Binance intent")
+
     if stop_loss_required and stop_loss is None:
         raise ValueError("stop_loss required by risk profile")
 
