@@ -7792,6 +7792,47 @@ def execution_binance_order(
             rr_min
         )
 
+        # --- F36 SHADOW MODE: position sizing only, no execution change ---
+        f36_shadow = None
+        try:
+            from apps.worker.app.engine.execution_runtime import get_binance_spot_usdt_free_for_user
+            from apps.api.app.services.strategy_capital import resolve_strategy_capital
+            from apps.api.app.services.position_sizing import compute_position_size
+            from apps.api.app.services.risk_level_resolver import resolve_risk_level
+
+            strategy_id = getattr(payload, "strategy_id", None) or "SWING_V1"
+            risk_level = getattr(payload, "risk_level", None) or 2
+
+            broker_status = get_binance_spot_usdt_free_for_user(current_user.id)
+            usdt_free = float(broker_status.get("usdt_free") or 0)
+
+            sc = resolve_strategy_capital(
+                strategy_id=strategy_id,
+                broker_balance_usdt=usdt_free,
+            )
+            rl = resolve_risk_level(risk_level)
+
+            f36_shadow = compute_position_size(
+                entry_price=float(payload.entry_price),
+                stop_loss=float(payload.stop_loss),
+                capital_base=float(sc["capital_base"]),
+                risk_pct=float(rl["risk_pct"]),
+            )
+
+            print("F36_DEBUG:", {
+                "strategy_id": strategy_id,
+                "risk_level": risk_level,
+                "usdt_free": usdt_free,
+                "capital_base": sc["capital_base"],
+                "qty_payload": payload.qty,
+                "qty_raw": f36_shadow["qty_raw"],
+                "qty_cap": f36_shadow["qty_cap"],
+                "qty_final": f36_shadow["qty_final"],
+                "risk_real": f36_shadow["risk_real"],
+            })
+        except Exception as exc:
+            print("F36_ERROR:", str(exc))
+
         intent = create_binance_intent(
             db=db,
             user_id=current_user.id,
