@@ -7839,7 +7839,7 @@ def execution_binance_order(
             account_id="default",
             symbol=payload.symbol,
             side=payload.side,
-            expected_qty=payload.qty,
+            expected_qty=f36_shadow["qty_final"] if f36_shadow else payload.qty,
             entry_price=getattr(payload, "entry_price", None),
             stop_loss=getattr(payload, "stop_loss", None),
             take_profit=getattr(payload, "take_profit", None),
@@ -7853,7 +7853,7 @@ def execution_binance_order(
             user_id=current_user.id,
             symbol=payload.symbol,
             side=payload.side,
-            qty=payload.qty,
+            qty=f36_shadow["qty_final"] if f36_shadow else payload.qty,
             intent_key=intent["intent_id"],
             market=payload.market,
         )
