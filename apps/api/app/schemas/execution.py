@@ -48,6 +48,8 @@ class BinanceTestOrderRequest(BaseModel):
     entry_price: Optional[float] = None
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+    strategy_id: Optional[str] = None
+    risk_level: Optional[int] = None
 
     @field_validator("side")
     @classmethod
