@@ -186,6 +186,10 @@ def compute_liquidity(candidate: dict[str, Any]) -> dict[str, Any]:
         "liquidity_factor": factor,
     }
 
+def infer_side_from_trend(combined_trend: Any) -> str:
+    """Infer entry side from the already computed directional trend. No new math."""
+    trend = _clamp(_to_float(combined_trend, "combined_trend"), -1.0, 1.0)
+    return "BUY" if trend >= 0.0 else "SELL"
 
 def compute_final_score(candidate: dict[str, Any]) -> dict[str, Any]:
     """Evaluate full crypto Auto-Pick score. No fallback, no broker, no side effects."""
@@ -194,6 +198,7 @@ def compute_final_score(candidate: dict[str, Any]) -> dict[str, Any]:
     if not hard["valid"]:
         return {
             "symbol": symbol,
+            "side": None,
             "valid": False,
             "reason": hard["reason"],
             "support": 0.0,
@@ -211,6 +216,7 @@ def compute_final_score(candidate: dict[str, Any]) -> dict[str, Any]:
     if not structure["valid"]:
         return {
             "symbol": symbol,
+            "side": None,
             "valid": False,
             "reason": structure["reason"],
             "support": float(structure["support"]),
@@ -227,6 +233,7 @@ def compute_final_score(candidate: dict[str, Any]) -> dict[str, Any]:
     trend = compute_trend(candidate)
     confirmation = compute_confirmation(candidate)
     liquidity = compute_liquidity(candidate)
+    side = infer_side_from_trend(trend["combined_trend"])
 
     range_score = 1.0 - float(structure["position_in_range"])
     structure_score = _clamp(
@@ -241,6 +248,7 @@ def compute_final_score(candidate: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "symbol": symbol,
+        "side": side,
         "valid": bool(final_score > 0.0),
         "reason": "ok" if final_score > 0.0 else "final_score_zero",
         "support": float(structure["support"]),
