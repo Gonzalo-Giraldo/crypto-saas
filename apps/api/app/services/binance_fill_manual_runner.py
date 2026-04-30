@@ -99,7 +99,6 @@ def run_binance_fill_ingestion_for_intent(
     if not isinstance(raw_trades, list):
         raise ValueError("gateway_trades_must_be_list")
 
-    _validate_no_mixed_order_ids(trades=raw_trades, order_id=expected_order_id)
     matched_trades = _filter_trades_by_order_id(trades=raw_trades, order_id=expected_order_id)
 
     if not matched_trades:

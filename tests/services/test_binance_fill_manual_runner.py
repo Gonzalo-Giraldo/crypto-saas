@@ -60,27 +60,33 @@ def test_runner_blocks_partial_fill_and_does_not_persist():
     assert called["persist"] is False
 
 
-def test_runner_rejects_mixed_order_ids():
+def test_runner_ignores_unrelated_order_ids_from_symbol_trade_history():
     def fetch(symbol, order_id):
         return [
             {"orderId": order_id, "qty": "0.005"},
-            {"orderId": "other", "qty": "0.005"},
+            {"orderId": "other", "qty": "9.999"},
+            {"orderId": order_id, "qty": "0.005"},
         ]
 
-    with pytest.raises(ValueError, match="mixed_order_ids_detected"):
-        run_binance_fill_ingestion_for_intent(
-            db=None,
-            intent_id="i1",
-            symbol="BTCUSDT",
-            order_id="123",
-            execution_ref_type="orderId",
-            user_id="u1",
-            account_id="default",
-            market="SPOT",
-            expected_qty="0.01",
-            gateway_fetch_trades=fetch,
-            persist=False,
-        )
+    result = run_binance_fill_ingestion_for_intent(
+        db=None,
+        intent_id="i1",
+        symbol="BTCUSDT",
+        order_id="123",
+        execution_ref_type="orderId",
+        user_id="u1",
+        account_id="default",
+        market="SPOT",
+        expected_qty="0.01",
+        gateway_fetch_trades=fetch,
+        persist=False,
+    )
+
+    assert result["reason"] == "ok"
+    assert result["matched_count"] == 2
+    assert result["reconciliation"]["status"] == "matched"
+    assert result["reconciliation"]["safe_for_position_update"] is True
+    assert all(str(t["orderId"]) == "123" for t in result["trades"])
 
 
 def test_runner_requires_order_id_execution_ref_type():
