@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 from apps.api.app.services.binance_fill_reconciliation import reconcile_binance_order_fills
 
 
@@ -9,6 +10,20 @@ def _normalize_order_id(value: Any) -> str:
     if not order_id:
         raise ValueError("order_id_required")
     return order_id
+
+
+def _normalize_required_str(value: Any, field: str) -> str:
+    out = str(value or "").strip()
+    if not out:
+        raise ValueError(f"{field}_required")
+    return out
+
+
+def _normalize_market(value: Any) -> str:
+    market = str(value or "").upper().strip()
+    if market not in {"SPOT", "FUTURES"}:
+        raise ValueError("market_invalid")
+    return market
 
 
 def _trade_order_id(trade: dict[str, Any]) -> str:
@@ -55,41 +70,27 @@ def run_binance_fill_ingestion_for_intent(
     user_id: str,
     account_id: str,
     market: str,
-    expected_qty,
+    expected_qty: Any,
     gateway_fetch_trades,
     persist_binance_fills_db=None,
     persist: bool = False,
 ) -> dict[str, Any]:
-    """
-    Manual controlled Binance fill ingestion runner.
 
-    This function does not execute broker orders.
-    The only optional side effect is delegated to the injected persistence callable
-    when persist=True.
-    """
     if not intent_id:
         raise ValueError("intent_id_required")
+
+    if execution_ref_type != "orderId":
+        raise ValueError("execution_ref_type_must_be_orderId")
+
+    user_id_norm = _normalize_required_str(user_id, "user_id")
+    account_id_norm = _normalize_required_str(account_id, "account_id")
+    market_norm = _normalize_market(market)
 
     symbol_norm = str(symbol or "").upper().strip()
     if not symbol_norm:
         raise ValueError("symbol_required")
 
     expected_order_id = _normalize_order_id(order_id)
-
-    if execution_ref_type != "orderId":
-        raise ValueError("execution_ref_type_must_be_orderId")
-
-    user_id_norm = str(user_id or "").strip()
-    if not user_id_norm:
-        raise ValueError("user_id_required")
-
-    account_id_norm = str(account_id or "").strip()
-    if not account_id_norm:
-        raise ValueError("account_id_required")
-
-    market_norm = str(market or "").upper().strip()
-    if market_norm not in {"SPOT", "FUTURES"}:
-        raise ValueError("market_must_be_SPOT_or_FUTURES")
 
     if not callable(gateway_fetch_trades):
         raise ValueError("gateway_fetch_trades_callable_required")
@@ -99,18 +100,23 @@ def run_binance_fill_ingestion_for_intent(
     if not isinstance(raw_trades, list):
         raise ValueError("gateway_trades_must_be_list")
 
-    matched_trades = _filter_trades_by_order_id(trades=raw_trades, order_id=expected_order_id)
+    # mixed order ids allowed; filtering applied below
+
+    matched_trades = _filter_trades_by_order_id(
+        trades=raw_trades,
+        order_id=expected_order_id,
+    )
 
     if not matched_trades:
         return {
             "intent_id": intent_id,
             "symbol": symbol_norm,
             "order_id": expected_order_id,
-            "execution_ref_type": "orderId",
             "matched_count": 0,
             "persisted": False,
             "reason": "no_matching_trades",
             "trades": [],
+            "reconciliation": None,
         }
 
     reconciliation = reconcile_binance_order_fills(
@@ -122,24 +128,27 @@ def run_binance_fill_ingestion_for_intent(
         fills=matched_trades,
     )
 
-    persisted_result = None
+    if not isinstance(reconciliation, dict):
+        raise ValueError("reconciliation_invalid")
 
-    if not reconciliation.get("safe_for_position_update"):
+    if reconciliation.get("safe_for_position_update") is not True:
         return {
             "intent_id": intent_id,
             "symbol": symbol_norm,
             "order_id": expected_order_id,
-            "execution_ref_type": "orderId",
             "matched_count": len(matched_trades),
             "persisted": False,
             "reason": f"reconciliation_blocked:{reconciliation.get('reason')}",
-            "reconciliation": reconciliation,
             "trades": matched_trades,
+            "reconciliation": reconciliation,
         }
+
+    persisted_result = None
 
     if persist:
         if not callable(persist_binance_fills_db):
             raise ValueError("persist_binance_fills_db_callable_required")
+
         persisted_result = persist_binance_fills_db(
             db=db,
             fills=matched_trades,
@@ -153,11 +162,10 @@ def run_binance_fill_ingestion_for_intent(
         "intent_id": intent_id,
         "symbol": symbol_norm,
         "order_id": expected_order_id,
-        "execution_ref_type": "orderId",
         "matched_count": len(matched_trades),
         "persisted": bool(persist),
         "persist_result": persisted_result,
         "reason": "ok",
-        "reconciliation": reconciliation,
         "trades": matched_trades,
+        "reconciliation": reconciliation,
     }
