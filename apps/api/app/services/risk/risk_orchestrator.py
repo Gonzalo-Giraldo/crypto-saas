@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from apps.api.app.services.intent_math import build_fixed_reward_risk_plan
 from apps.api.app.services.position_sizing import compute_position_size
-from apps.api.app.services.auto_pick.contracts import RiskSizingDecision
+from apps.api.app.services.risk.contracts import RiskSizingDecision
 
 
 def build_risk_sizing_decision(
