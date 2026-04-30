@@ -13,6 +13,7 @@ from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
+from apps.api.app.services.intent_service import mark_intent_executed
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
 from apps.worker.app.engine import broker_registry
 from apps.worker.app.engine.binance_client import (
@@ -624,6 +625,14 @@ def execute_binance_real_order_for_user(
                 )
                 if not attached:
                     raise RuntimeError("binance_attach_execution_failed")
+
+                # lifecycle: CONSUMED → EXECUTED (solo real order)
+                from apps.api.app.db.session import SessionLocal
+                db = SessionLocal()
+                try:
+                    mark_intent_executed(db, intent_key)
+                finally:
+                    db.close()
 
         except Exception as exc:
             details = {
