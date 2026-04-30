@@ -78,6 +78,16 @@ def _get_quote_volume(ticker: dict) -> float:
     raise ValueError("quote_volume_required")
 
 
+def _get_entry_price_reference(ticker: dict) -> float:
+    for key in ("lastPrice", "last_price"):
+        if key in ticker:
+            val = _to_float(ticker[key], key)
+            if val <= 0:
+                raise ValueError("entry_price_reference_non_positive")
+            return val
+    raise ValueError("lastPrice_required")
+
+
 def _get_bid_ask(ticker: dict) -> tuple[float, float]:
     bid = ticker.get("bidPrice") or ticker.get("bid_price")
     ask = ticker.get("askPrice") or ticker.get("ask_price")
@@ -194,6 +204,7 @@ def build_crypto_model_input(*, symbol: str, klines_1h: list[list], klines_15m: 
 
     ticker = _require_ticker(ticker_24h)
     quote_volume = _get_quote_volume(ticker)
+    entry_price_reference = _get_entry_price_reference(ticker)
 
     bid, ask = _get_bid_ask(ticker)
     spread = _spread_bps(bid, ask)
@@ -204,6 +215,7 @@ def build_crypto_model_input(*, symbol: str, klines_1h: list[list], klines_15m: 
 
     return {
         "symbol": symbol_norm,
+        "entry_price": entry_price_reference,
         "ohlc": parsed_1h,
         "market_metrics": {
             "momentum": _momentum(parsed_1h["close"]),

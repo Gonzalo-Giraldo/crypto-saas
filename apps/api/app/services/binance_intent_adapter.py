@@ -16,6 +16,7 @@ def create_binance_intent(
     stop_loss=None,
     take_profit=None,
     risk_profile: dict | None = None,
+    auto_pick_trace: dict | None = None,
 ) -> dict:
     if db is None:
         raise ValueError("db is required")
@@ -118,6 +119,27 @@ def create_binance_intent(
         "risk_profile": profile,
         "min_rr": min_rr,
     }
+
+    if auto_pick_trace is not None:
+        if not isinstance(auto_pick_trace, dict):
+            raise ValueError("auto_pick_trace must be a dict")
+
+        final_score = auto_pick_trace.get("final_score")
+        decision_reason = auto_pick_trace.get("decision_reason")
+        evidence = auto_pick_trace.get("evidence")
+
+        if final_score is None:
+            raise ValueError("auto_pick_trace.final_score is required")
+        if not decision_reason or not isinstance(decision_reason, str):
+            raise ValueError("auto_pick_trace.decision_reason is required")
+        if evidence is not None and not isinstance(evidence, dict):
+            raise ValueError("auto_pick_trace.evidence must be a dict")
+
+        policy_snapshot["auto_pick"] = {
+            "final_score": float(final_score),
+            "decision_reason": decision_reason,
+            "evidence": evidence or {},
+        }
 
     intent = create_intent(
         db=db,

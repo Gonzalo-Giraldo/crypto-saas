@@ -63,6 +63,7 @@ def run_binance_auto_pick() -> AutoPickResult:
             evaluation = compute_final_score(candidate)
 
             if evaluation.get("valid"):
+                evaluation["_candidate"] = candidate
                 side = str(evaluation.get("side") or "").upper().strip()
                 if side not in {"BUY", "SELL"}:
                     continue
@@ -85,6 +86,32 @@ def run_binance_auto_pick() -> AutoPickResult:
 
         direction = "LONG" if side == "BUY" else "SHORT"
 
+        candidate = top.get("_candidate") or {}
+        entry_price = candidate.get("entry_price")
+
+        if entry_price is None:
+            return AutoPickNoTrade(
+                broker="BINANCE",
+                reason="missing_entry_price_reference",
+                evidence={"selected": top},
+            )
+
+        try:
+            entry_price_f = float(entry_price)
+        except Exception:
+            return AutoPickNoTrade(
+                broker="BINANCE",
+                reason="invalid_entry_price_reference",
+                evidence={"selected": top},
+            )
+
+        if entry_price_f <= 0:
+            return AutoPickNoTrade(
+                broker="BINANCE",
+                reason="non_positive_entry_price_reference",
+                evidence={"selected": top},
+            )
+
         return AutoPickDecision(
             symbol=top.get("symbol"),
             side=side,
@@ -97,6 +124,9 @@ def run_binance_auto_pick() -> AutoPickResult:
             evidence={
                 "ranked_count": len(evaluations),
                 "selected_rank": 1,
+                "entry_price_reference": entry_price_f,
+                "entry_price_source": "ticker.lastPrice",
+                "entry_price_semantics": "reference_only_not_fill",
             },
         )
 
