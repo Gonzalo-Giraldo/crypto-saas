@@ -440,7 +440,7 @@ def execute_binance_test_order_for_user(
 
             if intent_key:
                 store = IntentConsumptionStore()
-                store.attach_execution(
+                attached = store.attach_execution(
                     user_id=user_id,
                     broker="BINANCE",
                     intent_key=intent_key,
@@ -450,6 +450,8 @@ def execute_binance_test_order_for_user(
                     symbol=symbol,
                     market=market,
                 )
+                if not attached:
+                    raise RuntimeError("binance_attach_execution_failed")
 
         except Exception as exc:
             details = {
@@ -610,7 +612,7 @@ def execute_binance_real_order_for_user(
 
             if intent_key:
                 store = IntentConsumptionStore()
-                store.attach_execution(
+                attached = store.attach_execution(
                     user_id=user_id,
                     broker="BINANCE",
                     intent_key=intent_key,
@@ -620,6 +622,8 @@ def execute_binance_real_order_for_user(
                     symbol=symbol,
                     market=market,
                 )
+                if not attached:
+                    raise RuntimeError("binance_attach_execution_failed")
 
         except Exception as exc:
             details = {
