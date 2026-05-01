@@ -173,6 +173,19 @@ def assert_exposure_limits(
         )
 
 
+
+def _json_safe_audit_value(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe_audit_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_audit_value(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe_audit_value(v) for v in value]
+    return value
+
+
 def _audit_binance_exposure_source_divergence(
     db,
     current_user,
@@ -234,11 +247,11 @@ def _audit_binance_exposure_source_divergence(
                 action="risk.exposure.shadow_divergence",
                 user_id=current_user.id,
                 entity_type="risk",
-                details={
+                details=_json_safe_audit_value({
                     "symbol": symbol,
                     "exchange": exchange,
                     "delta": comparison.get("delta"),
-                },
+                }),
             )
 
     except Exception as exc:
