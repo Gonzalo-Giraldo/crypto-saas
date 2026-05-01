@@ -1,4 +1,5 @@
 from apps.api.app.api.signals import router as signals_router
+from apps.api.app.api.binance_execution import router as binance_execution_router
 from apps.api.app.api.positions import router as positions_router
 from apps.api.app.routes.auth import router as auth_router
 from contextlib import asynccontextmanager
@@ -171,6 +172,7 @@ app.include_router(positions_router)
 app.include_router(ops_ibkr_router)
 app.include_router(binance_ping_router)
 app.include_router(binance_positions_router)
+app.include_router(binance_execution_router)
 app.include_router(admin_recovery_router)
 
 @app.get("/healthz")
