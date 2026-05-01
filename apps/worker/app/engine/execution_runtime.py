@@ -634,6 +634,80 @@ def execute_binance_real_order_for_user(
                 finally:
                     db.close()
 
+                # Post-execution Binance fill ingestion.
+                # Best-effort with bounded retry: never re-submits orders and never fails execution.
+                from time import sleep
+                from apps.api.app.services.binance_fill_db import persist_binance_fills_db
+                from apps.api.app.services.binance_fill_manual_runner import run_binance_fill_ingestion_for_intent
+                from apps.api.app.services.binance_trades_gateway_client import fetch_binance_trades
+
+                from apps.api.app.db.session import SessionLocal
+                db_ingest = SessionLocal()
+                fill_ingestion_result = None
+                fill_ingestion_error = None
+
+                try:
+                    for attempt, delay_seconds in enumerate((0, 1, 2, 4), start=1):
+                        if delay_seconds:
+                            sleep(delay_seconds)
+
+                        try:
+                            fill_ingestion_result = run_binance_fill_ingestion_for_intent(
+                                db=db_ingest,
+                                intent_id=str(intent_key),
+                                symbol=symbol,
+                                order_id=str(broker_order_id),
+                                execution_ref_type="orderId",
+                                user_id=user_id,
+                                account_id=account_id or "no-account",
+                                market=market,
+                                expected_qty=qty_meta["normalized_qty"],
+                                gateway_fetch_trades=lambda symbol, order_id: fetch_binance_trades(
+                                    api_key=creds["api_key"],
+                                    api_secret=creds["api_secret"],
+                                    symbol=symbol,
+                                    market=market,
+                                ),
+                                persist_binance_fills_db=persist_binance_fills_db,
+                                persist=True,
+                            )
+                            fill_ingestion_result["attempt"] = attempt
+
+                            if int(fill_ingestion_result.get("matched_count") or 0) > 0:
+                                break
+
+                        except Exception as attempt_exc:
+                            db_ingest.rollback()
+                            fill_ingestion_error = attempt_exc
+                            fill_ingestion_result = None
+
+                    if fill_ingestion_result is not None:
+                        log_audit_event(
+                            db_ingest,
+                            action="execution.binance.fill_ingestion.completed",
+                            user_id=user_id,
+                            entity_type="execution",
+                            details=fill_ingestion_result,
+                        )
+                    else:
+                        log_audit_event(
+                            db_ingest,
+                            action="execution.binance.fill_ingestion.error",
+                            user_id=user_id,
+                            entity_type="execution",
+                            details={
+                                "intent_key": str(intent_key),
+                                "symbol": symbol,
+                                "order_id": str(broker_order_id),
+                                "market": market,
+                                "error": str(fill_ingestion_error),
+                                "attempts": 4,
+                            },
+                        )
+                    db_ingest.commit()
+                finally:
+                    db_ingest.close()
+
         except Exception as exc:
             details = {
                 "symbol": symbol,
