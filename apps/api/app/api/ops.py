@@ -661,6 +661,7 @@ from apps.api.app.services.risk_profiles import (
 )
 from apps.api.app.services.idempotency import (
     cleanup_old_idempotency_keys,
+    store_idempotent_response,
     consume_idempotent_response,
     reserve_idempotent_intent,
     finalize_idempotent_intent,
