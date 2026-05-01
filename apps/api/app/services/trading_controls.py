@@ -1,3 +1,4 @@
+from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import select, text
 from apps.api.app.services.binance_derived_position_service import derive_binance_positions_from_fill_rows
