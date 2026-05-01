@@ -627,7 +627,6 @@ def execute_binance_real_order_for_user(
                     raise RuntimeError("binance_attach_execution_failed")
 
                 # lifecycle: CONSUMED → EXECUTED (solo real order)
-                from apps.api.app.db.session import SessionLocal
                 db = SessionLocal()
                 try:
                     mark_intent_executed(db, intent_key)
@@ -641,7 +640,6 @@ def execute_binance_real_order_for_user(
                 from apps.api.app.services.binance_fill_manual_runner import run_binance_fill_ingestion_for_intent
                 from apps.api.app.services.binance_trades_gateway_client import fetch_binance_trades
 
-                from apps.api.app.db.session import SessionLocal
                 db_ingest = SessionLocal()
                 fill_ingestion_result = None
                 fill_ingestion_error = None
