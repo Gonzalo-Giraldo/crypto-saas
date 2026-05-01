@@ -131,7 +131,10 @@ def run_binance_fill_ingestion_for_intent(
     if not isinstance(reconciliation, dict):
         raise ValueError("reconciliation_invalid")
 
-    if reconciliation.get("safe_for_position_update") is not True:
+    reconciliation_status = str(reconciliation.get("status") or "").lower().strip()
+    persistable_statuses = {"matched", "partial", "overfilled"}
+
+    if reconciliation_status not in persistable_statuses:
         return {
             "intent_id": intent_id,
             "symbol": symbol_norm,

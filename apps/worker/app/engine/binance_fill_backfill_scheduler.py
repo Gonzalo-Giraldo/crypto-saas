@@ -45,6 +45,7 @@ def run_binance_fill_backfill(*, limit: int = 50) -> dict:
                 ic.market,
                 ic.consumer
             HAVING COUNT(bf.id) = 0
+   OR ABS(COALESCE(SUM(bf.qty), 0) - i.expected_qty) > 0.00000001
             LIMIT :limit
         """), {"limit": int(limit)}).fetchall()
 
