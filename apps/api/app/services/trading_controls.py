@@ -150,7 +150,7 @@ def assert_exposure_limits(
         legacy_positions=open_positions,
         symbol=symbol_upper,
         exchange=exchange_upper,
-        projected_qty=projected_qty,
+        projected_qty=projected_qty_symbol,
         projected_price=price,
     )
     if max_notional_exchange > 0 and projected_notional_exchange > max_notional_exchange:
