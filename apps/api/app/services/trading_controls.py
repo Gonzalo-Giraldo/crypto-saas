@@ -100,6 +100,71 @@ def assert_exposure_limits(
     max_qty = float(settings.MAX_OPEN_QTY_PER_SYMBOL)
     max_notional_exchange = float(settings.MAX_OPEN_NOTIONAL_PER_EXCHANGE)
 
+    symbol_upper = symbol.upper()
+    exchange_upper = exchange.upper()
+
+    # === BINANCE FINANCIAL STATE GUARD (F6) ===
+    if exchange_upper == "BINANCE":
+        from apps.api.app.services.binance_financial_state_service import compute_binance_order_financial_state
+        from sqlalchemy import text as sql_text
+
+        rows = db.execute(sql_text("""
+            SELECT
+                i.intent_id,
+                i.expected_qty,
+                ic.execution_ref,
+                ic.symbol,
+                ic.market
+            FROM intents i
+            JOIN intent_consumptions ic ON ic.intent_id = i.intent_id::text
+            WHERE i.user_id = :user_id
+              AND i.lifecycle_status = 'EXECUTED'
+              AND ic.execution_ref IS NOT NULL
+              AND ic.broker_execution_id_type = 'orderId'
+              AND ic.symbol IS NOT NULL
+              AND ic.market IN ('SPOT', 'FUTURES')
+        """), {"user_id": str(current_user.id)}).fetchall()
+
+        for r in rows:
+            fills = db.execute(sql_text("""
+                SELECT *
+                FROM binance_fills
+                WHERE order_id = :order_id
+                  AND symbol = :symbol
+            """), {
+                "order_id": str(r.execution_ref),
+                "symbol": str(r.symbol),
+            }).mappings().all()
+
+            state = compute_binance_order_financial_state(
+                execution_ref=str(r.execution_ref),
+                symbol=str(r.symbol),
+                market=str(r.market),
+                fills=fills,
+                expected_qty=r.expected_qty,
+            )
+
+            if state["financial_state"] != "COMPLETE":
+                log_audit_event(
+                    db,
+                    action="execution.blocked.financial_state",
+                    user_id=current_user.id,
+                    entity_type="risk",
+                    details={
+                        "execution_ref": str(r.execution_ref),
+                        "symbol": str(r.symbol),
+                        "financial_state": state["financial_state"],
+                    },
+                )
+                db.commit()
+                from fastapi import HTTPException
+                from starlette import status
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Risk block: financial state not complete ({state['financial_state']})",
+                )
+
+
     open_positions = (
         db.execute(
             select(Position).where(
@@ -111,8 +176,6 @@ def assert_exposure_limits(
         .all()
     )
 
-    symbol_upper = symbol.upper()
-    exchange_upper = exchange.upper()
     open_qty_symbol = 0.0
     open_notional_exchange = 0.0
     for p in open_positions:
