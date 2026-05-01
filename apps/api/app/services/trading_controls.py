@@ -151,7 +151,7 @@ def assert_exposure_limits(
         symbol=symbol_upper,
         exchange=exchange_upper,
         projected_qty=projected_qty_symbol,
-        projected_price=price,
+        projected_price=price_f,
     )
     if max_notional_exchange > 0 and projected_notional_exchange > max_notional_exchange:
         log_audit_event(
