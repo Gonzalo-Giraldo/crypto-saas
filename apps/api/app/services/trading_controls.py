@@ -1,5 +1,7 @@
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, text
+from apps.api.app.services.binance_derived_position_service import derive_binance_positions_from_fill_rows
+from apps.api.app.services.exposure_source_comparison_service import compare_legacy_vs_derived_exposure
 from sqlalchemy.orm import Session
 import math
 
@@ -141,6 +143,16 @@ def assert_exposure_limits(
         )
 
     projected_notional_exchange = open_notional_exchange + (qty_f * max(0.0, price_f))
+
+    _audit_binance_exposure_source_divergence(
+        db=db,
+        current_user=current_user,
+        legacy_positions=open_positions,
+        symbol=symbol_upper,
+        exchange=exchange_upper,
+        projected_qty=projected_qty,
+        projected_price=price,
+    )
     if max_notional_exchange > 0 and projected_notional_exchange > max_notional_exchange:
         log_audit_event(
             db,
@@ -158,4 +170,86 @@ def assert_exposure_limits(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Risk block: exchange exposure exceeded ({projected_notional_exchange}>{max_notional_exchange})",
+        )
+
+
+def _audit_binance_exposure_source_divergence(
+    db,
+    current_user,
+    legacy_positions,
+    symbol,
+    exchange,
+    projected_qty,
+    projected_price,
+):
+    if str(exchange).upper() != "BINANCE":
+        return
+
+    try:
+        rows = db.execute(
+            text("""
+            SELECT
+                user_id,
+                account_id,
+                broker,
+                market,
+                symbol,
+                side,
+                qty,
+                quote_qty,
+                commission_usdt
+            FROM binance_fills
+            WHERE user_id = :user_id
+              AND broker = 'BINANCE'
+              AND symbol = :symbol
+            """),
+            {"user_id": current_user.id, "symbol": symbol},
+        ).fetchall()
+
+        fill_rows = [dict(r._mapping) for r in rows]
+
+        derived_positions = derive_binance_positions_from_fill_rows(fill_rows)
+
+        legacy_rows = []
+        for p in legacy_positions:
+            legacy_rows.append({
+                "symbol": getattr(p, "symbol", None),
+                "qty": getattr(p, "qty", None),
+                "entry_price": getattr(p, "entry_price", None),
+                "status": getattr(p, "status", None),
+            })
+
+        comparison = compare_legacy_vs_derived_exposure(
+            legacy_positions=legacy_rows,
+            derived_positions=derived_positions,
+            symbol=symbol,
+            exchange=exchange,
+            projected_qty=projected_qty,
+            projected_price=projected_price,
+        )
+
+        if comparison.get("diverged") is True:
+            log_audit_event(
+                db,
+                action="risk.exposure.shadow_divergence",
+                user_id=current_user.id,
+                entity_type="risk",
+                details={
+                    "symbol": symbol,
+                    "exchange": exchange,
+                    "delta": comparison.get("delta"),
+                },
+            )
+
+    except Exception as exc:
+        log_audit_event(
+            db,
+            action="risk.exposure.shadow_error",
+            user_id=current_user.id,
+            entity_type="risk",
+            details={
+                "symbol": symbol,
+                "exchange": exchange,
+                "error": str(exc),
+            },
         )
