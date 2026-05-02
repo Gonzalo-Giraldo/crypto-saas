@@ -772,9 +772,12 @@ def create_binance_listen_key():
     api_key, _ = _binance_gateway_credentials()
     base_url = _binance_gateway_base_url()
 
+    endpoint = "/api/v3/userDataStream"
+    url = f"{base_url}{endpoint}"
+
     response = requests.request(
         method="POST",
-        url=f"{base_url}/api/v3/userDataStream",
+        url=url,
         headers={"X-MBX-APIKEY": api_key},
         timeout=15,
     )
@@ -784,23 +787,49 @@ def create_binance_listen_key():
             status_code=502,
             detail={
                 "error": "binance_gateway_upstream_error",
+                "base_url": base_url,
+                "endpoint": endpoint,
+                "method": "POST",
+                "has_params": False,
+                "has_body": False,
                 "status_code": response.status_code,
                 "response_text": _sanitize_binance_error_text(response.text),
-                "endpoint": "/api/v3/userDataStream",
-                "method": "POST",
+                "upstream_url_sanitized": url,
             },
         )
 
-    result = response.json()
-    listen_key = result.get("listenKey")
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "binance_gateway_invalid_json",
+                "base_url": base_url,
+                "endpoint": endpoint,
+                "method": "POST",
+                "has_params": False,
+                "has_body": False,
+                "status_code": response.status_code,
+                "response_text": _sanitize_binance_error_text(response.text),
+                "upstream_url_sanitized": url,
+            },
+        ) from exc
 
+    listen_key = result.get("listenKey")
     if not listen_key:
         raise HTTPException(
             status_code=502,
             detail={
                 "error": "binance_gateway_missing_listen_key",
-                "endpoint": "/api/v3/userDataStream",
+                "base_url": base_url,
+                "endpoint": endpoint,
                 "method": "POST",
+                "has_params": False,
+                "has_body": False,
+                "status_code": response.status_code,
+                "response_text": _sanitize_binance_error_text(response.text),
+                "upstream_url_sanitized": url,
             },
         )
 
