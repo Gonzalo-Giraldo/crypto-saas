@@ -11,6 +11,7 @@ def fetch_binance_trades(
     api_secret: str,
     symbol: str,
     market: str,
+    start_time_ms: int = None,   # 🔴 NUEVO
 ):
     if not (settings.BINANCE_GATEWAY_ENABLED and settings.BINANCE_GATEWAY_BASE_URL):
         raise RuntimeError("binance_gateway_not_configured")
@@ -31,12 +32,18 @@ def fetch_binance_trades(
 
     url = f"{settings.BINANCE_GATEWAY_BASE_URL.rstrip('/')}/binance/my-trades"
 
-    payload = json.dumps({
+    payload_dict = {
         "api_key": api_key_norm,
         "api_secret": api_secret_norm,
         "symbol": symbol_norm,
         "market": market_norm,
-    }).encode("utf-8")
+    }
+
+# 🔴 NUEVO
+    if start_time_ms is not None:
+        payload_dict["start_time_ms"] = int(start_time_ms)
+
+    payload = json.dumps(payload_dict).encode("utf-8")
 
     req = urllib_request.Request(
         url,

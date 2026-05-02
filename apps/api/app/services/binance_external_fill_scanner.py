@@ -1,5 +1,6 @@
 from sqlalchemy import text
 from typing import Dict, Any, List
+import time
 
 def scan_binance_external_fills(
     db,
@@ -11,17 +12,24 @@ def scan_binance_external_fills(
     api_secret: str,
     fetch_binance_trades,
     persist_binance_fills_db,
+    start_time_ms: int = None,   # 🔴 NUEVO
 ) -> Dict[str, Any]:
+
     if market != "SPOT":
         raise ValueError("market_not_supported")
 
     symbol = symbol.upper()
+
+    # 🔴 SI NO SE PASA → usar "ahora - 5 min"
+    if start_time_ms is None:
+        start_time_ms = int(time.time() * 1000) - (5 * 60 * 1000)
 
     trades = fetch_binance_trades(
         api_key=api_key,
         api_secret=api_secret,
         symbol=symbol,
         market=market,
+        start_time_ms=start_time_ms,   # 🔴 CLAVE
     ) or []
 
     scanned_count = len(trades)
@@ -50,9 +58,8 @@ def scan_binance_external_fills(
     skipped_existing_count = 0
 
     for t in trades:
-        raw_id = t.get("id") or t.get("trade_id")
+        raw_id = t.get("id") or t.get("tradeId")
 
-        # 🔴 VALIDACIÓN CRÍTICA
         if raw_id is None:
             continue
 
@@ -69,20 +76,25 @@ def scan_binance_external_fills(
     if new_trades:
         result = persist_binance_fills_db(
             db=db,
-            trades=new_trades,
+            fills=new_trades,
             user_id=user_id,
             account_id=account_id,
+            broker="BINANCE",
             market=market,
-        ) or []
+        ) or {}
 
-        for r in result:
-            rid = r.get("trade_id") or r.get("id")
-            if rid is not None:
-                inserted_trade_ids.append(str(rid))
+        inserted_count = result.get("inserted", 0)
+
+        inserted_trade_ids = [
+            str(t.get("id") or t.get("tradeId"))
+            for t in new_trades[:inserted_count]
+        ]
+    else:
+        inserted_count = 0
 
     return {
         "scanned_count": scanned_count,
-        "inserted_count": len(inserted_trade_ids),
+        "inserted_count": inserted_count,
         "skipped_existing_count": skipped_existing_count,
         "inserted_trade_ids": inserted_trade_ids,
     }
