@@ -1,3 +1,4 @@
+import os
 from sqlalchemy import text
 from typing import Dict, Any, List
 import time
@@ -14,6 +15,22 @@ def scan_binance_external_fills(
     persist_binance_fills_db,
     start_time_ms: int = None,   # 🔴 NUEVO
 ) -> Dict[str, Any]:
+
+    app_env = (os.getenv("APP_ENV") or "").strip().lower()
+    environment = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    allow_unsafe_manual_run = (
+        os.getenv("BINANCE_EXTERNAL_FILL_SCANNER_ALLOW_UNSAFE_MANUAL_RUN")
+        or ""
+    ).strip().lower()
+
+    if (
+        app_env in {"production", "prod"}
+        or environment in {"production", "prod"}
+    ) and allow_unsafe_manual_run != "true":
+        raise RuntimeError(
+            "binance external fill scanner is blocked in production unless "
+            "BINANCE_EXTERNAL_FILL_SCANNER_ALLOW_UNSAFE_MANUAL_RUN=true"
+        )
 
     if market != "SPOT":
         raise ValueError("market_not_supported")
