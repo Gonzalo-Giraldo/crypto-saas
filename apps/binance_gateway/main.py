@@ -769,11 +769,31 @@ def _signed_binance_user_data_stream_request(method: str, endpoint: str, extra_p
 
 @app.post("/binance/listen-key")
 def create_binance_listen_key():
-    result = _signed_binance_user_data_stream_request(
-        "POST",
-        "/api/v3/userDataStream",
+    api_key, _ = _binance_gateway_credentials()
+    base_url = _binance_gateway_base_url()
+
+    response = requests.request(
+        method="POST",
+        url=f"{base_url}/api/v3/userDataStream",
+        headers={"X-MBX-APIKEY": api_key},
+        timeout=15,
     )
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "binance_gateway_upstream_error",
+                "status_code": response.status_code,
+                "response_text": _sanitize_binance_error_text(response.text),
+                "endpoint": "/api/v3/userDataStream",
+                "method": "POST",
+            },
+        )
+
+    result = response.json()
     listen_key = result.get("listenKey")
+
     if not listen_key:
         raise HTTPException(
             status_code=502,
@@ -783,17 +803,35 @@ def create_binance_listen_key():
                 "method": "POST",
             },
         )
-    return {"listenKey": listen_key}
 
+    return {"listenKey": listen_key}
 
 @app.put("/binance/listen-key")
 def keepalive_binance_listen_key(listenKey: str):
     if not listenKey or not listenKey.strip():
         raise HTTPException(status_code=400, detail="listenKey is required")
-    _signed_binance_user_data_stream_request(
-        "PUT",
-        "/api/v3/userDataStream",
-        {"listenKey": listenKey.strip()},
-    )
-    return {"status": "ok"}
 
+    api_key, _ = _binance_gateway_credentials()
+    base_url = _binance_gateway_base_url()
+
+    response = requests.request(
+        method="PUT",
+        url=f"{base_url}/api/v3/userDataStream",
+        headers={"X-MBX-APIKEY": api_key},
+        params={"listenKey": listenKey.strip()},
+        timeout=15,
+    )
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "binance_gateway_upstream_error",
+                "status_code": response.status_code,
+                "response_text": _sanitize_binance_error_text(response.text),
+                "endpoint": "/api/v3/userDataStream",
+                "method": "PUT",
+            },
+        )
+
+    return {"status": "ok"}
