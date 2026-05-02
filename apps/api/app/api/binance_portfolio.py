@@ -52,9 +52,10 @@ def get_unrealized_pnl(
 
     fills = [dict(r._mapping) for r in rows]
 
-    ticker = fetch_binance_ticker_price(symbol=symbol)
-    if "price" not in ticker:
-        raise HTTPException(status_code=500, detail="ticker_invalid")
+    try:
+        ticker = fetch_binance_ticker_price(symbol=symbol)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
     current_price = Decimal(str(ticker["price"]))
 
