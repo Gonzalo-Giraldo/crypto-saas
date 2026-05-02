@@ -665,3 +665,135 @@ def binance_position_risk(payload: BinanceFuturesAccountIn, x_internal_token: st
         "mode": "gateway_position_risk",
         "positions": data,
     }
+
+def _binance_gateway_env(name: str) -> str:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        raise HTTPException(status_code=500, detail=f"Missing gateway environment variable: {name}")
+    return value.strip()
+
+
+def _binance_gateway_base_url() -> str:
+    return (
+        os.getenv("BINANCE_BASE_URL")
+        or os.getenv("BINANCE_REST_BASE_URL")
+        or os.getenv("BINANCE_SPOT_BASE_URL")
+        or "https://api.binance.com"
+    ).rstrip("/")
+
+
+def _sanitize_binance_error_text(text: str) -> str:
+    if not text:
+        return ""
+    sanitized = text
+    for secret_name in ("BINANCE_API_SECRET", "BINANCE_SECRET_KEY", "BINANCE_SECRET"):
+        secret_value = os.getenv(secret_name)
+        if secret_value:
+            sanitized = sanitized.replace(secret_value, "[REDACTED]")
+    for key_name in ("BINANCE_API_KEY", "BINANCE_KEY"):
+        key_value = os.getenv(key_name)
+        if key_value:
+            sanitized = sanitized.replace(key_value, "[REDACTED]")
+    return sanitized[:2000]
+
+
+def _binance_gateway_credentials() -> tuple[str, str]:
+    api_key = (
+        os.getenv("BINANCE_API_KEY")
+        or os.getenv("BINANCE_KEY")
+        or ""
+    ).strip()
+    api_secret = (
+        os.getenv("BINANCE_API_SECRET")
+        or os.getenv("BINANCE_SECRET_KEY")
+        or os.getenv("BINANCE_SECRET")
+        or ""
+    ).strip()
+
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Missing gateway Binance API key")
+    if not api_secret:
+        raise HTTPException(status_code=500, detail="Missing gateway Binance API secret")
+
+    return api_key, api_secret
+
+
+def _signed_binance_user_data_stream_request(method: str, endpoint: str, extra_params: dict[str, str] | None = None) -> dict:
+    api_key, api_secret = _binance_gateway_credentials()
+    base_url = _binance_gateway_base_url()
+    params: dict[str, str] = dict(extra_params or {})
+    params["timestamp"] = str(int(time.time() * 1000))
+    query = urlencode(params)
+    signature = hmac.new(api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+    signed_query = f"{query}&signature={signature}"
+    url = f"{base_url}{endpoint}"
+    headers = {"X-MBX-APIKEY": api_key}
+
+    response = requests.request(
+        method=method,
+        url=url,
+        params=signed_query,
+        headers=headers,
+        timeout=15,
+    )
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "binance_gateway_upstream_error",
+                "status_code": response.status_code,
+                "response_text": _sanitize_binance_error_text(response.text),
+                "endpoint": endpoint,
+                "method": method,
+            },
+        )
+
+    if not response.text:
+        return {}
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "binance_gateway_invalid_json",
+                "status_code": response.status_code,
+                "response_text": _sanitize_binance_error_text(response.text),
+                "endpoint": endpoint,
+                "method": method,
+            },
+        ) from exc
+
+
+@app.post("/binance/listen-key")
+def create_binance_listen_key():
+    result = _signed_binance_user_data_stream_request(
+        "POST",
+        "/api/v3/userDataStream",
+    )
+    listen_key = result.get("listenKey")
+    if not listen_key:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "binance_gateway_missing_listen_key",
+                "endpoint": "/api/v3/userDataStream",
+                "method": "POST",
+            },
+        )
+    return {"listenKey": listen_key}
+
+
+@app.put("/binance/listen-key")
+def keepalive_binance_listen_key(listenKey: str):
+    if not listenKey or not listenKey.strip():
+        raise HTTPException(status_code=400, detail="listenKey is required")
+    _signed_binance_user_data_stream_request(
+        "PUT",
+        "/api/v3/userDataStream",
+        {"listenKey": listenKey.strip()},
+    )
+    return {"status": "ok"}
+
