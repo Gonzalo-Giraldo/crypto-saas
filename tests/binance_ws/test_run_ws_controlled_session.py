@@ -265,3 +265,170 @@ def test_no_orders_or_rest_are_executed():
 
     assert summary["received"] == 1
     assert summary["ignored"] == 1
+
+
+class LifecycleWsClient:
+    def __init__(self, messages=None, fail_on=None):
+        self.messages = list(messages or [])
+        self.fail_on = fail_on
+        self.calls = []
+        self.closed = False
+
+    def session_logon(self):
+        self.calls.append("session_logon")
+        if self.fail_on == "session_logon":
+            raise RuntimeError("logon failed")
+
+    def subscribe_user_data(self):
+        self.calls.append("subscribe_user_data")
+        if self.fail_on == "subscribe_user_data":
+            raise RuntimeError("subscribe failed")
+
+    def receive(self):
+        self.calls.append("receive")
+        if self.fail_on == "receive":
+            raise RuntimeError("receive failed")
+        if not self.messages:
+            raise RuntimeError("no more messages")
+        return self.messages.pop(0)
+
+    def close(self):
+        self.calls.append("close")
+        self.closed = True
+        if self.fail_on == "close":
+            raise RuntimeError("close failed")
+
+
+def test_lifecycle_client_logon_subscribe_receive_close_order():
+    client = LifecycleWsClient(messages=[
+        filled_event(trade_id=2001),
+        new_event(order_id=61308219300),
+    ])
+
+    db = FakeDB()
+
+    result = run_controlled_ws_session(
+        ws_client=client,
+        db=db,
+        user_id="user-1",
+        account_id="default",
+        persist_binance_fills_db_callable=fake_persist,
+        max_messages=2,
+    )
+
+    assert client.calls == [
+        "session_logon",
+        "subscribe_user_data",
+        "receive",
+        "receive",
+        "close",
+    ]
+    assert client.closed is True
+    assert result["received"] == 2
+    assert result["execution_reports"] == 2
+    assert result["processed"] == 1
+    assert result["not_a_fill"] == 1
+    assert result["errors"] == []
+
+
+def test_lifecycle_client_logon_error_skips_receive_and_closes():
+    client = LifecycleWsClient(messages=[filled_event()], fail_on="session_logon")
+
+    result = run_controlled_ws_session(
+        ws_client=client,
+        db=FakeDB(),
+        user_id="user-1",
+        account_id="default",
+        persist_binance_fills_db_callable=fake_persist,
+        max_messages=1,
+    )
+
+    assert client.calls == ["session_logon", "close"]
+    assert client.closed is True
+    assert result["received"] == 0
+    assert result["processed"] == 0
+    assert result["errors"] == ["logon failed"]
+
+
+def test_lifecycle_client_subscribe_error_skips_receive_and_closes():
+    client = LifecycleWsClient(messages=[filled_event()], fail_on="subscribe_user_data")
+
+    result = run_controlled_ws_session(
+        ws_client=client,
+        db=FakeDB(),
+        user_id="user-1",
+        account_id="default",
+        persist_binance_fills_db_callable=fake_persist,
+        max_messages=1,
+    )
+
+    assert client.calls == ["session_logon", "subscribe_user_data", "close"]
+    assert client.closed is True
+    assert result["received"] == 0
+    assert result["processed"] == 0
+    assert result["errors"] == ["subscribe failed"]
+
+
+def test_lifecycle_client_receive_error_is_reported_and_closes():
+    client = LifecycleWsClient(messages=[filled_event()], fail_on="receive")
+
+    result = run_controlled_ws_session(
+        ws_client=client,
+        db=FakeDB(),
+        user_id="user-1",
+        account_id="default",
+        persist_binance_fills_db_callable=fake_persist,
+        max_messages=2,
+    )
+
+    assert client.calls == [
+        "session_logon",
+        "subscribe_user_data",
+        "receive",
+        "receive",
+        "close",
+    ]
+    assert client.closed is True
+    assert result["received"] == 0
+    assert result["processed"] == 0
+    assert result["errors"] == ["receive failed", "receive failed"]
+
+
+def test_lifecycle_client_close_error_is_reported():
+    client = LifecycleWsClient(messages=[filled_event()], fail_on="close")
+
+    result = run_controlled_ws_session(
+        ws_client=client,
+        db=FakeDB(),
+        user_id="user-1",
+        account_id="default",
+        persist_binance_fills_db_callable=fake_persist,
+        max_messages=1,
+    )
+
+    assert client.calls == [
+        "session_logon",
+        "subscribe_user_data",
+        "receive",
+        "close",
+    ]
+    assert result["received"] == 1
+    assert result["processed"] == 1
+    assert result["errors"] == ["close failed"]
+
+
+def test_client_without_lifecycle_methods_still_works():
+    client = FakeWSClient(messages=[filled_event(trade_id=3001)])
+
+    result = run_controlled_ws_session(
+        ws_client=client,
+        db=FakeDB(),
+        user_id="user-1",
+        account_id="default",
+        persist_binance_fills_db_callable=fake_persist,
+        max_messages=1,
+    )
+
+    assert result["received"] == 1
+    assert result["processed"] == 1
+    assert result["errors"] == []
