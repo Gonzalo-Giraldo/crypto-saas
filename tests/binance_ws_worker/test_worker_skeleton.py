@@ -44,6 +44,8 @@ class FakeWsClient:
                     "t": 456,
                     "s": "BTCUSDT",
                     "S": "BUY",
+                    "l": "0.01",
+                    "L": "50000",
                     "apiKey": "fixture-only",
                     "signature": "fixture-only",
                     "private_key": "fixture-only",
@@ -272,3 +274,63 @@ def test_forbidden_imports_and_secrets_not_present():
         text = path.read_text()
         for token in forbidden:
             assert token not in text, f"{token} found in {path}"
+
+
+def test_run_ws_read_only_does_not_call_persistence_by_default():
+    main_module = _import_worker_module("main")
+
+    count = {"n": 0}
+
+    def fake_persist(**kwargs):
+        count["n"] += 1
+        return {"inserted": 1, "skipped": 0}
+
+    result = main_module.run_ws_read_only(
+        max_events=1,
+        client_builder=lambda: FakeWsClient(),
+        persist_callable=fake_persist,
+    )
+
+    assert result["received"] == 1
+    assert count["n"] == 0
+
+
+def test_run_ws_read_only_requires_callable_when_persistence_enabled():
+    main_module = _import_worker_module("main")
+
+    try:
+        main_module.run_ws_read_only(
+            max_events=1,
+            client_builder=lambda: FakeWsClient(),
+            enable_persistence=True,
+        )
+    except ValueError as exc:
+        assert "persist_callable is required" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_run_ws_read_only_calls_persistence_when_enabled():
+    main_module = _import_worker_module("main")
+
+    captured = {}
+
+    def fake_persist(**kwargs):
+        captured.update(kwargs)
+        return {"inserted": 1, "skipped": 0}
+
+    result = main_module.run_ws_read_only(
+        max_events=1,
+        client_builder=lambda: FakeWsClient(),
+        enable_persistence=True,
+        persist_callable=fake_persist,
+    )
+
+    assert result["received"] == 1
+    assert captured["db"] is None
+    assert captured["user_id"] == ""
+    assert captured["account_id"] == ""
+    assert captured["fills"][0]["tradeId"] == "456"
+    assert captured["fills"][0]["orderId"] == "123"
+    assert captured["fills"][0]["qty"] == "0.01"
+    assert captured["fills"][0]["price"] == "50000"

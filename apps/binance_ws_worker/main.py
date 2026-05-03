@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 from .config import BinanceWsWorkerConfig
 from .status import build_worker_status
+from .persistence_adapter import persist_ws_execution_report_message
 
 
 _ALLOWED_SAFE_MESSAGE_KEYS = {
@@ -76,9 +77,15 @@ def _print_safe(label: str, payload: dict[str, Any]) -> None:
 def run_ws_read_only(
     max_events: int = 5,
     client_builder: Callable[..., Any] | None = None,
+    *,
+    enable_persistence: bool = False,
+    persist_callable: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     if max_events is None or max_events <= 0:
         raise ValueError("max_events must be > 0")
+
+    if enable_persistence and persist_callable is None:
+        raise ValueError("persist_callable is required when enable_persistence=True")
 
     builder = client_builder or _load_ws_client_builder()
     client = builder()
@@ -102,6 +109,15 @@ def run_ws_read_only(
             message = _recv_json_object(client)
             received += 1
             _print_safe("WS_EVENT_SAFE", _safe_ws_message(message))
+
+            if enable_persistence:
+                persist_ws_execution_report_message(
+                    db=None,
+                    message=message,
+                    user_id="",
+                    account_id="",
+                    persist_callable=persist_callable,
+                )
 
     except Exception as exc:
         errors.append(str(exc))
