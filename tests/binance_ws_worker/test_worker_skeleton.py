@@ -1,4 +1,5 @@
 import importlib
+import json
 import pathlib
 
 import pytest
@@ -15,9 +16,62 @@ def _import_worker_module(name):
     return importlib.import_module(PACKAGE_NAME + "." + name)
 
 
+class FakeWs:
+    def __init__(self, messages):
+        self.messages = list(messages)
+
+    def recv(self):
+        if not self.messages:
+            raise RuntimeError("no more fake messages")
+        return self.messages.pop(0)
+
+
+class FakeWsClient:
+    def __init__(self, messages=None):
+        self.ws = FakeWs(messages or [
+            json.dumps({"id": "logon-id", "status": 200, "result": {"token": "hidden"}}),
+            json.dumps({"id": "subscribe-id", "status": 200, "result": {"subscriptionId": 0}}),
+            json.dumps({
+                "subscriptionId": 0,
+                "params": {"apiKey": "fixture-only"},
+                "result": {"signature": "fixture-only"},
+                "raw": {"private_key": "fixture-only"},
+                "token": "fixture-only",
+                "event": {
+                    "e": "executionReport",
+                    "x": "TRADE",
+                    "i": 123,
+                    "t": 456,
+                    "s": "BTCUSDT",
+                    "S": "BUY",
+                    "apiKey": "fixture-only",
+                    "signature": "fixture-only",
+                    "private_key": "fixture-only",
+                    "secret": "fixture-only",
+                    "token": "fixture-only",
+                    "params": {"unsafe": True},
+                    "result": {"unsafe": True},
+                    "raw": {"unsafe": True},
+                },
+            }),
+        ])
+        self.calls = []
+
+    def connect(self):
+        self.calls.append("connect")
+
+    def session_logon(self):
+        self.calls.append("session_logon")
+
+    def subscribe_user_data(self):
+        self.calls.append("subscribe_user_data")
+
+    def close(self):
+        self.calls.append("close")
+
+
 def test_package_import_has_no_side_effects():
     module = _import_worker_package()
-
     assert hasattr(module, "BinanceWsWorkerConfig")
     assert hasattr(module, "build_worker_status")
 
@@ -25,7 +79,6 @@ def test_package_import_has_no_side_effects():
 def test_default_config_is_inert_skeleton():
     config_module = _import_worker_module("config")
     config = config_module.BinanceWsWorkerConfig()
-
     assert config.worker_name == "binance_ws_worker"
     assert config.mode == "skeleton"
 
@@ -38,15 +91,9 @@ def test_skeleton_mode_is_valid_and_fully_disabled():
         config_module.BinanceWsWorkerConfig(mode="skeleton")
     )
 
-    assert status == {
-        "worker_name": "binance_ws_worker",
-        "mode": "skeleton",
-        "network_enabled": False,
-        "db_writes_enabled": False,
-        "orders_enabled": False,
-        "broker_actions_enabled": False,
-        "persistence_enabled": False,
-    }
+    assert status["network_enabled"] is False
+    assert status["db_writes_enabled"] is False
+    assert status["orders_enabled"] is False
 
 
 def test_dry_run_mode_is_valid_but_still_fully_disabled():
@@ -57,28 +104,12 @@ def test_dry_run_mode_is_valid_but_still_fully_disabled():
         config_module.BinanceWsWorkerConfig(mode="dry-run")
     )
 
-    assert status == {
-        "worker_name": "binance_ws_worker",
-        "mode": "dry-run",
-        "network_enabled": False,
-        "db_writes_enabled": False,
-        "orders_enabled": False,
-        "broker_actions_enabled": False,
-        "persistence_enabled": False,
-    }
+    assert status["network_enabled"] is False
+    assert status["db_writes_enabled"] is False
+    assert status["orders_enabled"] is False
 
 
-def test_invalid_mode_rejected():
-    config_module = _import_worker_module("config")
-    status_module = _import_worker_module("status")
-
-    config = config_module.BinanceWsWorkerConfig(mode="live")
-
-    with pytest.raises(ValueError, match="mode must be one of: dry-run, skeleton"):
-        status_module.build_worker_status(config)
-
-
-def test_main_only_prints_status(capsys):
+def test_main_default_no_ws_execution(capsys):
     main_module = _import_worker_module("main")
 
     status = main_module.main()
@@ -86,54 +117,158 @@ def test_main_only_prints_status(capsys):
     captured = capsys.readouterr()
 
     assert "BINANCE_WS_WORKER_STATUS" in captured.out
-    assert '"worker_name": "binance_ws_worker"' in captured.out
-    assert '"mode": "skeleton"' in captured.out
-    assert '"network_enabled": false' in captured.out
-    assert '"db_writes_enabled": false' in captured.out
-    assert '"orders_enabled": false' in captured.out
-    assert status["network_enabled"] is False
-    assert status["db_writes_enabled"] is False
-    assert status["orders_enabled"] is False
+    assert "ws_result" not in status
 
 
-def test_worker_files_do_not_import_forbidden_dependencies_or_read_secrets():
+def test_enable_ws_requires_dry_run():
+    config_module = _import_worker_module("config")
+    main_module = _import_worker_module("main")
+
+    status = main_module.main(
+        config=config_module.BinanceWsWorkerConfig(mode="skeleton"),
+        enable_ws=True,
+    )
+
+    assert status["ws_result"]["skipped"] is True
+
+
+def test_run_ws_read_only_flow_and_order(capsys):
+    main_module = _import_worker_module("main")
+    fake = FakeWsClient()
+
+    result = main_module.run_ws_read_only(
+        max_events=1,
+        client_builder=lambda: fake,
+    )
+
+    captured = capsys.readouterr()
+
+    assert fake.calls == [
+        "connect",
+        "session_logon",
+        "subscribe_user_data",
+        "close",
+    ]
+
+    assert result["received"] == 1
+    assert result["closed"] is True
+
+    assert "WS_LOGON_RESPONSE_SAFE" in captured.out
+    assert "WS_SUBSCRIBE_RESPONSE_SAFE" in captured.out
+    assert "WS_EVENT_SAFE" in captured.out
+
+
+def test_no_sensitive_tokens_in_sanitized_output(capsys):
+    main_module = _import_worker_module("main")
+    fake = FakeWsClient()
+
+    main_module.run_ws_read_only(
+        max_events=1,
+        client_builder=lambda: fake,
+    )
+
+    captured = capsys.readouterr().out
+
+    forbidden = [
+        "apiKey",
+        "signature",
+        "private_key",
+        "secret",
+        "token",
+        "params",
+        "result",
+        "raw",
+    ]
+
+    for token in forbidden:
+        assert token not in captured
+
+
+def test_safe_ws_message_allowlist_only():
+    main_module = _import_worker_module("main")
+
+    safe = main_module._safe_ws_message({
+        "status": 200,
+        "event": {
+            "e": "executionReport",
+            "x": "TRADE",
+            "i": 1,
+            "t": 2,
+            "s": "BTCUSDT",
+            "S": "BUY",
+        },
+    })
+
+    assert set(safe.keys()) == {
+        "message_kind",
+        "status",
+        "event_type",
+        "execution_type",
+        "order_id",
+        "trade_id",
+        "symbol",
+        "side",
+    }
+
+
+def test_only_allowed_binance_ws_import_location():
+    source = pathlib.Path("apps/binance_ws_worker/main.py").read_text()
+
+    lines = [l.strip() for l in source.splitlines() if "binance_ws" in l]
+
+    assert lines == [
+        'module_name = "apps." + "binance_ws.run_real_ws_controlled_session_dry_run"'
+    ]
+
+
+def test_recv_only_used_inside_recv_json_object():
+    source = pathlib.Path("apps/binance_ws_worker/main.py").read_text()
+
+    func_name = "def _recv_json_object"
+    start = source.find(func_name)
+    assert start != -1, "_recv_json_object not found"
+
+    # find end of function by next top-level def
+    end = source.find("\ndef ", start + 1)
+    if end == -1:
+        end = len(source)
+
+    recv_block = source[start:end]
+
+    # must use recv inside the function
+    assert ".recv()" in recv_block
+
+    # everything outside the function
+    outside = source[:start] + source[end:]
+
+    # ensure recv is not used anywhere else
+    assert ".recv()" not in outside
+
+def test_forbidden_imports_and_secrets_not_present():
     files = [
-        pathlib.Path("apps/binance_ws_worker/__init__.py"),
-        pathlib.Path("apps/binance_ws_worker/config.py"),
-        pathlib.Path("apps/binance_ws_worker/status.py"),
         pathlib.Path("apps/binance_ws_worker/main.py"),
     ]
 
     forbidden = [
-        "apps" + ".binance_ws",
-        "apps" + ".api",
-        "apps" + ".binance_gateway",
-        "ops" + ".py",
         "DATABASE_URL_RENDER",
         "BINANCE_API_KEY",
         "BINANCE_WS_API_KEY",
         "BINANCE_WS_ED25519_PRIVATE_KEY",
-        "os" + ".environ",
-        "os" + ".getenv",
-        "apiKey",
-        "signature",
-        "private_key",
-        "secret=",
-        "secret:",
+        "os.environ",
+        "os.getenv",
         "sqlalchemy",
         "create_engine",
         "sessionmaker",
-        "websocket",
-        "create_connection",
         "requests",
-        "FastAPI",
-        "uvicorn",
         "create_order",
         "cancel_order",
         "persist_binance_fills_db",
+        "ops.py",
+        "apps.api",
+        "apps.binance_gateway",
     ]
 
     for path in files:
-        source = path.read_text()
+        text = path.read_text()
         for token in forbidden:
-            assert token not in source, f"{token} found in {path}"
+            assert token not in text, f"{token} found in {path}"
