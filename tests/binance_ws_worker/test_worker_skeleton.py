@@ -30,20 +30,13 @@ def test_default_config_is_inert_skeleton():
     assert config.mode == "skeleton"
 
 
-def test_invalid_mode_rejected():
+def test_skeleton_mode_is_valid_and_fully_disabled():
     config_module = _import_worker_module("config")
     status_module = _import_worker_module("status")
 
-    config = config_module.BinanceWsWorkerConfig(mode="dry-run")
-
-    with pytest.raises(ValueError, match="mode must be 'skeleton'"):
-        status_module.build_worker_status(config)
-
-
-def test_worker_status_is_fully_disabled():
-    status_module = _import_worker_module("status")
-
-    status = status_module.build_worker_status()
+    status = status_module.build_worker_status(
+        config_module.BinanceWsWorkerConfig(mode="skeleton")
+    )
 
     assert status == {
         "worker_name": "binance_ws_worker",
@@ -54,6 +47,35 @@ def test_worker_status_is_fully_disabled():
         "broker_actions_enabled": False,
         "persistence_enabled": False,
     }
+
+
+def test_dry_run_mode_is_valid_but_still_fully_disabled():
+    config_module = _import_worker_module("config")
+    status_module = _import_worker_module("status")
+
+    status = status_module.build_worker_status(
+        config_module.BinanceWsWorkerConfig(mode="dry-run")
+    )
+
+    assert status == {
+        "worker_name": "binance_ws_worker",
+        "mode": "dry-run",
+        "network_enabled": False,
+        "db_writes_enabled": False,
+        "orders_enabled": False,
+        "broker_actions_enabled": False,
+        "persistence_enabled": False,
+    }
+
+
+def test_invalid_mode_rejected():
+    config_module = _import_worker_module("config")
+    status_module = _import_worker_module("status")
+
+    config = config_module.BinanceWsWorkerConfig(mode="live")
+
+    with pytest.raises(ValueError, match="mode must be one of: dry-run, skeleton"):
+        status_module.build_worker_status(config)
 
 
 def test_main_only_prints_status(capsys):
@@ -96,7 +118,8 @@ def test_worker_files_do_not_import_forbidden_dependencies_or_read_secrets():
         "apiKey",
         "signature",
         "private_key",
-        "secret=","secret:",
+        "secret=",
+        "secret:",
         "sqlalchemy",
         "create_engine",
         "sessionmaker",
