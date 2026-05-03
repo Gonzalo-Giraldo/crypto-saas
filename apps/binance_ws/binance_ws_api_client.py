@@ -60,7 +60,14 @@ class BinanceWsApiClient:
 
         self.ws = factory(self.ws_url, timeout=self.timeout_seconds)
 
-        # attempt to set socket timeout if available (websocket-client)
+        # enforce timeout at websocket level (critical to avoid blocking recv)
+        try:
+            if hasattr(self.ws, "settimeout"):
+                self.ws.settimeout(self.timeout_seconds)
+        except Exception:
+            pass
+
+        # attempt to set socket timeout as fallback
         try:
             sock = getattr(self.ws, "sock", None)
             if sock is not None and hasattr(sock, "settimeout"):
