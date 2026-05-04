@@ -49,6 +49,9 @@ class BinanceTestOrderIn(BaseModel):
     qty: float
     client_order_id: str | None = None
     market: str | None = None
+    type: str | None = None
+    stopPrice: float | None = None
+    reduceOnly: bool | None = None
 
 
 class BinanceAccountStatusIn(BaseModel):
@@ -261,13 +264,21 @@ def binance_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(de
     base_url = _base_url_for_market(market)
     endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
 
+    order_type = getattr(payload, "type", None) or "MARKET"
+
     params = {
         "symbol": payload.symbol.upper(),
         "side": payload.side.upper(),
-        "type": "MARKET",
+        "type": order_type.upper(),
         "quantity": payload.qty,
         "timestamp": int(time.time() * 1000),
     }
+
+    if hasattr(payload, "stopPrice") and payload.stopPrice is not None:
+        params["stopPrice"] = payload.stopPrice
+
+    if hasattr(payload, "reduceOnly") and payload.reduceOnly is not None:
+        params["reduceOnly"] = payload.reduceOnly
     if payload.client_order_id:
         params["newClientOrderId"] = str(payload.client_order_id)[:36]
 
@@ -302,13 +313,21 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
     else:
         endpoint = "/api/v3/order/test"
 
+    order_type = getattr(payload, "type", None) or "MARKET"
+
     params = {
         "symbol": payload.symbol.upper(),
         "side": payload.side.upper(),
-        "type": "MARKET",
+        "type": order_type.upper(),
         "quantity": payload.qty,
         "timestamp": int(time.time() * 1000),
     }
+
+    if hasattr(payload, "stopPrice") and payload.stopPrice is not None:
+        params["stopPrice"] = payload.stopPrice
+
+    if hasattr(payload, "reduceOnly") and payload.reduceOnly is not None:
+        params["reduceOnly"] = payload.reduceOnly
     if payload.client_order_id:
         params["newClientOrderId"] = str(payload.client_order_id)[:36]
     query = urlencode(params)
