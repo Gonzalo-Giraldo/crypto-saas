@@ -308,6 +308,59 @@ def binance_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(de
 
     return {"ok": True, "mode": f"gateway_order_{market.lower()}", "data": data}
 
+
+
+@app.post("/binance/algo-order")
+def binance_algo_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default=None)):
+    import time, hmac, hashlib
+    from urllib.parse import urlencode
+
+    _require_internal_token(x_internal_token)
+
+    market = (payload.market or "SPOT").upper()
+    if market != "FUTURES":
+        raise HTTPException(status_code=400, detail="algo_order_only_supported_for_futures")
+
+    base_url = _base_url_for_market(market)
+    endpoint = "/fapi/v1/algoOrder"
+
+    params = {
+        "symbol": payload.symbol.upper(),
+        "side": payload.side.upper(),
+        "type": (payload.type or "").upper(),
+        "algoType": "CONDITIONAL",
+        "quantity": payload.qty,
+        "timestamp": int(time.time() * 1000),
+    }
+
+    if payload.stopPrice is not None:
+        params["triggerPrice"] = payload.stopPrice
+
+    if payload.client_order_id:
+        params["clientAlgoId"] = str(payload.client_order_id)[:36]
+
+    query = urlencode(params)
+
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+
+    response = requests.post(
+        url,
+        headers={"X-MBX-APIKEY": payload.api_key},
+        timeout=10,
+    )
+
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+
+    return {"ok": True, "mode": "gateway_algo_order_futures"}
+
+
 @app.post("/binance/test-order")
 def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
     _authorize_internal_request(x_internal_token, endpoint_path="/binance/test-order")
