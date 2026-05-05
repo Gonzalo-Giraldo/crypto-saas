@@ -15,6 +15,7 @@ from apps.api.app.services.audit import log_audit_event
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
 from apps.api.app.services.intent_service import mark_intent_executed
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+from apps.worker.app.engine.binance_entry_fill_basis import derive_binance_entry_fill_basis
 from apps.worker.app.engine import broker_registry
 from apps.worker.app.engine.binance_client import (
     send_test_order,
@@ -738,7 +739,6 @@ def execute_binance_real_order_for_user(
                             db_ingest.rollback()
                             fill_ingestion_error = attempt_exc
                             fill_ingestion_result = None
-
                     if fill_ingestion_result is not None:
                         log_audit_event(
                             db_ingest,
@@ -747,6 +747,42 @@ def execute_binance_real_order_for_user(
                             entity_type="execution",
                             details=fill_ingestion_result,
                         )
+                        try:
+                            fill_basis = derive_binance_entry_fill_basis(
+                                trades=(fill_ingestion_result.get("trades") or []),
+                                reconciliation_status=((fill_ingestion_result.get("reconciliation") or {}).get("status")),
+                            )
+
+                            log_audit_event(
+                                db_ingest,
+                                action="execution.binance.fill_basis",
+                                user_id=user_id,
+                                entity_type="execution",
+                                details={
+                                    "broker_order_id": str(broker_order_id),
+                                    "intent_key": str(intent_key),
+                                    "symbol": symbol,
+                                    "market": market,
+                                    "fill_basis": fill_basis,
+                                    "matched_count": fill_ingestion_result.get("matched_count"),
+                                    "ingestion_attempt": fill_ingestion_result.get("attempt"),
+                                },
+                            )
+
+                        except Exception as e:
+                            log_audit_event(
+                                db_ingest,
+                                action="execution.binance.fill_basis.error",
+                                user_id=user_id,
+                                entity_type="execution",
+                                details={
+                                    "broker_order_id": str(broker_order_id),
+                                    "intent_key": str(intent_key),
+                                    "symbol": symbol,
+                                    "market": market,
+                                    "error": str(e),
+                                },
+                            )
                     else:
                         log_audit_event(
                             db_ingest,
