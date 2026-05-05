@@ -315,7 +315,7 @@ def binance_algo_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
     import time, hmac, hashlib
     from urllib.parse import urlencode
 
-    _require_internal_token(x_internal_token)
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/algo-order")
 
     market = (payload.market or "SPOT").upper()
     if market != "FUTURES":
