@@ -568,6 +568,20 @@ def execute_binance_real_order_for_user(
     market: str | None = None,
     risk_decision: dict | None = None,
 ):
+    if str(market or "").upper().strip() == "DRY_RUN":
+        risk_inputs = _extract_binance_risk_exit_inputs(risk_decision)
+        return {
+            "exchange": "BINANCE",
+            "mode": "dry_run",
+            "symbol": str(symbol or "").upper(),
+            "side": str(side or "").upper(),
+            "qty": float(qty),
+            "qty_requested": float(qty),
+            "execution_ref": "DRY_RUN_ORDER_ID",
+            "risk_inputs": risk_inputs,
+            "sent": False,
+        }
+
     db = SessionLocal()
     try:
         _assert_binance_gateway_policy()
