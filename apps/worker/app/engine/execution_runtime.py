@@ -792,6 +792,87 @@ def execute_binance_real_order_for_user(
                                     is_duplicate_exit=lambda _: False,
                                 )
 
+                            
+                            # === FASE 9C: persistencia pasiva SL/TP (SIN ejecución) ===
+                            try:
+                                if (
+                                    exit_plan.get("available") is True
+                                    and guard_result
+                                    and guard_result.allowed is True
+                                    and guard_result.exit_key
+                                ):
+                                    from apps.api.app.services.binance_exit_protection_service import create_exit_protection
+                                    from apps.api.app.db.session import SessionLocal
+
+                                    db_protection = SessionLocal()
+
+                                    try:
+                                        from apps.worker.app.engine.binance_futures_exit_orders import build_binance_futures_bracket_orders
+
+                                        bracket_orders = build_binance_futures_bracket_orders(
+                                            symbol=exit_plan.get("symbol"),
+                                            direction=exit_plan.get("direction"),
+                                            qty=exit_plan.get("filled_qty"),
+                                            entry_price=exit_plan.get("avg_entry_price"),
+                                            stop_loss=exit_plan.get("stop_loss"),
+                                            take_profit=exit_plan.get("take_profit"),
+                                            client_order_id=exit_plan.get("client_order_id"),
+                                        )
+
+                                        sl_client_algo_id = (bracket_orders.stop_loss_order or {}).get("clientAlgoId")
+                                        tp_client_algo_id = (bracket_orders.take_profit_order or {}).get("clientAlgoId")
+
+                                        if not sl_client_algo_id or not tp_client_algo_id:
+                                            raise ValueError("missing_exit_client_algo_id")
+
+                                        persist_result = create_exit_protection(
+                                            db_protection,
+                                            exit_key=guard_result.exit_key,
+                                            intent_id=str(intent_key),
+                                            entry_execution_ref=str(broker_order_id),
+                                            symbol=exit_plan.get("symbol"),
+                                            market=market,
+                                            direction=exit_plan.get("direction"),
+                                            filled_qty=exit_plan.get("filled_qty"),
+                                            avg_entry_price=exit_plan.get("avg_entry_price"),
+                                            sl_client_algo_id=sl_client_algo_id,
+                                            tp_client_algo_id=tp_client_algo_id,
+                                        )
+
+                                        log_audit_event(
+                                            db_ingest,
+                                            action="execution.binance.exit_persist_result",
+                                            user_id=user_id,
+                                            entity_type="execution",
+                                            details={
+                                                "persist_result": persist_result,
+                                                "exit_key": guard_result.exit_key,
+                                                "intent_id": str(intent_key),
+                                                "broker_order_id": str(broker_order_id),
+                                                "symbol": symbol,
+                                                "market": market,
+                                                "sl_client_algo_id": sl_client_algo_id,
+                                                "tp_client_algo_id": tp_client_algo_id,
+                                            },
+                                        )
+                                    finally:
+                                        db_protection.close()
+                            except Exception as persist_exc:
+                                log_audit_event(
+                                    db_ingest,
+                                    action="execution.binance.exit_persist_error",
+                                    user_id=user_id,
+                                    entity_type="execution",
+                                    details={
+                                        "error": str(persist_exc),
+                                        "exit_key": getattr(guard_result, "exit_key", None) if guard_result else None,
+                                        "intent_id": str(intent_key),
+                                        "broker_order_id": str(broker_order_id),
+                                        "symbol": symbol,
+                                        "market": market,
+                                    },
+                                )
+
                             log_audit_event(
                                 db_ingest,
                                 action="execution.binance.exit_integration",
