@@ -769,6 +769,54 @@ def execute_binance_real_order_for_user(
                                 },
                             )
 
+                            from apps.worker.app.engine.binance_exit_plan import build_binance_exit_plan
+                            from apps.worker.app.engine.binance_exit_guard import guard_binance_exit
+
+                            exit_plan = build_binance_exit_plan(
+                                symbol=symbol,
+                                side=side,
+                                fill_basis=fill_basis,
+                                risk_inputs=risk_inputs,
+                                client_order_id=client_order_id,
+                            )
+
+                            guard_result = None
+                            if exit_plan.get("available"):
+                                guard_result = guard_binance_exit(
+                                    market=market,
+                                    position_direction=exit_plan.get("direction"),
+                                    symbol=symbol,
+                                    net_qty=exit_plan.get("filled_qty"),
+                                    intent_id=str(intent_key),
+                                    exit_reason="STOP_LOSS",  # solo placeholder en esta fase
+                                    is_duplicate_exit=lambda _: False,
+                                )
+
+                            log_audit_event(
+                                db_ingest,
+                                action="execution.binance.exit_integration",
+                                user_id=user_id,
+                                entity_type="execution",
+                                details={
+                                    "broker_order_id": str(broker_order_id),
+                                    "intent_key": str(intent_key),
+                                    "symbol": symbol,
+                                    "market": market,
+                                    "exit_plan": exit_plan,
+                                    "guard_result": (
+                                        {
+                                            "allowed": guard_result.allowed,
+                                            "reason": guard_result.reason,
+                                            "exit_side": guard_result.exit_side,
+                                            "qty": str(guard_result.qty) if guard_result.qty else None,
+                                            "exit_key": guard_result.exit_key,
+                                        }
+                                        if guard_result
+                                        else None
+                                    ),
+                                },
+                            )
+
                         except Exception as e:
                             log_audit_event(
                                 db_ingest,
