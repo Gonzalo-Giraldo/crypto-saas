@@ -49,6 +49,7 @@ from apps.api.app.api.admin_recovery import router as admin_recovery_router
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
 from apps.api.app.core.config import settings
+from apps.api.app.services.runtime_orchestrator import run_binance_trading_cycle
 
 
 @asynccontextmanager
@@ -230,6 +231,20 @@ def _auto_pick_tick_once() -> None:
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
+        shadow_out = None
+        try:
+            shadow_out = run_binance_trading_cycle(
+                db=db,
+                account_id="default",
+                persist_intent=False,
+                execute_real=False,
+                execution_authorized=False,
+            )
+        except Exception as shadow_exc:
+            shadow_out = {
+                "status": "shadow_error",
+                "error": str(shadow_exc),
+            }
         print(
             "[auto-pick-scheduler] tick ok",
             {
@@ -245,6 +260,10 @@ def _auto_pick_tick_once() -> None:
                 "exit_errors": exit_out.get("errors", 0),
                 "exit_paused": exit_out.get("paused", False),
                 "exit_dry_run": exit_out.get("dry_run", True),
+                "shadow_status": (shadow_out or {}).get("status"),
+                "shadow_symbol": (shadow_out or {}).get("symbol"),
+                "shadow_persisted": (shadow_out or {}).get("persisted"),
+                "shadow_executed": (shadow_out or {}).get("executed"),
             },
             flush=True,
         )
