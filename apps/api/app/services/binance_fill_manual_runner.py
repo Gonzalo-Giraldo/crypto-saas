@@ -148,7 +148,21 @@ def run_binance_fill_ingestion_for_intent(
 
     persisted_result = None
 
-    if persist:
+    def _trade_has_persistable_identity(trade: dict[str, Any]) -> bool:
+        return bool(
+            str(trade.get("id") or trade.get("tradeId") or trade.get("trade_id") or "").strip()
+        )
+
+    allow_persist = (
+        reconciliation_status == "matched"
+        or reconciliation_status == "overfilled"
+        or (
+            reconciliation_status == "partial"
+            and all(_trade_has_persistable_identity(trade) for trade in matched_trades)
+        )
+    )
+
+    if persist and allow_persist:
         if not callable(persist_binance_fills_db):
             raise ValueError("persist_binance_fills_db_callable_required")
 
@@ -160,6 +174,8 @@ def run_binance_fill_ingestion_for_intent(
             broker="BINANCE",
             market=market_norm,
         )
+    else:
+        persist = False
 
     return {
         "intent_id": intent_id,
