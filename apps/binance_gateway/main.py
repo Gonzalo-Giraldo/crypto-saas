@@ -361,6 +361,60 @@ def binance_algo_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
     return {"ok": True, "mode": "gateway_algo_order_futures"}
 
 
+
+
+class BinanceAlgoCancelIn(BaseModel):
+    api_key: str
+    api_secret: str
+    algoId: int | None = None
+    clientAlgoId: str | None = None
+
+
+@app.post("/binance/algo-cancel")
+def binance_algo_cancel(payload: BinanceAlgoCancelIn, x_internal_token: str = Header(default="")):
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/algo-cancel")
+
+    if payload.algoId is None and not payload.clientAlgoId:
+        raise HTTPException(status_code=400, detail="algoId_or_clientAlgoId_required")
+
+    base_url = BINANCE_FUTURES_BASE
+    endpoint = "/fapi/v1/algoOrder"
+
+    params = {
+        "timestamp": int(time.time() * 1000),
+    }
+
+    if payload.algoId is not None:
+        params["algoId"] = payload.algoId
+
+    if payload.clientAlgoId:
+        params["clientAlgoId"] = str(payload.clientAlgoId)[:36]
+
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{base_url}{endpoint}?{query}&signature={signature}"
+    response = _request_upstream(
+        "DELETE",
+        url,
+        headers={"X-MBX-APIKEY": payload.api_key},
+        timeout=max(3, REQUEST_TIMEOUT_SECONDS),
+    )
+
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="invalid_algo_cancel_payload")
+
+    return {"ok": True, "mode": "gateway_algo_cancel_futures", "data": data}
+
+
 @app.post("/binance/test-order")
 def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(default="")):
     _authorize_internal_request(x_internal_token, endpoint_path="/binance/test-order")
