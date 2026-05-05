@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+import pytest
+
+from apps.worker.app.engine.binance_gateway_executor import (
+    sanitize_order_payload,
+    send_order_via_gateway,
+    validate_futures_order_payload,
+)
+
+
+class FakeResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.body
+
+
+def test_validate_market_order_futures_only():
+    out = validate_futures_order_payload(
+        {
+            "symbol": "btcusdt",
+            "market": "FUTURES",
+            "side": "buy",
+            "type": "market",
+            "quantity": "0.01",
+        }
+    )
+
+    assert out["symbol"] == "BTCUSDT"
+    assert out["market"] == "FUTURES"
+    assert out["side"] == "BUY"
+    assert out["type"] == "MARKET"
+
+
+def test_rejects_spot_payload():
+    with pytest.raises(ValueError, match="market_must_be_FUTURES"):
+        validate_futures_order_payload(
+            {
+                "symbol": "BTCUSDT",
+                "market": "SPOT",
+                "side": "BUY",
+                "type": "MARKET",
+                "quantity": "0.01",
+            }
+        )
+
+
+def test_stop_market_requires_reduce_only_and_stop_price():
+    with pytest.raises(ValueError, match="stopPrice_required_for_trigger_order"):
+        validate_futures_order_payload(
+            {
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "side": "SELL",
+                "type": "STOP_MARKET",
+                "quantity": "0.01",
+                "reduceOnly": True,
+            }
+        )
+
+    with pytest.raises(ValueError, match="reduceOnly_true_required_for_exit_order"):
+        validate_futures_order_payload(
+            {
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "side": "SELL",
+                "type": "STOP_MARKET",
+                "quantity": "0.01",
+                "stopPrice": "90000",
+                "reduceOnly": False,
+            }
+        )
+
+
+def test_take_profit_market_requires_reduce_only_and_stop_price():
+    out = validate_futures_order_payload(
+        {
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "side": "SELL",
+            "type": "TAKE_PROFIT_MARKET",
+            "quantity": "0.01",
+            "stopPrice": "120000",
+            "reduceOnly": True,
+        }
+    )
+
+    assert out["type"] == "TAKE_PROFIT_MARKET"
+    assert out["reduceOnly"] is True
+
+
+def test_send_order_uses_configured_gateway_and_keeps_payload():
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse({"ok": True, "data": {"orderId": 123}})
+
+    result = send_order_via_gateway(
+        {
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "side": "BUY",
+            "type": "MARKET",
+            "quantity": "0.01",
+        },
+        post=fake_post,
+    )
+
+    assert result["ok"] is True
+    assert calls[0]["url"].endswith("/binance/order")
+    assert calls[0]["json"]["market"] == "FUTURES"
+    assert calls[0]["json"]["type"] == "MARKET"
+
+
+def test_sanitize_order_payload_redacts_sensitive_fields():
+    safe = sanitize_order_payload(
+        {
+            "api_key": "k",
+            "api_secret": "s",
+            "signature": "sig",
+            "DATABASE_URL": "db",
+            "symbol": "BTCUSDT",
+        }
+    )
+
+    assert safe["api_key"] == "[REDACTED]"
+    assert safe["api_secret"] == "[REDACTED]"
+    assert safe["signature"] == "[REDACTED]"
+    assert safe["DATABASE_URL"] == "[REDACTED]"
+    assert safe["symbol"] == "BTCUSDT"
+
+
+def test_market_order_uses_order_endpoint():
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse({"ok": True, "data": {"orderId": 123}})
+
+    result = send_order_via_gateway(
+        {
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "side": "BUY",
+            "type": "MARKET",
+            "quantity": "0.01",
+        },
+        post=fake_post,
+    )
+
+    assert result["ok"] is True
+    assert calls[0]["url"].endswith("/binance/order")
+
+
+def test_stop_market_uses_algo_order_endpoint():
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse({"ok": True, "data": {"algoId": 123}})
+
+    result = send_order_via_gateway(
+        {
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "side": "SELL",
+            "type": "STOP_MARKET",
+            "quantity": "0.01",
+            "stopPrice": "90000",
+            "reduceOnly": True,
+        },
+        post=fake_post,
+    )
+
+    assert result["ok"] is True
+    assert calls[0]["url"].endswith("/binance/algo-order")
+
+
+def test_take_profit_market_uses_algo_order_endpoint():
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return FakeResponse({"ok": True, "data": {"algoId": 456}})
+
+    result = send_order_via_gateway(
+        {
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "side": "SELL",
+            "type": "TAKE_PROFIT_MARKET",
+            "quantity": "0.01",
+            "stopPrice": "120000",
+            "reduceOnly": True,
+        },
+        post=fake_post,
+    )
+
+    assert result["ok"] is True
+    assert calls[0]["url"].endswith("/binance/algo-order")
