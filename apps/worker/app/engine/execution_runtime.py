@@ -525,6 +525,39 @@ def execute_binance_test_order_for_user(
         db.close()
 
 
+
+def _extract_binance_risk_exit_inputs(risk_decision):
+    if risk_decision is None:
+        return {
+            "available": False,
+            "reason": "risk_decision_missing",
+            "missing": ["stop_loss", "take_profit", "expected_qty"],
+        }
+
+    def _get_value(name):
+        if isinstance(risk_decision, dict):
+            return risk_decision.get(name)
+        return getattr(risk_decision, name, None)
+
+    out = {
+        "stop_loss": _get_value("stop_loss"),
+        "take_profit": _get_value("take_profit"),
+        "expected_qty": _get_value("expected_qty"),
+    }
+
+    missing = sorted(key for key, value in out.items() if value is None)
+    if missing:
+        return {
+            "available": False,
+            "reason": "risk_decision_invalid",
+            "missing": missing,
+        }
+
+    return {
+        "available": True,
+        **out,
+    }
+
 def execute_binance_real_order_for_user(
     user_id: str,
     symbol: str,
@@ -533,6 +566,7 @@ def execute_binance_real_order_for_user(
     intent_key: str | None = None,
     account_id: str | None = None,
     market: str | None = None,
+    risk_decision: dict | None = None,
 ):
     db = SessionLocal()
     try:
