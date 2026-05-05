@@ -206,15 +206,21 @@ def _request_upstream_raw(method: str, url: str, **kwargs) -> requests.Response:
 
 def _raise_upstream_http_error(response: requests.Response) -> None:
     binance_code = None
+    binance_msg = None
     try:
         body = response.json()
         if isinstance(body, dict):
             binance_code = body.get("code")
+            raw_msg = body.get("msg")
+            if raw_msg is not None:
+                binance_msg = str(raw_msg).replace("\n", " ").replace("\r", " ")[:180]
     except Exception:
         pass
     detail = f"binance_upstream_error status={response.status_code}"
     if binance_code is not None:
         detail += f" code={binance_code}"
+    if binance_msg:
+        detail += f" msg={binance_msg}"
     raise HTTPException(status_code=502, detail=detail)
 
 
