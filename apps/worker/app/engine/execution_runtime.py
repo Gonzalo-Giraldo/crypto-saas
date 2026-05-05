@@ -645,6 +645,18 @@ def execute_binance_real_order_for_user(
             if broker_order_id is None:
                 raise RuntimeError("binance_order_status_missing_orderId")
 
+            risk_inputs = _extract_binance_risk_exit_inputs(risk_decision)
+            log_audit_event(
+                db,
+                action="execution.binance.risk_inputs",
+                user_id=user_id,
+                entity_type="execution",
+                details={
+                    "execution_ref": broker_order_id,
+                    "risk_inputs": risk_inputs,
+                },
+            )
+
             if intent_key:
                 store = IntentConsumptionStore()
                 attached = store.attach_execution(
