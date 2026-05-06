@@ -234,14 +234,22 @@ def _auto_pick_tick_once() -> None:
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
-        out = run_auto_pick_tick_for_tenant(
-            db=db,
-            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
-            top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
-            real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
-            include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
-        )
+        out = {
+            "executed_count": 0,
+            "dry_run": bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            "top_n": int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
+            "legacy_enabled": False,
+        }
+        if bool(settings.AUTO_PICK_LEGACY_TICK_ENABLED):
+            out = run_auto_pick_tick_for_tenant(
+                db=db,
+                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
+                real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
+                include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
+            )
+            out["legacy_enabled"] = True
         run_learning_pipeline_tick(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
