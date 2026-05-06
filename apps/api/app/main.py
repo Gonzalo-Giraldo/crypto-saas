@@ -193,6 +193,21 @@ _scheduler_thread: threading.Thread | None = None
 _AUTO_PICK_LOCK_KEY = 887731
 
 
+def _global_shadow_tick_once(*, db) -> dict | None:
+    if not bool(settings.AUTO_PICK_GLOBAL_SHADOW_ENABLED):
+        return None
+    try:
+        return run_global_shadow_cycle(
+            db=db,
+            account_id="default",
+        )
+    except Exception as shadow_exc:
+        return {
+            "status": "shadow_error",
+            "error": str(shadow_exc),
+        }
+
+
 def _auto_pick_tick_once() -> None:
     db = SessionLocal()
     try:
@@ -231,18 +246,7 @@ def _auto_pick_tick_once() -> None:
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
-        shadow_out = None
-        if bool(settings.AUTO_PICK_GLOBAL_SHADOW_ENABLED):
-            try:
-                shadow_out = run_global_shadow_cycle(
-                    db=db,
-                    account_id="default",
-                )
-            except Exception as shadow_exc:
-                shadow_out = {
-                    "status": "shadow_error",
-                    "error": str(shadow_exc),
-                }
+        shadow_out = _global_shadow_tick_once(db=db)
         print(
             "[auto-pick-scheduler] tick ok",
             {
