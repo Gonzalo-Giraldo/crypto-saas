@@ -49,7 +49,7 @@ from apps.api.app.api.admin_recovery import router as admin_recovery_router
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
 from apps.api.app.core.config import settings
-from apps.api.app.services.runtime_orchestrator import run_binance_trading_cycle
+from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
 
 
 @asynccontextmanager
@@ -233,12 +233,9 @@ def _auto_pick_tick_once() -> None:
         )
         shadow_out = None
         try:
-            shadow_out = run_binance_trading_cycle(
+            shadow_out = run_global_shadow_cycle(
                 db=db,
                 account_id="default",
-                persist_intent=False,
-                execute_real=False,
-                execution_authorized=False,
             )
         except Exception as shadow_exc:
             shadow_out = {
