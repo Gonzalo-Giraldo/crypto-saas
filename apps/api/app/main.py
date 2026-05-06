@@ -230,10 +230,13 @@ def _auto_pick_tick_once() -> None:
                 include_service_users=bool(settings.AUTO_EXIT_INTERNAL_INCLUDE_SERVICE_USERS),
                 max_positions=int(settings.AUTO_EXIT_INTERNAL_MAX_POSITIONS or 500),
             )
-        monitor = run_market_monitor_tick_for_tenant(
-            db=db,
-            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-        )
+        monitor = {"inserted": 0, "legacy_enabled": False}
+        if bool(settings.AUTO_PICK_LEGACY_MARKET_MONITOR_ENABLED):
+            monitor = run_market_monitor_tick_for_tenant(
+                db=db,
+                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+            )
+            monitor["legacy_enabled"] = True
         out = {
             "executed_count": 0,
             "dry_run": bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
