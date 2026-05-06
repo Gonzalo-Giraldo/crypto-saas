@@ -36,13 +36,19 @@ import apps.api.app.models.learning_rollup_hourly
 import threading
 import time
 
+from apps.api.app.api.ops import (
+    router as ops_router,
+    run_auto_pick_tick_for_tenant,
+    run_exit_tick_for_tenant,
+    run_market_monitor_tick_for_tenant,
+    run_learning_pipeline_tick,
+)
 from apps.api.app.api.users import router as users_router
 from apps.api.app.api.admin_recovery import router as admin_recovery_router
 
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
 from apps.api.app.core.config import settings
-from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
 
 
 @asynccontextmanager
@@ -160,6 +166,7 @@ def _safe_startup_schema_ensures():
             print(f"WARNING startup schema ensure failed: {ensure_func.__name__}: {exc}")
 
 
+app.include_router(ops_router)
 app.include_router(users_router)
 app.include_router(signals_router)
 app.include_router(positions_router)
@@ -185,61 +192,6 @@ _scheduler_thread: threading.Thread | None = None
 _AUTO_PICK_LOCK_KEY = 887731
 
 
-def _legacy_exit_tick_disabled(**_kwargs):
-    return {
-        "status": "disabled",
-        "reason": "ops_py_detached",
-        "scanned_positions": 0,
-        "exit_candidates": 0,
-        "closed_positions": 0,
-        "skipped_no_price": 0,
-        "skipped_by_policy": 0,
-        "errors": 0,
-        "paused": True,
-        "dry_run": True,
-    }
-
-
-def _legacy_market_monitor_tick_disabled(**_kwargs):
-    return {
-        "status": "disabled",
-        "reason": "ops_py_detached",
-        "inserted": 0,
-        "legacy_enabled": False,
-    }
-
-
-def _legacy_auto_pick_tick_disabled(**_kwargs):
-    return {
-        "status": "disabled",
-        "reason": "ops_py_detached",
-        "persisted": False,
-        "executed": False,
-    }
-
-
-def _legacy_learning_tick_disabled(**_kwargs):
-    return {
-        "status": "disabled",
-        "reason": "ops_py_detached",
-    }
-
-
-def _global_shadow_tick_once(*, db) -> dict | None:
-    if not bool(settings.AUTO_PICK_GLOBAL_SHADOW_ENABLED):
-        return None
-    try:
-        return run_global_shadow_cycle(
-            db=db,
-            account_id="default",
-        )
-    except Exception as shadow_exc:
-        return {
-            "status": "shadow_error",
-            "error": str(shadow_exc),
-        }
-
-
 def _auto_pick_tick_once() -> None:
     db = SessionLocal()
     try:
@@ -254,7 +206,7 @@ def _auto_pick_tick_once() -> None:
             "dry_run": True,
         }
         if bool(settings.AUTO_EXIT_INTERNAL_ENABLED):
-            exit_out = _legacy_exit_tick_disabled(
+            exit_out = run_exit_tick_for_tenant(
                 db=db,
                 tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
                 dry_run=bool(settings.AUTO_EXIT_INTERNAL_DRY_RUN),
@@ -262,34 +214,22 @@ def _auto_pick_tick_once() -> None:
                 include_service_users=bool(settings.AUTO_EXIT_INTERNAL_INCLUDE_SERVICE_USERS),
                 max_positions=int(settings.AUTO_EXIT_INTERNAL_MAX_POSITIONS or 500),
             )
-        monitor = {"inserted": 0, "legacy_enabled": False}
-        if bool(settings.AUTO_PICK_LEGACY_MARKET_MONITOR_ENABLED):
-            monitor = _legacy_market_monitor_tick_disabled(
-                db=db,
-                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-            )
-            monitor["legacy_enabled"] = True
-        out = {
-            "executed_count": 0,
-            "dry_run": bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
-            "top_n": int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
-            "legacy_enabled": False,
-        }
-        if bool(settings.AUTO_PICK_LEGACY_TICK_ENABLED):
-            out = _legacy_auto_pick_tick_disabled(
-                db=db,
-                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
-                top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
-                real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
-                include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
-            )
-            out["legacy_enabled"] = True
-        _legacy_learning_tick_disabled(
+        monitor = run_market_monitor_tick_for_tenant(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
-        shadow_out = _global_shadow_tick_once(db=db)
+        out = run_auto_pick_tick_for_tenant(
+            db=db,
+            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
+            real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
+            include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
+        )
+        run_learning_pipeline_tick(
+            db=db,
+            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+        )
         print(
             "[auto-pick-scheduler] tick ok",
             {
@@ -305,10 +245,6 @@ def _auto_pick_tick_once() -> None:
                 "exit_errors": exit_out.get("errors", 0),
                 "exit_paused": exit_out.get("paused", False),
                 "exit_dry_run": exit_out.get("dry_run", True),
-                "shadow_status": (shadow_out or {}).get("status"),
-                "shadow_symbol": (shadow_out or {}).get("symbol"),
-                "shadow_persisted": (shadow_out or {}).get("persisted"),
-                "shadow_executed": (shadow_out or {}).get("executed"),
             },
             flush=True,
         )
