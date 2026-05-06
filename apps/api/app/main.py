@@ -232,16 +232,17 @@ def _auto_pick_tick_once() -> None:
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
         shadow_out = None
-        try:
-            shadow_out = run_global_shadow_cycle(
-                db=db,
-                account_id="default",
-            )
-        except Exception as shadow_exc:
-            shadow_out = {
-                "status": "shadow_error",
-                "error": str(shadow_exc),
-            }
+        if bool(settings.AUTO_PICK_GLOBAL_SHADOW_ENABLED):
+            try:
+                shadow_out = run_global_shadow_cycle(
+                    db=db,
+                    account_id="default",
+                )
+            except Exception as shadow_exc:
+                shadow_out = {
+                    "status": "shadow_error",
+                    "error": str(shadow_exc),
+                }
         print(
             "[auto-pick-scheduler] tick ok",
             {
