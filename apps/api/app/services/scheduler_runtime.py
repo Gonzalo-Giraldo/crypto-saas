@@ -28,9 +28,18 @@ def run_modular_shadow_trading_tick(
         execution_authorized=False,
     )
 
+    ibkr = {
+        "status": "fail_closed",
+        "broker": "IBKR",
+        "reason": "ibkr_scheduler_runtime_not_implemented",
+        "persisted": False,
+        "executed": False,
+    }
+
     return {
         "status": "ok",
         "binance": binance,
+        "ibkr": ibkr,
         "persisted": False,
         "executed": False,
     }

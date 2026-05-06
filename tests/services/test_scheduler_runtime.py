@@ -24,3 +24,7 @@ def test_modular_shadow_trading_tick_does_not_persist_or_execute(monkeypatch):
     assert out["binance"]["symbol"] == "BTCUSDT"
     assert out["persisted"] is False
     assert out["executed"] is False
+    assert out["ibkr"]["status"] == "fail_closed"
+    assert out["ibkr"]["broker"] == "IBKR"
+    assert out["ibkr"]["persisted"] is False
+    assert out["ibkr"]["executed"] is False
