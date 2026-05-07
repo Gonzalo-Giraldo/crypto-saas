@@ -8,4 +8,5 @@ class UserTwoFactor(Base):
 
     user_id = Column(String, primary_key=True, index=True)
     secret = Column(String, nullable=False)
+    key_version = Column(String, nullable=False, default="v1", server_default="v1")
     enabled = Column(Boolean, nullable=False, default=False)

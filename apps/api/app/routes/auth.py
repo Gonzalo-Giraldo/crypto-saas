@@ -14,6 +14,7 @@ from apps.api.app.api.deps import get_current_user, oauth2_scheme
 from apps.api.app.db.session import get_db
 from apps.api.app.models.session_revocation import SessionRevocation
 from apps.api.app.models.user_2fa import UserTwoFactor
+from apps.api.app.services.crypto import decrypt_value, encrypt_value, get_active_key_version
 from apps.api.app.models.revoked_token import RevokedToken
 from apps.api.app.models.user import User
 from apps.api.app.core.security import (
@@ -147,6 +148,16 @@ def _enforced_2fa_emails() -> set[str]:
         for e in raw.split(",")
         if e.strip()
     }
+
+
+
+def _decrypt_2fa_secret(row: UserTwoFactor) -> str:
+    key_version = getattr(row, "key_version", None)
+    try:
+        return decrypt_value(row.secret, key_version=key_version)
+    except Exception:
+        # Backward compatibility for legacy plaintext TOTP seeds.
+        return row.secret
 
 
 def _totp_valid_window() -> int:
@@ -283,7 +294,7 @@ def login(
                 detail="OTP required",
             )
 
-        is_valid_otp = pyotp.TOTP(user_2fa.secret).verify(
+        is_valid_otp = pyotp.TOTP(_decrypt_2fa_secret(user_2fa)).verify(
             otp_normalized,
             valid_window=_totp_valid_window(),
         )
@@ -577,12 +588,14 @@ def setup_2fa(
     )
 
     if current_2fa:
-        current_2fa.secret = secret
+        current_2fa.secret = encrypt_value(secret)
+        current_2fa.key_version = get_active_key_version()
         current_2fa.enabled = False
     else:
         current_2fa = UserTwoFactor(
             user_id=current_user.id,
-            secret=secret,
+            secret=encrypt_value(secret),
+            key_version=get_active_key_version(),
             enabled=False,
         )
         db.add(current_2fa)
@@ -626,7 +639,7 @@ def verify_enable_2fa(
             detail="2FA setup not found. Call /auth/2fa/setup first.",
         )
 
-    is_valid_otp = pyotp.TOTP(current_2fa.secret).verify(
+    is_valid_otp = pyotp.TOTP(_decrypt_2fa_secret(current_2fa)).verify(
         payload.otp,
         valid_window=1,
     )
@@ -667,7 +680,7 @@ def disable_2fa(
             detail="2FA is not enabled",
         )
 
-    is_valid_otp = pyotp.TOTP(current_2fa.secret).verify(
+    is_valid_otp = pyotp.TOTP(_decrypt_2fa_secret(current_2fa)).verify(
         payload.otp,
         valid_window=1,
     )
