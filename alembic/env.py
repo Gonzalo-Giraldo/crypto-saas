@@ -4,9 +4,13 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# Configuración Alembic
+# Configuracion Alembic
 config = context.config
 fileConfig(config.config_file_name)
+
+runtime_database_url = os.environ.get("DATABASE_URL")
+if runtime_database_url:
+    config.set_main_option("sqlalchemy.url", runtime_database_url)
 
 # Agregar raíz del proyecto al sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
