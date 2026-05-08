@@ -7,3 +7,5 @@ REASON_RECONCILIATION_NOT_MATCHED = "reconciliation_not_matched"
 REASON_CORRECTION_NOT_REQUIRED = "correction_not_required"
 
 REASON_PROTECTION_NOT_VERIFIABLE = "protection_not_verifiable"
+
+REASON_AUTHORITATIVE_NOT_STABLE = "authoritative_not_stable"
