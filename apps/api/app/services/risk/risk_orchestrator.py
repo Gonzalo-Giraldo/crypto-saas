@@ -42,8 +42,12 @@ def build_risk_sizing_decision(
         risk_pct=risk_pct,
         risk_abs=plan.risk_abs,
         expected_qty=size["qty_final"],
+        reward_risk_ratio=reward_risk_ratio,
+        risk_usdt=size["risk_usdt"],
         evidence={
             "risk_usdt": size["risk_usdt"],
             "risk_real": size["risk_real"],
+            "reward_risk_ratio": reward_risk_ratio,
+            "entry_price_reference": entry_price,
         },
     )

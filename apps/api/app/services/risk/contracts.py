@@ -14,4 +14,6 @@ class RiskSizingDecision:
     risk_pct: float
     risk_abs: float
     expected_qty: float
+    reward_risk_ratio: float | None = None
+    risk_usdt: float | None = None
     evidence: dict[str, Any] = field(default_factory=dict)

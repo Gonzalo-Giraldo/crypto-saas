@@ -17,6 +17,7 @@ def create_binance_intent(
     take_profit=None,
     risk_profile: dict | None = None,
     auto_pick_trace: dict | None = None,
+    risk_policy: dict | None = None,
 ) -> dict:
     if db is None:
         raise ValueError("db is required")
@@ -119,6 +120,11 @@ def create_binance_intent(
         "risk_profile": profile,
         "min_rr": min_rr,
     }
+
+    if risk_policy is not None:
+        if not isinstance(risk_policy, dict):
+            raise ValueError("risk_policy must be a dict")
+        policy_snapshot["risk_policy"] = dict(risk_policy)
 
     if auto_pick_trace is not None:
         if not isinstance(auto_pick_trace, dict):

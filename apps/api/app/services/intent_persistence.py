@@ -38,6 +38,14 @@ def persist_binance_intent_from_draft(
         stop_loss=draft.stop_loss,
         take_profit=draft.take_profit,
         auto_pick_trace=draft.auto_pick_trace,
+        risk_policy={
+            "risk_pct": draft.risk_pct,
+            "risk_abs": draft.risk_abs,
+            "risk_usdt": draft.risk_usdt,
+            "reward_risk_ratio": draft.reward_risk_ratio,
+            "entry_price_reference": draft.entry_price_reference,
+            "expected_qty": draft.expected_qty,
+        },
     )
 
     if not execute_real:
