@@ -10,17 +10,19 @@ from apps.api.app.services.risk.protection_reasons import (
 
 def test_allows_when_protection_is_verifiable():
     result = evaluate_protection_critical(
+        current_state="AUTHORITATIVE_ACTIVE",
         protection_active_verifiable=True,
     )
 
     assert result.allowed is True
     assert result.reason == REASON_OK
-    assert result.current_state == "PROTECTION_ACTIVE"
+    assert result.current_state == "AUTHORITATIVE_ACTIVE"
     assert result.next_state is None
 
 
 def test_returns_critical_when_protection_not_verifiable():
     result = evaluate_protection_critical(
+        current_state="AUTHORITATIVE_ACTIVE",
         protection_active_verifiable=False,
     )
 
@@ -32,6 +34,7 @@ def test_returns_critical_when_protection_not_verifiable():
 
 def test_evaluation_is_deterministic():
     kwargs = dict(
+        current_state="AUTHORITATIVE_ACTIVE",
         protection_active_verifiable=True,
     )
 
