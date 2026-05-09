@@ -216,6 +216,16 @@ def _raise_upstream_http_error(response: requests.Response) -> None:
                 binance_msg = str(raw_msg).replace("\n", " ").replace("\r", " ")[:180]
     except Exception:
         pass
+
+    if response.status_code == 418 or binance_code == -1003:
+        with _CIRCUIT_LOCK:
+            _circuit_state["fail_count"] = CIRCUIT_BREAKER_THRESHOLD
+            _circuit_state["open_until"] = time.time() + CIRCUIT_BREAKER_COOLDOWN_SEC
+        raise HTTPException(
+            status_code=503,
+            detail="binance_ip_banned_or_rate_limited",
+        )
+
     detail = f"binance_upstream_error status={response.status_code}"
     if binance_code is not None:
         detail += f" code={binance_code}"
