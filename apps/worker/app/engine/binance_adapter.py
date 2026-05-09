@@ -29,7 +29,7 @@ class BinanceBrokerAdapter(BrokerAdapter):
             quantity=quantity,
             order_type=order_type,
             client_order_id=client_order_id,
-            market=(market or "SPOT"),
+            market=(market or "FUTURES"),
         )
 
     def query_order(
@@ -46,7 +46,7 @@ class BinanceBrokerAdapter(BrokerAdapter):
             api_secret=self._api_secret,
             symbol=symbol,
             orig_client_order_id=(client_order_id or ""),
-            market=(market or "SPOT"),
+            market=(market or "FUTURES"),
         )
 
 
@@ -55,7 +55,7 @@ class BinanceBrokerAdapter(BrokerAdapter):
         *,
         symbol: str,
         client_order_id: str | None = None,
-        market: str = "SPOT",
+        market: str = "FUTURES",
         **kwargs,
     ):
         if client_order_id is None:

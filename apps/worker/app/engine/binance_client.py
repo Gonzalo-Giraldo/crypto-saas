@@ -20,7 +20,7 @@ _price_cache_expiry: float = 0.0
 
 
 def _normalize_market(market: str | None) -> str:
-    m = str(market or "SPOT").upper().strip()
+    m = str(market or "FUTURES").upper().strip()
     return "FUTURES" if m == "FUTURES" else "SPOT"
 
 
@@ -97,7 +97,7 @@ def send_test_order(
     quantity: float,
     order_type: str = "MARKET",
     client_order_id: str | None = None,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ):
     market_norm = _normalize_market(market)
 
@@ -129,7 +129,7 @@ def send_order_real(
     quantity: float,
     order_type: str = "MARKET",
     client_order_id: str | None = None,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ):
     market_norm = _normalize_market(market)
 
@@ -202,11 +202,11 @@ def cancel_order(
     api_secret: str,
     symbol: str,
     orig_client_order_id: str,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ) -> dict:
     sym = str(symbol or "").strip().upper()
     order_id = str(orig_client_order_id or "").strip()
-    market_norm = str(market or "SPOT").upper()
+    market_norm = str(market or "FUTURES").upper()
 
     if not sym:
         raise RuntimeError("symbol_required")
@@ -252,7 +252,7 @@ def query_order_status(
     api_secret: str,
     symbol: str,
     orig_client_order_id: str,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ) -> dict:
     market_norm = _normalize_market(market)
     symbol_norm = str(symbol or "").upper().strip()
@@ -459,7 +459,7 @@ def _normalize_qty_to_step(qty: Decimal, step: Decimal) -> Decimal:
 def prepare_binance_market_order_quantity(
     symbol: str,
     requested_qty: float,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ) -> dict:
     market_norm = _normalize_market(market)
     sym = str(symbol or "").upper().strip()
@@ -573,7 +573,7 @@ def get_account_status(
     return response.json()
 
 
-def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "SPOT") -> dict[str, dict]:
+def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "FUTURES") -> dict[str, dict]:
     market_norm = _normalize_market(market)
     if market_norm == "SPOT":
         return _fetch_exchange_info_symbols(symbols)
@@ -602,7 +602,7 @@ def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "S
     return parsed
 
 
-def _fetch_symbol_price_for_market(symbol: str, market: str = "SPOT") -> float | None:
+def _fetch_symbol_price_for_market(symbol: str, market: str = "FUTURES") -> float | None:
     market_norm = _normalize_market(market)
     if market_norm == "SPOT":
         return _fetch_symbol_price(symbol)

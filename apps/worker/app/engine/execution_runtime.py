@@ -33,7 +33,7 @@ def cancel_broker_order(
     api_secret: str = None,
     symbol: str,
     client_order_id: str,
-    market: str = "SPOT",
+    market: str = "FUTURES",
     user_id: str = None,
 ):
     """
@@ -70,7 +70,7 @@ def cancel_broker_order(
         )
     finally:
         db.close()
-def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, market: str = "SPOT"):
+def _cancel_order_via_adapter(*, adapter, symbol: str, client_order_id: str, market: str = "FUTURES"):
     """
     Helper to cancel an order via the broker adapter, following the exception handling pattern of send_order/query_order flows.
     """
@@ -338,7 +338,7 @@ def resolve_execution_quantity_preview(
     side_up = str(side or "").upper().strip()
 
     if exchange_up == "BINANCE":
-        market = "FUTURES" if side_up == "SELL" else "SPOT"
+        market = "FUTURES"
         qty_meta = prepare_binance_market_order_quantity(
             symbol=symbol_up,
             requested_qty=requested_qty,
@@ -393,7 +393,7 @@ def execute_binance_test_order_for_user(
                 detail="Missing credentials for BINANCE",
             )
 
-        market = "FUTURES" if str(side or "").upper() == "SELL" else "SPOT"
+        market = "FUTURES"
         runtime_context = {}
         if account_id is not None and str(account_id).strip():
             runtime_context["account_id"] = account_id
@@ -505,7 +505,7 @@ def execute_binance_test_order_for_user(
                 "qty_requested": qty,
                 "qty_normalized": qty_meta["normalized_qty"],
                 "client_order_id": client_order_id,
-                "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+                "mode": "testnet_order_test_futures",
                 "market": market,
             },
         )
@@ -513,7 +513,7 @@ def execute_binance_test_order_for_user(
 
         return {
             "exchange": "BINANCE",
-            "mode": "testnet_order_test_futures" if market == "FUTURES" else "testnet_order_test",
+            "mode": "testnet_order_test_futures",
             "symbol": symbol.upper(),
             "side": side.upper(),
             "qty": float(qty_meta["normalized_qty"]),
@@ -598,7 +598,7 @@ def execute_binance_real_order_for_user(
             )
 
         requested_market = str(market or "").upper().strip() if market is not None else ""
-        market = requested_market if requested_market in {"SPOT", "FUTURES"} else ("FUTURES" if str(side or "").upper() == "SELL" else "SPOT")
+        market = requested_market if requested_market == "FUTURES" else "FUTURES"
         # Contexto interno del runtime
         runtime_context = {}
         if account_id is not None and str(account_id).strip():
@@ -981,7 +981,7 @@ def execute_binance_real_order_for_user(
                 "qty_requested": qty,
                 "qty_normalized": qty_meta["normalized_qty"],
                 "client_order_id": client_order_id,
-                "mode": "live_order_futures" if market == "FUTURES" else "live_order_spot",
+                "mode": "live_order_futures",
                 "market": market,
             },
         )
@@ -989,7 +989,7 @@ def execute_binance_real_order_for_user(
 
         return {
             "exchange": "BINANCE",
-            "mode": "live_order_futures" if market == "FUTURES" else "live_order_spot",
+            "mode": "live_order_futures",
             "symbol": symbol.upper(),
             "side": side.upper(),
             "qty": float(qty_meta["normalized_qty"]),
@@ -1062,7 +1062,7 @@ def _send_binance_test_order_with_retry(
     side: str,
     qty: float,
     client_order_id: str,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ) -> None:
     attempts = max(1, int(settings.BINANCE_ORDER_RETRY_MAX_ATTEMPTS or 2))
     backoff_base = max(0.05, float(settings.BINANCE_ORDER_RETRY_BACKOFF_SECONDS or 0.7))
@@ -1096,7 +1096,7 @@ def _send_binance_test_order(
     side: str,
     qty: float,
     client_order_id: str | None = None,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ) -> None:
     if not client_order_id:
         raise RuntimeError("kernel_dispatch_guard: missing client_order_id")
@@ -1165,7 +1165,7 @@ def _send_binance_test_order_via_gateway(
     side: str,
     qty: float,
     client_order_id: str | None = None,
-    market: str = "SPOT",
+    market: str = "FUTURES",
 ) -> None:
     payload = {
         "api_key": api_key,
@@ -1174,7 +1174,7 @@ def _send_binance_test_order_via_gateway(
         "side": side.upper(),
         "qty": qty,
         "client_order_id": client_order_id,
-        "market": str(market or "SPOT").upper(),
+        "market": str(market or "FUTURES").upper(),
     }
     _post_binance_gateway("/binance/test-order", payload)
 
