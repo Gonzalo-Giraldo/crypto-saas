@@ -25,7 +25,6 @@ from apps.worker.app.engine.binance_client import (
 )
 from apps.worker.app.engine.ibkr_client import _build_order_ref, send_ibkr_test_order, get_ibkr_account_status
 
-
 def cancel_broker_order(
     *,
     exchange: str,
@@ -855,6 +854,31 @@ def execute_binance_real_order_for_user(
                                                 "tp_client_algo_id": tp_client_algo_id,
                                             },
                                         )
+
+                                        from apps.worker.app.engine.binance_exit_protection_shadow_view import (
+                                            build_exit_protection_shadow_view,
+                                        )
+
+                                        shadow_view = build_exit_protection_shadow_view(
+                                            api_key=creds["api_key"],
+                                            api_secret=creds["api_secret"],
+                                            symbol=exit_plan.get("symbol"),
+                                            sl_client_algo_id=sl_client_algo_id,
+                                            tp_client_algo_id=tp_client_algo_id,
+                                        )
+
+                                        log_audit_event(
+                                            db_ingest,
+                                            action="execution.binance.exit_protection.shadow_view",
+                                            user_id=user_id,
+                                            entity_type="execution",
+                                            details={
+                                                "intent_key": str(intent_key),
+                                                "broker_order_id": str(broker_order_id),
+                                                "shadow_view": shadow_view,
+                                            },
+                                        )
+
                                     finally:
                                         db_protection.close()
                             except Exception as persist_exc:
