@@ -39,6 +39,11 @@ def _gateway_algo_order_url() -> str:
         raise RuntimeError("BINANCE_GATEWAY_BASE_URL_required")
     return f"{base.rstrip('/')}/binance/algo-order"
 
+def _gateway_algo_order_status_url() -> str:
+    base = str(getattr(settings, "BINANCE_GATEWAY_BASE_URL", "") or "").rstrip()
+    if not base:
+        raise RuntimeError("BINANCE_GATEWAY_BASE_URL_required")
+    return f"{base.rstrip('/')}/binance/algo-order-status"
 
 def sanitize_order_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
@@ -139,4 +144,71 @@ def send_order_via_gateway(
             "status": "ERROR",
             "error": str(exc),
             "safe_order_payload": sanitize_order_payload(order_payload),
+        }
+
+def fetch_algo_order_status_via_gateway(
+    *,
+    api_key: str,
+    api_secret: str,
+    symbol: str,
+    algo_id: int | None = None,
+    client_algo_id: str | None = None,
+    post: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+
+    has_algo_id = algo_id is not None
+    has_client_algo_id = bool(str(client_algo_id or "").strip())
+
+    if has_algo_id == has_client_algo_id:
+        raise ValueError("exactly_one_algo_identifier_required")
+
+    symbol_norm = str(symbol or "").upper().strip()
+    if not symbol_norm:
+        raise ValueError("symbol_required")
+
+    payload = {
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "symbol": symbol_norm,
+    }
+
+    if has_algo_id:
+        payload["algoId"] = algo_id
+    else:
+        payload["clientAlgoId"] = str(client_algo_id).strip()
+
+    try:
+        post_callable = post or requests.post
+
+        response = post_callable(
+            _gateway_algo_order_status_url(),
+            json=payload,
+            timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
+        )
+
+        response.raise_for_status()
+
+        body = response.json()
+
+        if not isinstance(body, dict):
+            return {
+                "status": "ERROR",
+                "error": "invalid_gateway_json",
+            }
+
+        return {
+            "status": "OK",
+            "response": body,
+        }
+
+    except requests.exceptions.ReadTimeout:
+        return {
+            "status": "TIMEOUT",
+            "error": "gateway_read_timeout",
+        }
+
+    except Exception as exc:
+        return {
+            "status": "ERROR",
+            "error": str(exc),
         }

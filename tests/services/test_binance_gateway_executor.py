@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import pytest
+import requests
 
 from apps.worker.app.engine.binance_gateway_executor import (
+    fetch_algo_order_status_via_gateway,
     sanitize_order_payload,
     send_order_via_gateway,
     validate_futures_order_payload,
 )
-
 
 class FakeResponse:
     def __init__(self, body):
@@ -204,3 +205,107 @@ def test_take_profit_market_uses_algo_order_endpoint():
 
     assert result["ok"] is True
     assert calls[0]["url"].endswith("/binance/algo-order")
+
+def test_algo_order_status_requires_exactly_one_identifier():
+    with pytest.raises(ValueError, match="exactly_one_algo_identifier_required"):
+        fetch_algo_order_status_via_gateway(
+            api_key="k",
+            api_secret="s",
+            symbol="BTCUSDT",
+        )
+
+    with pytest.raises(ValueError, match="exactly_one_algo_identifier_required"):
+        fetch_algo_order_status_via_gateway(
+            api_key="k",
+            api_secret="s",
+            symbol="BTCUSDT",
+            algo_id=1,
+            client_algo_id="abc",
+        )
+
+
+def test_algo_order_status_uses_gateway_endpoint():
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append(
+            {
+                "url": url,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse(
+            {
+                "ok": True,
+                "mode": "gateway_algo_order_status_futures",
+                "data": {"algoId": 123},
+            }
+        )
+
+    result = fetch_algo_order_status_via_gateway(
+        api_key="k",
+        api_secret="s",
+        symbol="BTCUSDT",
+        algo_id=123,
+        post=fake_post,
+    )
+
+    assert result["status"] == "OK"
+
+    assert calls[0]["url"].endswith("/binance/algo-order-status")
+
+    assert calls[0]["json"]["symbol"] == "BTCUSDT"
+    assert calls[0]["json"]["algoId"] == 123
+
+    assert "clientAlgoId" not in calls[0]["json"]
+
+
+def test_algo_order_status_supports_client_algo_id():
+    calls = []
+
+    def fake_post(url, json, timeout):
+        calls.append(
+            {
+                "url": url,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse(
+            {
+                "ok": True,
+                "mode": "gateway_algo_order_status_futures",
+                "data": {"clientAlgoId": "cid-123"},
+            }
+        )
+
+    result = fetch_algo_order_status_via_gateway(
+        api_key="k",
+        api_secret="s",
+        symbol="BTCUSDT",
+        client_algo_id="cid-123",
+        post=fake_post,
+    )
+
+    assert result["status"] == "OK"
+
+    assert calls[0]["json"]["clientAlgoId"] == "cid-123"
+
+    assert "algoId" not in calls[0]["json"]
+
+
+def test_algo_order_status_timeout_is_not_failed_execution():
+    def fake_post(url, json, timeout):
+        raise requests.exceptions.ReadTimeout()
+
+    result = fetch_algo_order_status_via_gateway(
+        api_key="k",
+        api_secret="s",
+        symbol="BTCUSDT",
+        algo_id=123,
+        post=fake_post,
+    )
+
+    assert result["status"] == "TIMEOUT"
+    assert result["error"] == "gateway_read_timeout"
