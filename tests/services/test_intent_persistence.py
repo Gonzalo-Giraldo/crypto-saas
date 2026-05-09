@@ -5,7 +5,6 @@ import apps.api.app.services.intent_persistence as module
 from apps.api.app.services.intent_draft import BinanceIntentDraft
 from apps.api.app.services.intent_persistence import persist_binance_intent_from_draft
 
-
 def _draft():
     return BinanceIntentDraft(
         symbol="BTCUSDT",
@@ -14,6 +13,11 @@ def _draft():
         entry_price=100.0,
         stop_loss=99.0,
         take_profit=102.0,
+        risk_pct=1.0,
+        risk_abs=1.0,
+        risk_usdt=1.0,
+        reward_risk_ratio=2.0,
+        entry_price_reference=100.0,
         auto_pick_trace={
             "final_score": 0.9,
             "decision_reason": "test",
