@@ -369,6 +369,64 @@ class BinanceAlgoCancelIn(BaseModel):
     algoId: int | None = None
     clientAlgoId: str | None = None
 
+class BinanceAlgoOrderStatusIn(BaseModel):
+    api_key: str
+    api_secret: str
+    symbol: str
+    algoId: int | None = None
+    clientAlgoId: str | None = None
+
+
+@app.post("/binance/algo-order-status")
+def binance_algo_order_status(payload: BinanceAlgoOrderStatusIn, x_internal_token: str = Header(default="")):
+    _authorize_internal_request(x_internal_token, endpoint_path="/binance/algo-order-status")
+
+    has_algo_id = payload.algoId is not None
+    has_client_algo_id = bool(str(payload.clientAlgoId or "").strip())
+
+    if has_algo_id == has_client_algo_id:
+        raise HTTPException(status_code=400, detail="exactly_one_algo_identifier_required")
+
+    symbol = str(payload.symbol or "").upper().strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol_required")
+
+    params = {
+        "symbol": symbol,
+        "timestamp": int(time.time() * 1000),
+    }
+
+    if has_algo_id:
+        params["algoId"] = payload.algoId
+    else:
+        params["clientAlgoId"] = str(payload.clientAlgoId).strip()
+
+    query = urlencode(params)
+    signature = hmac.new(
+        payload.api_secret.encode("utf-8"),
+        query.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+    url = f"{BINANCE_FUTURES_BASE}/fapi/v1/algoOrder?{query}&signature={signature}"
+
+    response = _request_upstream(
+        "GET",
+        url,
+        headers={"X-MBX-APIKEY": payload.api_key},
+        timeout=max(3, REQUEST_TIMEOUT_SECONDS),
+    )
+
+    if response.status_code >= 400:
+        _raise_upstream_http_error(response)
+
+    data = response.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="invalid_algo_order_status_payload")
+
+    return {"ok": True, "mode": "gateway_algo_order_status_futures", "data": data}
+
+
 
 @app.post("/binance/algo-cancel")
 def binance_algo_cancel(payload: BinanceAlgoCancelIn, x_internal_token: str = Header(default="")):
