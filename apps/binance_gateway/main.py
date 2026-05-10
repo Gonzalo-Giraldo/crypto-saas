@@ -98,15 +98,24 @@ class BinanceTickerPriceIn(BaseModel):
 
 
 def _resolve_market(value: str | None) -> str:
-    market = str(value or "SPOT").upper().strip()
-    if market not in {"SPOT", "FUTURES"}:
-        raise HTTPException(status_code=400, detail="market must be SPOT or FUTURES")
-    return market
+    market = str(value or "FUTURES").upper().strip()
 
+    if market != "FUTURES":
+        raise HTTPException(
+            status_code=400,
+            detail="binance_futures_only",
+        )
+
+    return "FUTURES"
 
 def _base_url_for_market(market: str) -> str:
-    return BINANCE_FUTURES_BASE if market == "FUTURES" else BINANCE_SPOT_BASE
+    if market != "FUTURES":
+        raise HTTPException(
+            status_code=400,
+            detail="binance_futures_only",
+        )
 
+    return BINANCE_FUTURES_BASE
 
 
 def _sanitize_upstream_log_url(url: object) -> str:
@@ -263,7 +272,7 @@ def healthz():
         return {"status": "ok", "binance_check": "skipped"}
 
     try:
-        r = _request_upstream("GET", f"{BINANCE_SPOT_BASE}/api/v3/time", timeout=max(2, REQUEST_TIMEOUT_SECONDS))
+        r = _request_upstream("GET", f"{BINANCE_FUTURES_BASE}/fapi/v1/time", timeout=max(2, REQUEST_TIMEOUT_SECONDS))
         ok = r.status_code == 200
         return {"status": "ok" if ok else "degraded", "binance_check": r.status_code}
     except Exception:
@@ -327,7 +336,7 @@ def binance_algo_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
 
     _authorize_internal_request(x_internal_token, endpoint_path="/binance/algo-order")
 
-    market = (payload.market or "SPOT").upper()
+    market = (payload.market or "FUTURES").upper()
     if market != "FUTURES":
         raise HTTPException(status_code=400, detail="algo_order_only_supported_for_futures")
 
@@ -535,7 +544,7 @@ class BinanceCancelOrderIn(BaseModel):
     api_secret: str
     symbol: str
     orig_client_order_id: str
-    market: str = "SPOT"
+    market: str = "FUTURES"
 
 
 @app.post("/binance/cancel-order")
