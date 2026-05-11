@@ -9,6 +9,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import text
                 
+from apps.api.app.services.trading_controls import get_trading_enabled
 from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
@@ -380,6 +381,22 @@ def execute_binance_test_order_for_user(
 ):
     db = SessionLocal()
     try:
+        if not get_trading_enabled(db):
+            log_audit_event(
+                db,
+                action="execution.blocked.kill_switch",
+                user_id=user_id,
+                entity_type="execution",
+                details={
+                    "action": "execute_binance_test_order_for_user",
+                    "exchange": "BINANCE",
+                },
+            )
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Trading is globally disabled by admin kill-switch",
+            )
         _assert_binance_gateway_policy()
         creds = get_decrypted_exchange_secret(
             db=db,

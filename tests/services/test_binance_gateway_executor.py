@@ -309,3 +309,49 @@ def test_algo_order_status_timeout_is_not_failed_execution():
 
     assert result["status"] == "TIMEOUT"
     assert result["error"] == "gateway_read_timeout"
+
+
+def test_execute_binance_test_order_for_user_blocks_when_kill_switch_disabled(monkeypatch):
+    from fastapi import HTTPException
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    class _DB:
+        committed = False
+
+        def commit(self):
+            self.committed = True
+
+        def close(self):
+            pass
+
+    db = _DB()
+    audit = {}
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: db)
+    monkeypatch.setattr(runtime, "get_trading_enabled", lambda db: False)
+    monkeypatch.setattr(
+        runtime,
+        "log_audit_event",
+        lambda db, action, user_id, entity_type, details: audit.update(
+            {
+                "action": action,
+                "user_id": user_id,
+                "entity_type": entity_type,
+                "details": details,
+            }
+        ),
+    )
+
+    try:
+        runtime.execute_binance_test_order_for_user("user-1", "BTCUSDT", "BUY", 1.0)
+        assert False, "expected kill-switch block"
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert exc.detail == "Trading is globally disabled by admin kill-switch"
+
+    assert audit["action"] == "execution.blocked.kill_switch"
+    assert audit["user_id"] == "user-1"
+    assert audit["details"]["exchange"] == "BINANCE"
+    assert audit["details"]["action"] == "execute_binance_test_order_for_user"
+    assert db.committed is True
+
