@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     SUPERUSER_EMAILS: str = "gonzalogiraldo@yahoo.com"
     PASSWORD_MAX_AGE_DAYS: int = 0
     ENFORCE_PASSWORD_MAX_AGE: bool = False
-    TRADING_ENABLED_DEFAULT: bool = True
+    TRADING_ENABLED_DEFAULT: bool = False
     RISK_INPUT_MAX_QTY: float = 1000000.0
     RISK_INPUT_MAX_PRICE: float = 10000000.0
     RISK_INPUT_MAX_OPENED_MINUTES: int = 10080
