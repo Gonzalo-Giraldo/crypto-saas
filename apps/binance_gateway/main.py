@@ -287,7 +287,7 @@ def binance_order(payload: BinanceTestOrderIn, x_internal_token: str = Header(de
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
-    endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
+    endpoint = "/fapi/v1/order"
 
     order_type = getattr(payload, "type", None) or "MARKET"
 
@@ -498,10 +498,7 @@ def binance_test_order(payload: BinanceTestOrderIn, x_internal_token: str = Head
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
-    if market == "FUTURES":
-        endpoint = "/fapi/v1/order/test"
-    else:
-        endpoint = "/api/v3/order/test"
+    endpoint = "/fapi/v1/order/test"
 
     order_type = getattr(payload, "type", None) or "MARKET"
 
@@ -556,7 +553,7 @@ def binance_cancel_order(
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
-    endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
+    endpoint = "/fapi/v1/order"
 
     params = {
         "symbol": payload.symbol.upper(),
@@ -585,7 +582,7 @@ def binance_order_status(payload: BinanceOrderStatusIn, x_internal_token: str = 
 
     market = _resolve_market(payload.market)
     base_url = _base_url_for_market(market)
-    endpoint = "/fapi/v1/order" if market == "FUTURES" else "/api/v3/order"
+    endpoint = "/fapi/v1/order"
 
     params = {
         "symbol": payload.symbol.upper(),
