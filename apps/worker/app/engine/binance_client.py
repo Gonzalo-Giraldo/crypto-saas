@@ -21,7 +21,9 @@ _price_cache_expiry: float = 0.0
 
 def _normalize_market(market: str | None) -> str:
     m = str(market or "FUTURES").upper().strip()
-    return "FUTURES" if m == "FUTURES" else "SPOT"
+    if m != "FUTURES":
+        raise RuntimeError("binance_futures_only")
+    return "FUTURES"
 
 
 def _base_url_for_market(market: str) -> str:
@@ -575,8 +577,6 @@ def get_account_status(
 
 def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "FUTURES") -> dict[str, dict]:
     market_norm = _normalize_market(market)
-    if market_norm == "SPOT":
-        return _fetch_exchange_info_symbols(symbols)
     wanted = sorted({str(s or "").upper().strip() for s in symbols if str(s or "").strip()})
     if not wanted:
         return {}
@@ -604,8 +604,6 @@ def _fetch_exchange_info_symbols_for_market(symbols: list[str], market: str = "F
 
 def _fetch_symbol_price_for_market(symbol: str, market: str = "FUTURES") -> float | None:
     market_norm = _normalize_market(market)
-    if market_norm == "SPOT":
-        return _fetch_symbol_price(symbol)
     sym = str(symbol or "").upper().strip()
     if not sym:
         return None
