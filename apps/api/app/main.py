@@ -38,6 +38,7 @@ import time
 
 from apps.api.app.api.users import router as users_router
 from apps.api.app.api.admin_recovery import router as admin_recovery_router
+from apps.api.app.api.trading_control import router as trading_control_router
 
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
@@ -169,6 +170,7 @@ app.include_router(binance_positions_router)
 app.include_router(binance_portfolio_router)
 app.include_router(binance_execution_router)
 app.include_router(admin_recovery_router)
+app.include_router(trading_control_router)
 
 @app.get("/healthz")
 def healthz():
