@@ -211,3 +211,56 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
     assert execute_kwargs["intent_key"] == "intent-1"
     assert execute_kwargs["account_id"] == "acc-1"
     assert execute_kwargs["market"] is None
+
+def test_persist_binance_intent_from_draft_blocks_real_execution_when_kill_switch_disabled(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+
+    events = []
+
+    def fake_create_binance_intent(**kwargs):
+        events.append(("create", kwargs))
+        return {"intent_id": "intent-1", "ok": True}
+
+    def fake_get_intent(db, intent_id):
+        events.append(("get_intent", {"intent_id": intent_id}))
+        return SimpleNamespace(
+            intent_id="intent-1",
+            user_id="user-1",
+            broker="BINANCE",
+            account_id="acc-1",
+            lifecycle_status="CREATED",
+            symbol="BTCUSDT",
+            side="BUY",
+            expected_qty=1.0,
+            entry_price=100.0,
+        )
+
+    def forbidden(name):
+        def _inner(**kwargs):
+            raise AssertionError(f"{name} must not be called when kill-switch is disabled")
+        return _inner
+
+    monkeypatch.setattr(module, "create_binance_intent", fake_create_binance_intent)
+    monkeypatch.setattr(module, "get_intent", fake_get_intent)
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: False)
+    monkeypatch.setattr(module, "assert_exposure_limits", forbidden("assert_exposure_limits"))
+    monkeypatch.setattr(module, "reserve_idempotent_intent", forbidden("reserve_idempotent_intent"))
+    monkeypatch.setattr(module, "consume_intent", forbidden("consume_intent"))
+    monkeypatch.setattr(module, "execute_binance_real_order_for_user", forbidden("execute_binance_real_order_for_user"))
+
+    with pytest.raises(HTTPException) as exc:
+        persist_binance_intent_from_draft(
+            draft=_draft(),
+            db="fake-db",
+            user_id="user-1",
+            current_user=_user(),
+            account_id="acc-1",
+            execute_real=True,
+            execution_authorized=True,
+            idempotency_key="idem-kill-switch-test",
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "trading_disabled_by_admin_kill_switch"
+    assert [event[0] for event in events] == ["create", "get_intent"]
