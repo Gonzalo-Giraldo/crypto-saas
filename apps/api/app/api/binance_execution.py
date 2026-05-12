@@ -98,6 +98,7 @@ def intent_execute_binance(
             draft=draft,
             db=db,
             user_id=str(current_user.id),
+            current_user=current_user,
             account_id=payload.account_id,
             execute_real=payload.execute_real,
             execution_authorized=payload.execution_authorized,
