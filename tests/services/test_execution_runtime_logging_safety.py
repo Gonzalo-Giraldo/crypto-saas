@@ -89,3 +89,156 @@ def test_binance_real_order_query_failure_after_send_does_not_resubmit_or_mark_e
     assert calls["mark_executed"] == 0
     assert exc.value.status_code == 502
     assert "gateway_upstream_error status=502" in exc.value.detail
+
+def test_binance_real_order_query_failure_does_not_freeze_when_not_uncertain(monkeypatch):
+    import pytest
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    class _DB:
+        def __init__(self):
+            self.freeze_called = False
+
+        def execute(self, *args, **kwargs):
+            class _Result:
+                def fetchone(self):
+                    return (1,)
+            return _Result()
+
+        def add(self, obj):
+            return None
+
+        def flush(self):
+            return None
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    db = _DB()
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            return {"accepted": True}
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: db)
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {"normalized_qty": requested_qty},
+    )
+    monkeypatch.setattr(runtime, "_build_binance_client_order_id", lambda **kwargs: "cid-no-freeze-1")
+    monkeypatch.setattr(runtime, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(runtime, "query_order_status", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("gateway_upstream_error status=502")))
+    monkeypatch.setattr(runtime, "mark_intent_executed", lambda *a, **k: None)
+
+    def forbidden_freeze(*args, **kwargs):
+        raise AssertionError("set_trading_enabled must not be called")
+
+    monkeypatch.setattr(runtime, "set_trading_enabled", forbidden_freeze)
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
+        runtime.execute_binance_real_order_for_user(
+            user_id="user-1",
+            symbol="BTCUSDT",
+            side="BUY",
+            qty=0.001,
+            intent_key="intent-no-freeze-1",
+            account_id="default",
+            market="FUTURES",
+        )
+
+
+def test_binance_real_order_uncertain_timeout_auto_freezes(monkeypatch):
+    import pytest
+    import apps.worker.app.engine.execution_runtime as runtime
+
+    class _DB:
+        def execute(self, *args, **kwargs):
+            class _Result:
+                def fetchone(self):
+                    return (1,)
+            return _Result()
+
+        def add(self, obj):
+            return None
+
+        def flush(self):
+            return None
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    db = _DB()
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            return {"accepted": True}
+
+    freeze_calls = {"count": 0}
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: db)
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {"normalized_qty": requested_qty},
+    )
+    monkeypatch.setattr(runtime, "_build_binance_client_order_id", lambda **kwargs: "cid-freeze-1")
+    monkeypatch.setattr(runtime, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+
+    monkeypatch.setattr(
+        runtime,
+        "query_order_status",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("request timed out")),
+    )
+
+    monkeypatch.setattr(
+        runtime,
+        "_reconcile_binance_test_order_best_effort",
+        lambda **kwargs: {"result": None, "error": "still unknown"},
+    )
+
+    monkeypatch.setattr(runtime, "mark_intent_executed", lambda *a, **k: None)
+
+    class _Row:
+        id = 123
+
+    def fake_set_trading_enabled(db, enabled):
+        freeze_calls["count"] += 1
+        assert enabled is False
+        return _Row()
+
+    monkeypatch.setattr(runtime, "set_trading_enabled", fake_set_trading_enabled)
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
+        runtime.execute_binance_real_order_for_user(
+            user_id="user-1",
+            symbol="BTCUSDT",
+            side="BUY",
+            qty=0.001,
+            intent_key="intent-freeze-1",
+            account_id="default",
+            market="FUTURES",
+        )
+
+    assert freeze_calls["count"] == 1

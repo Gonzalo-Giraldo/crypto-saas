@@ -9,7 +9,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import text
                 
-from apps.api.app.services.trading_controls import get_trading_enabled
+from apps.api.app.services.trading_controls import get_trading_enabled, set_trading_enabled
 from apps.api.app.core.config import settings
 from apps.api.app.db.session import SessionLocal
 from apps.api.app.services.audit import log_audit_event
@@ -997,6 +997,25 @@ def execute_binance_real_order_for_user(
                     result=reconciliation_attempt.get("result"),
                     error=reconciliation_attempt.get("error"),
                 )
+                if details["reconciliation_classification"] == "SENT_UNKNOWN":
+                    row = set_trading_enabled(db, enabled=False)
+                    log_audit_event(
+                        db,
+                        action="execution.binance.real_order.uncertain_freeze",
+                        user_id=user_id,
+                        entity_type="runtime_setting",
+                        entity_id=str(row.id),
+                        details={
+                            "reason": "binance_real_order_sent_unknown",
+                            "symbol": symbol,
+                            "side": side,
+                            "client_order_id": client_order_id,
+                            "market": market,
+                            "error": str(exc),
+                            "reconciliation_classification": details["reconciliation_classification"],
+                        },
+                    )
+                    details["auto_freeze_trading_enabled"] = False
             log_audit_event(
                 db,
                 action="execution.binance.real_order.error",
