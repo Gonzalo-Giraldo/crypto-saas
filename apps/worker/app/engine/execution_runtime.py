@@ -818,7 +818,6 @@ def execute_binance_real_order_for_user(
                                     and guard_result.exit_key
                                 ):
                                     from apps.api.app.services.binance_exit_protection_service import create_exit_protection
-                                    from apps.api.app.db.session import SessionLocal
 
                                     db_protection = SessionLocal()
 
