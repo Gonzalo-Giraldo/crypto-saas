@@ -999,7 +999,7 @@ def execute_binance_real_order_for_user(
                 )
             log_audit_event(
                 db,
-                action="execution.binance.test_order.error",
+                action="execution.binance.real_order.error",
                 user_id=user_id,
                 entity_type="execution",
                 details=details,
@@ -1007,7 +1007,7 @@ def execute_binance_real_order_for_user(
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Binance test order failed: {exc}",
+                detail=f"Binance real order failed: {exc}",
             )
 
         log_audit_event(
