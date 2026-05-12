@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -12,7 +14,6 @@ from apps.api.app.services.intent_persistence import persist_binance_intent_from
 
 
 router = APIRouter(tags=["binance-execution"])
-
 
 class BinanceIntentExecuteRequest(BaseModel):
     symbol: str
@@ -51,17 +52,23 @@ class BinanceIntentExecuteRequest(BaseModel):
             raise ValueError("account_id_required")
         return account_id
 
-
 @router.post("/execution/binance/intent-execute")
 def intent_execute_binance(
     payload: BinanceIntentExecuteRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
 ):
     if payload.execute_real and not payload.execution_authorized:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="real_execution_authorization_required",
+        )
+
+    if payload.execute_real and not str(idempotency_key or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="idempotency_key_required_for_real_execution",
         )
 
     draft = BinanceIntentDraft(
@@ -94,6 +101,7 @@ def intent_execute_binance(
             account_id=payload.account_id,
             execute_real=payload.execute_real,
             execution_authorized=payload.execution_authorized,
+            idempotency_key=idempotency_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

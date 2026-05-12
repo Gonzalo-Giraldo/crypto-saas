@@ -27,6 +27,8 @@ def _draft():
 
     monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
 
+
+
 def test_persist_binance_intent_from_draft_calls_adapter(monkeypatch):
     captured = {}
 
@@ -143,6 +145,16 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
     monkeypatch.setattr(module, "execute_binance_real_order_for_user", fake_execute)
     monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
 
+    def fake_reserve_idempotent_intent(**kwargs):
+        events.append(("reserve_idempotency", kwargs))
+        return None
+
+    def fake_finalize_idempotent_intent(**kwargs):
+        events.append(("finalize_idempotency", kwargs))
+
+    monkeypatch.setattr(module, "reserve_idempotent_intent", fake_reserve_idempotent_intent)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", fake_finalize_idempotent_intent)
+
     result = persist_binance_intent_from_draft(
         draft=_draft(),
         db="fake-db",
@@ -150,17 +162,29 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
         account_id="acc-1",
         execute_real=True,
         execution_authorized=True,
+        idempotency_key="idem-test-1",
     )
 
     assert result["execution"]["sent"] is True
-    assert [event[0] for event in events] == ["create", "get_intent", "consume", "execute"]
+    assert [event[0] for event in events] == [
+        "create",
+        "get_intent",
+        "reserve_idempotency",
+        "consume",
+        "execute",
+        "finalize_idempotency",
+    ]
 
-    consume_kwargs = events[2][1]
+    reserve_kwargs = events[2][1]
+    assert reserve_kwargs["idempotency_key"] == "idem-test-1"
+    assert reserve_kwargs["endpoint"] == "/execution/binance/intent-execute"
+
+    consume_kwargs = events[3][1]
     assert consume_kwargs["intent_id"] == "intent-1"
     assert consume_kwargs["broker"] == "BINANCE"
     assert consume_kwargs["account_id"] == "acc-1"
 
-    execute_kwargs = events[3][1]
+    execute_kwargs = events[4][1]
     assert execute_kwargs["user_id"] == "user-1"
     assert execute_kwargs["symbol"] == "BTCUSDT"
     assert execute_kwargs["side"] == "BUY"

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from fastapi import HTTPException, status
-from apps.api.app.services.trading_controls import get_trading_enabled
 
+from apps.api.app.services.trading_controls import get_trading_enabled
+from apps.api.app.services.idempotency import (
+    finalize_idempotent_intent,
+    reserve_idempotent_intent,
+)
 from apps.api.app.services.intent_draft import BinanceIntentDraft
 from apps.api.app.services.binance_intent_adapter import create_binance_intent
 from apps.api.app.services.intent_service import get_intent
 from apps.api.app.services.intent_consumption_service import consume_intent
 from apps.worker.app.engine.execution_runtime import execute_binance_real_order_for_user
-
 
 def persist_binance_intent_from_draft(
     *,
@@ -18,6 +21,7 @@ def persist_binance_intent_from_draft(
     account_id,
     execute_real: bool = False,
     execution_authorized: bool = False,
+    idempotency_key: str | None = None,
 ):
     """
     SIDE EFFECT:
@@ -94,6 +98,26 @@ def persist_binance_intent_from_draft(
             detail="trading_disabled_by_admin_kill_switch",
         )
 
+    request_payload = {
+        "intent_id": str(intent.intent_id),
+        "user_id": str(user_id),
+        "account_id": str(account_id),
+        "symbol": str(intent.symbol),
+        "side": str(intent.side),
+        "qty": qty,
+    }
+
+    if execute_real:
+        existing_idempotent_response = reserve_idempotent_intent(
+            db=db,
+            user_id=str(user_id),
+            endpoint="/execution/binance/intent-execute",
+            idempotency_key=str(idempotency_key or ""),
+            request_payload=request_payload,
+        )
+        if existing_idempotent_response is not None:
+            return existing_idempotent_response
+
     consume_intent(
         db=db,
         intent_id=str(intent.intent_id),
@@ -112,7 +136,18 @@ def persist_binance_intent_from_draft(
         market=None,
     )
 
-    return {
+    response_payload = {
         **result,
         "execution": execution,
     }
+
+    if execute_real:
+        finalize_idempotent_intent(
+            db=db,
+            user_id=str(user_id),
+            endpoint="/execution/binance/intent-execute",
+            idempotency_key=str(idempotency_key or ""),
+            request_payload=request_payload,
+            response_payload=response_payload,
+        )
+    return response_payload
