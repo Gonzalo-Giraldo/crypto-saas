@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import apps.api.app.services.intent_persistence as module
 
 from apps.api.app.services.intent_draft import BinanceIntentDraft
 from apps.api.app.services.intent_persistence import persist_binance_intent_from_draft
+
+def _user():
+    return SimpleNamespace(
+        id="user-1",
+    )
 
 def _draft():
     return BinanceIntentDraft(
@@ -25,10 +32,6 @@ def _draft():
         },
     )
 
-    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
-
-
-
 def test_persist_binance_intent_from_draft_calls_adapter(monkeypatch):
     captured = {}
 
@@ -42,6 +45,7 @@ def test_persist_binance_intent_from_draft_calls_adapter(monkeypatch):
         draft=_draft(),
         db="fake-db",
         user_id="user-1",
+        current_user=_user(),
         account_id="acc-1",
     )
 
@@ -65,6 +69,7 @@ def test_invalid_input():
             draft=None,
             db="db",
             user_id="u",
+            current_user=_user(),
             account_id="a",
         )
 
@@ -85,6 +90,7 @@ def test_persist_binance_intent_from_draft_does_not_execute_by_default(monkeypat
         draft=_draft(),
         db="fake-db",
         user_id="user-1",
+        current_user=_user(),
         account_id="acc-1",
     )
 
@@ -104,6 +110,7 @@ def test_persist_binance_intent_from_draft_requires_authorization_for_real_execu
             draft=_draft(),
             db="fake-db",
             user_id="user-1",
+            current_user=_user(),
             account_id="acc-1",
             execute_real=True,
         )
@@ -118,6 +125,11 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
         events.append(("create", kwargs))
         return {"intent_id": "intent-1", "ok": True}
 
+    def fake_assert_exposure_limits(**kwargs):
+        events.append(("assert_exposure_limits", kwargs))
+
+    monkeypatch.setattr(module, "assert_exposure_limits", fake_assert_exposure_limits)
+
     def fake_get_intent(db, intent_id):
         events.append(("get_intent", {"intent_id": intent_id}))
         return SimpleNamespace(
@@ -129,6 +141,7 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
             symbol="BTCUSDT",
             side="BUY",
             expected_qty=1.25,
+            entry_price=100.0,
         )
 
     def fake_consume_intent(**kwargs):
@@ -158,6 +171,7 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
     result = persist_binance_intent_from_draft(
         draft=_draft(),
         db="fake-db",
+        current_user=_user(),
         user_id="user-1",
         account_id="acc-1",
         execute_real=True,
@@ -169,22 +183,27 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
     assert [event[0] for event in events] == [
         "create",
         "get_intent",
+        "assert_exposure_limits",
         "reserve_idempotency",
         "consume",
         "execute",
         "finalize_idempotency",
     ]
 
-    reserve_kwargs = events[2][1]
+    exposure_kwargs = events[2][1]
+    assert exposure_kwargs["exchange"] == "BINANCE"
+    assert exposure_kwargs["symbol"] == "BTCUSDT"
+
+    reserve_kwargs = events[3][1]
     assert reserve_kwargs["idempotency_key"] == "idem-test-1"
     assert reserve_kwargs["endpoint"] == "/execution/binance/intent-execute"
 
-    consume_kwargs = events[3][1]
+    consume_kwargs = events[4][1]
     assert consume_kwargs["intent_id"] == "intent-1"
     assert consume_kwargs["broker"] == "BINANCE"
     assert consume_kwargs["account_id"] == "acc-1"
 
-    execute_kwargs = events[4][1]
+    execute_kwargs = events[5][1]
     assert execute_kwargs["user_id"] == "user-1"
     assert execute_kwargs["symbol"] == "BTCUSDT"
     assert execute_kwargs["side"] == "BUY"

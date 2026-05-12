@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from fastapi import HTTPException, status
+from apps.api.app.models.user import User
 
-from apps.api.app.services.trading_controls import get_trading_enabled
+from apps.api.app.services.trading_controls import (
+    assert_exposure_limits,
+    get_trading_enabled,
+)
 from apps.api.app.services.idempotency import (
     finalize_idempotent_intent,
     reserve_idempotent_intent,
@@ -18,6 +22,7 @@ def persist_binance_intent_from_draft(
     draft: BinanceIntentDraft,
     db,
     user_id,
+    current_user: User,
     account_id,
     execute_real: bool = False,
     execution_authorized: bool = False,
@@ -72,14 +77,14 @@ def persist_binance_intent_from_draft(
     if str(intent.user_id) != str(user_id):
         raise ValueError("intent_user_mismatch")
 
-    if str(intent.broker).upper() != "BINANCE":
-        raise ValueError(f"invalid_broker_for_binance_execution:{intent.broker}")
-
     if str(intent.account_id) != str(account_id):
         raise ValueError("intent_account_mismatch")
 
     if str(intent.lifecycle_status).upper() != "CREATED":
         raise ValueError(f"invalid_state_for_execution:{intent.lifecycle_status}")
+
+    if str(intent.broker).upper() != "BINANCE":
+        raise ValueError(f"invalid_broker_for_binance_execution:{intent.broker}")
 
     if str(intent.side).upper() not in {"BUY", "SELL"}:
         raise ValueError(f"invalid_side_for_execution:{intent.side}")
@@ -97,6 +102,15 @@ def persist_binance_intent_from_draft(
             status_code=status.HTTP_409_CONFLICT,
             detail="trading_disabled_by_admin_kill_switch",
         )
+
+    assert_exposure_limits(
+        db=db,
+        current_user=current_user,
+        exchange="BINANCE",
+        symbol=str(intent.symbol),
+        qty=float(qty),
+        price_estimate=float(intent.entry_price or 0.0),
+    )
 
     request_payload = {
         "intent_id": str(intent.intent_id),
