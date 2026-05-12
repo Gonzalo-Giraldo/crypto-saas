@@ -71,6 +71,11 @@ def intent_execute_binance(
         entry_price=payload.entry_price,
         stop_loss=payload.stop_loss,
         take_profit=payload.take_profit,
+        risk_pct=0.0,
+        risk_abs=0.0,
+        risk_usdt=None,
+        reward_risk_ratio=None,
+        entry_price_reference=payload.entry_price,
         auto_pick_trace={
             "final_score": 0.0,
             "decision_reason": "manual_binance_execution_request",
