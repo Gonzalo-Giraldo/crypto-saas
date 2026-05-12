@@ -25,6 +25,7 @@ def _draft():
         },
     )
 
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
 
 def test_persist_binance_intent_from_draft_calls_adapter(monkeypatch):
     captured = {}
@@ -140,6 +141,7 @@ def test_persist_binance_intent_from_draft_consumes_then_executes_when_authorize
     monkeypatch.setattr(module, "get_intent", fake_get_intent)
     monkeypatch.setattr(module, "consume_intent", fake_consume_intent)
     monkeypatch.setattr(module, "execute_binance_real_order_for_user", fake_execute)
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
 
     result = persist_binance_intent_from_draft(
         draft=_draft(),

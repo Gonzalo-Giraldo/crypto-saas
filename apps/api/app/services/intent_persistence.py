@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from fastapi import HTTPException, status
+from apps.api.app.services.trading_controls import get_trading_enabled
+
 from apps.api.app.services.intent_draft import BinanceIntentDraft
 from apps.api.app.services.binance_intent_adapter import create_binance_intent
 from apps.api.app.services.intent_service import get_intent
@@ -84,6 +87,12 @@ def persist_binance_intent_from_draft(
 
     if qty <= 0:
         raise ValueError("invalid_expected_qty_for_execution")
+
+    if not get_trading_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="trading_disabled_by_admin_kill_switch",
+        )
 
     consume_intent(
         db=db,
