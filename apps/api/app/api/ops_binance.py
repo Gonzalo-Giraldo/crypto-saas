@@ -10,6 +10,7 @@ from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
 from apps.api.app.services.intent_service import get_intent
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
 from apps.worker.app.engine.broker_positions import get_binance_positions
+from apps.api.app.services.trading_controls import get_trading_enabled
 
 from apps.worker.app.engine.binance_client import query_order_status_by_order_id
 from apps.worker.app.engine.execution_runtime import (
@@ -323,6 +324,162 @@ def reconcile_binance_position(
         "account_id": account_id_norm,
         "market": market_norm,
         "position": matched,
+        "protected": "UNKNOWN",
+        "mutations": [],
+    }
+
+@router.get("/binance/close-preflight")
+def binance_close_preflight(
+    symbol: str = Query(...),
+    account_id: str = Query("default"),
+    market: str = Query("FUTURES"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    symbol_norm = str(symbol or "").upper().strip()
+    account_id_norm = str(account_id or "default").strip()
+    market_norm = str(market or "FUTURES").upper().strip()
+
+    if market_norm != "FUTURES":
+        return {
+            "success": False,
+            "classification": "INVALID_MARKET",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": "binance_close_preflight_supports_futures_only",
+            "mutations": [],
+        }
+
+    if not get_trading_enabled(db):
+        return {
+            "success": False,
+            "classification": "TRADING_DISABLED",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": "trading_enabled_required_for_close_preflight",
+            "mutations": [],
+        }
+
+    creds = get_decrypted_exchange_secret(
+        db=db,
+        user_id=str(current_user.id),
+        exchange="BINANCE",
+    )
+    if not creds:
+        return {
+            "success": False,
+            "classification": "MISSING_CREDENTIALS",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": "Missing credentials for BINANCE",
+            "mutations": [],
+        }
+
+    try:
+        positions = get_binance_positions(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "classification": "POSITION_UNKNOWN",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": str(exc),
+            "mutations": [],
+        }
+
+    matches = [
+        p for p in positions
+        if str(p.get("symbol") or "").upper().strip() == symbol_norm
+    ]
+
+    if len(matches) == 0:
+        return {
+            "success": False,
+            "classification": "NO_OPEN_POSITION",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position_detected": False,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if len(matches) > 1:
+        return {
+            "success": False,
+            "classification": "AMBIGUOUS_POSITION",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "positions": matches,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    position = matches[0]
+    side = str(position.get("side") or "").upper().strip()
+    qty = position.get("qty")
+
+    try:
+        qty_value = float(qty)
+    except Exception:
+        return {
+            "success": False,
+            "classification": "INVALID_POSITION_QTY",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if qty_value <= 0:
+        return {
+            "success": False,
+            "classification": "INVALID_POSITION_QTY",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if side == "BUY":
+        close_side = "SELL"
+    elif side == "SELL":
+        close_side = "BUY"
+    else:
+        return {
+            "success": False,
+            "classification": "INVALID_POSITION_SIDE",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    return {
+        "success": True,
+        "classification": "READY_TO_CLOSE",
+        "symbol": symbol_norm,
+        "account_id": account_id_norm,
+        "market": market_norm,
+        "position_detected": True,
+        "position": position,
+        "close_side": close_side,
+        "qty": str(qty),
+        "reduce_only": True,
         "protected": "UNKNOWN",
         "mutations": [],
     }

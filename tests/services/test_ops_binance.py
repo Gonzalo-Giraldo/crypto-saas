@@ -269,3 +269,81 @@ def test_reconcile_binance_position_handles_position_unknown(monkeypatch):
     assert result["classification"] == "POSITION_UNKNOWN"
     assert result["mutations"] == []
 
+def test_close_preflight_trading_disabled(monkeypatch):
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: False)
+
+    result = module.binance_close_preflight(
+        symbol="BTCUSDT",
+        account_id="default",
+        market="FUTURES",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "TRADING_DISABLED"
+    assert result["mutations"] == []
+
+
+def test_close_preflight_ready_to_close_long(monkeypatch):
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+
+    monkeypatch.setattr(
+        module,
+        "get_decrypted_exchange_secret",
+        lambda **kwargs: {"api_key": "k", "api_secret": "s"},
+    )
+
+    monkeypatch.setattr(
+        module,
+        "get_binance_positions",
+        lambda **kwargs: [
+            {
+                "symbol": "BTCUSDT",
+                "side": "BUY",
+                "qty": "0.001",
+            }
+        ],
+    )
+
+    result = module.binance_close_preflight(
+        symbol="BTCUSDT",
+        account_id="default",
+        market="FUTURES",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is True
+    assert result["classification"] == "READY_TO_CLOSE"
+    assert result["close_side"] == "SELL"
+    assert result["reduce_only"] is True
+    assert result["mutations"] == []
+
+
+def test_close_preflight_no_open_position(monkeypatch):
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+
+    monkeypatch.setattr(
+        module,
+        "get_decrypted_exchange_secret",
+        lambda **kwargs: {"api_key": "k", "api_secret": "s"},
+    )
+
+    monkeypatch.setattr(
+        module,
+        "get_binance_positions",
+        lambda **kwargs: [],
+    )
+
+    result = module.binance_close_preflight(
+        symbol="BTCUSDT",
+        account_id="default",
+        market="FUTURES",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "NO_OPEN_POSITION"
+    assert result["mutations"] == []
