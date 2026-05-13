@@ -512,3 +512,349 @@ def test_resolve_close_context_derives_buy_for_short():
     assert result["position_direction"] == "SHORT"
     assert result["close_side"] == "BUY"
     assert result["reduce_only"] is True
+
+def test_execute_close_pipeline_ready_does_not_send_order(monkeypatch):
+    calls = {"creds": 0, "positions": 0, "audit": 0, "finalize": 0}
+
+    class _Db:
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+
+    def fake_creds(**kwargs):
+        calls["creds"] += 1
+        return {"api_key": "k", "api_secret": "s"}
+
+    def fake_positions(**kwargs):
+        calls["positions"] += 1
+        return [{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001}]
+
+    def fake_audit(*args, **kwargs):
+        calls["audit"] += 1
+
+    def fake_finalize(*args, **kwargs):
+        calls["finalize"] += 1
+        assert kwargs["response_payload"]["classification"] == "EXECUTION_SUBMITTED"
+        assert kwargs["response_payload"]["close_side"] == "SELL"
+        assert kwargs["response_payload"]["order_type"] == "MARKET"
+        assert kwargs["response_payload"]["reduce_only"] is True
+
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", fake_creds)
+    class _Adapter:
+        def send_order(self, **kwargs):
+            return {
+                "status": "FILLED",
+                "clientOrderId": kwargs["client_order_id"],
+                "orderId": 123456,
+            }
+
+    monkeypatch.setattr(module, "get_binance_positions", fake_positions)
+    monkeypatch.setattr(module, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(
+        module,
+        "_reconcile_binance_test_order_best_effort",
+        lambda **kwargs: {
+            "result": {
+                "status": "FILLED",
+                "clientOrderId": kwargs["client_order_id"],
+            },
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(module, "log_audit_event", fake_audit)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", fake_finalize)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-send-guard-1",
+    )
+
+    assert result["classification"] == "EXECUTION_SUBMITTED"
+    assert result["success"] is False
+    assert result["client_order_id"].startswith("csclose_")
+    assert calls == {"creds": 1, "positions": 1, "audit": 1, "finalize": 1}
+
+
+def test_execute_close_rejects_position_qty_mismatch(monkeypatch):
+    class _Db:
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", lambda **kwargs: {"api_key": "k", "api_secret": "s"})
+    monkeypatch.setattr(module, "get_binance_positions", lambda **kwargs: [{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.002}])
+    monkeypatch.setattr(module, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", lambda *args, **kwargs: None)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-qty-mismatch-1",
+    )
+
+    assert result["classification"] == "POSITION_QTY_MISMATCH"
+    assert result["success"] is False
+    assert result["mutations"] == []
+
+
+def test_execute_close_rejects_hedge_mode_ambiguity(monkeypatch):
+    class _Db:
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", lambda **kwargs: {"api_key": "k", "api_secret": "s"})
+    monkeypatch.setattr(
+        module,
+        "get_binance_positions",
+        lambda **kwargs: [
+            {"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001},
+            {"symbol": "BTCUSDT", "side": "SELL", "qty": 0.001},
+        ],
+    )
+    monkeypatch.setattr(module, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", lambda *args, **kwargs: None)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-hedge-1",
+    )
+
+    assert result["classification"] == "HEDGE_MODE_UNSUPPORTED"
+    assert result["success"] is False
+    assert result["mutations"] == []
+
+
+def test_execute_close_timeout_unknown_freezes_trading(monkeypatch):
+    calls = {"send": 0, "freeze": 0, "audit": 0}
+
+    class _Db:
+        def commit(self):
+            pass
+
+    class _Row:
+        id = "runtime-setting-1"
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            calls["send"] += 1
+            raise TimeoutError("gateway read timeout")
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", lambda **kwargs: {"api_key": "k", "api_secret": "s"})
+    monkeypatch.setattr(module, "get_binance_positions", lambda **kwargs: [{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001}])
+    monkeypatch.setattr(module, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(
+        module,
+        "_reconcile_binance_test_order_best_effort",
+        lambda **kwargs: {"result": None, "error": "gateway read timeout"},
+    )
+
+    def fake_freeze(db, *, enabled):
+        calls["freeze"] += 1
+        assert enabled is False
+        return _Row()
+
+    def fake_audit(*args, **kwargs):
+        calls["audit"] += 1
+
+    monkeypatch.setattr(module, "set_trading_enabled", fake_freeze)
+    monkeypatch.setattr(module, "log_audit_event", fake_audit)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", lambda *args, **kwargs: None)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-timeout-unknown-1",
+    )
+
+    assert result["classification"] == "EXECUTION_STATE_UNKNOWN"
+    assert result["success"] is False
+    assert calls["send"] == 1
+    assert calls["freeze"] == 1
+    assert calls["audit"] >= 2
+
+
+def test_execute_close_timeout_reconciled_not_sent_does_not_freeze(monkeypatch):
+    calls = {"send": 0, "freeze": 0}
+
+    class _Db:
+        def commit(self):
+            pass
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            calls["send"] += 1
+            raise TimeoutError("gateway read timeout")
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", lambda **kwargs: {"api_key": "k", "api_secret": "s"})
+    monkeypatch.setattr(module, "get_binance_positions", lambda **kwargs: [{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001}])
+    monkeypatch.setattr(module, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(
+        module,
+        "_reconcile_binance_test_order_best_effort",
+        lambda **kwargs: {"result": None, "error": "code=-2013 unknown order"},
+    )
+
+    def fake_freeze(db, *, enabled):
+        calls["freeze"] += 1
+        raise AssertionError("must not freeze when reconciliation proves NOT_SENT")
+
+    monkeypatch.setattr(module, "set_trading_enabled", fake_freeze)
+    monkeypatch.setattr(module, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", lambda *args, **kwargs: None)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-timeout-not-sent-1",
+    )
+
+    assert result["classification"] == "EXECUTION_STATE_UNKNOWN"
+    assert result["success"] is False
+    assert calls["send"] == 1
+    assert calls["freeze"] == 0
+
+
+def test_execute_close_non_timeout_exception_is_rejected_without_freeze(monkeypatch):
+    calls = {"send": 0, "freeze": 0}
+
+    class _Db:
+        def commit(self):
+            pass
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            calls["send"] += 1
+            raise RuntimeError("binance_upstream_error status=400 code=-2019")
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", lambda **kwargs: {"api_key": "k", "api_secret": "s"})
+    monkeypatch.setattr(module, "get_binance_positions", lambda **kwargs: [{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001}])
+    monkeypatch.setattr(module, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+
+    def fake_freeze(db, *, enabled):
+        calls["freeze"] += 1
+        raise AssertionError("must not freeze on explicit non-timeout rejection")
+
+    monkeypatch.setattr(module, "set_trading_enabled", fake_freeze)
+    monkeypatch.setattr(module, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", lambda *args, **kwargs: None)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-rejected-1",
+    )
+
+    assert result["classification"] == "EXECUTION_REJECTED"
+    assert result["success"] is False
+    assert calls["send"] == 1
+    assert calls["freeze"] == 0
+
+
+def test_execute_close_forces_market_reduce_only_payload(monkeypatch):
+    observed = {}
+
+    class _Db:
+        def commit(self):
+            pass
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            observed.update(kwargs)
+            return {"status": "FILLED", "orderId": 123}
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: True)
+    monkeypatch.setattr(module, "reserve_idempotent_intent", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", lambda **kwargs: {"api_key": "k", "api_secret": "s"})
+    monkeypatch.setattr(module, "get_binance_positions", lambda **kwargs: [{"symbol": "BTCUSDT", "side": "SELL", "qty": 0.001}])
+    monkeypatch.setattr(module, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+    monkeypatch.setattr(
+        module,
+        "_reconcile_binance_test_order_best_effort",
+        lambda **kwargs: {"result": {"status": "FILLED"}, "error": None},
+    )
+    monkeypatch.setattr(module, "log_audit_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", lambda *args, **kwargs: None)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=True,
+            execution_authorized=True,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-payload-1",
+    )
+
+    assert result["classification"] == "EXECUTION_SUBMITTED"
+    assert observed["symbol"] == "BTCUSDT"
+    assert observed["side"] == "BUY"
+    assert observed["quantity"] == 0.001
+    assert observed["order_type"] == "MARKET"
+    assert observed["reduce_only"] is True
+    assert observed["market"] == "FUTURES"
+    assert observed["client_order_id"].startswith("csclose_")

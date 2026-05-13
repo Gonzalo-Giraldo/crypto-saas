@@ -27,7 +27,10 @@ from apps.worker.app.engine.binance_client import query_order_status_by_order_id
 from apps.worker.app.engine.execution_runtime import (
     _classify_binance_reconciliation,
     _reconcile_binance_test_order_best_effort,
+    _is_uncertain_binance_timeout_error,
+    _build_binance_broker_adapter,
 )
+from apps.api.app.services.trading_controls import set_trading_enabled
 
 
 router = APIRouter(prefix="/ops/admin", tags=["ops-admin"])
@@ -756,22 +759,120 @@ def binance_execute_close(
                 response_payload = close_context
             else:
                 client_order_id = f"csclose_{str(idempotency_key).replace('-', '')[:28]}"
-                response_payload = {
-                    "success": False,
-                    "classification": "EXECUTION_PIPELINE_READY",
-                    "symbol": payload.symbol,
-                    "account_id": payload.account_id,
-                    "market": payload.market,
-                    "position": close_context.get("position"),
-                    "position_direction": close_context.get("position_direction"),
-                    "close_side": close_context.get("close_side"),
-                    "qty": close_context.get("qty"),
-                    "order_type": "MARKET",
-                    "reduce_only": True,
-                    "client_order_id": client_order_id,
-                    "error": "execute_close_send_order_not_enabled_yet",
-                    "mutations": [],
-                }
+
+                try:
+                    adapter = _build_binance_broker_adapter(
+                        api_key=creds["api_key"],
+                        api_secret=creds["api_secret"],
+                    )
+
+                    execution_result = adapter.send_order(
+                        symbol=payload.symbol,
+                        side=close_context.get("close_side"),
+                        quantity=float(close_context.get("qty")),
+                        order_type="MARKET",
+                        client_order_id=client_order_id,
+                        reduce_only=True,
+                        market="FUTURES",
+                    )
+
+                    reconciliation_attempt = {
+                        "client_order_id": client_order_id,
+                        **_reconcile_binance_test_order_best_effort(
+                            api_key=creds["api_key"],
+                            api_secret=creds["api_secret"],
+                            symbol=payload.symbol,
+                            client_order_id=client_order_id,
+                            market="FUTURES",
+                        ),
+                    }
+
+                    reconciliation_classification = _classify_binance_reconciliation(
+                        result=reconciliation_attempt.get("result"),
+                        error=reconciliation_attempt.get("error"),
+                    )
+
+                    response_payload = {
+                        "success": False,
+                        "classification": (
+                            "EXECUTION_SUBMITTED"
+                            if reconciliation_classification == "EXECUTED"
+                            else reconciliation_classification
+                        ),
+                        "symbol": payload.symbol,
+                        "account_id": payload.account_id,
+                        "market": payload.market,
+                        "position": close_context.get("position"),
+                        "position_direction": close_context.get("position_direction"),
+                        "close_side": close_context.get("close_side"),
+                        "qty": close_context.get("qty"),
+                        "order_type": "MARKET",
+                        "reduce_only": True,
+                        "client_order_id": client_order_id,
+                        "execution_result": execution_result,
+                        "reconciliation": reconciliation_attempt,
+                        "mutations": [],
+                    }
+
+                except Exception as exc:
+                    if _is_uncertain_binance_timeout_error(exc):
+                        reconciliation_attempt = {
+                            "client_order_id": client_order_id,
+                            **_reconcile_binance_test_order_best_effort(
+                                api_key=creds["api_key"],
+                                api_secret=creds["api_secret"],
+                                symbol=payload.symbol,
+                                client_order_id=client_order_id,
+                                market="FUTURES",
+                            ),
+                        }
+
+                        reconciliation_classification = _classify_binance_reconciliation(
+                            result=reconciliation_attempt.get("result"),
+                            error=reconciliation_attempt.get("error"),
+                        )
+
+                        if reconciliation_classification == "SENT_UNKNOWN":
+                            row = set_trading_enabled(db, enabled=False)
+
+                            log_audit_event(
+                                db,
+                                action="execution.binance.close.uncertain_freeze",
+                                user_id=str(current_user.id),
+                                entity_type="runtime_setting",
+                                entity_id=str(row.id),
+                                details={
+                                    "reason": "binance_execute_close_sent_unknown",
+                                    "symbol": payload.symbol,
+                                    "client_order_id": client_order_id,
+                                    "market": payload.market,
+                                    "error": str(exc),
+                                },
+                            )
+
+                        response_payload = {
+                            "success": False,
+                            "classification": "EXECUTION_STATE_UNKNOWN",
+                            "symbol": payload.symbol,
+                            "account_id": payload.account_id,
+                            "market": payload.market,
+                            "client_order_id": client_order_id,
+                            "reconciliation": reconciliation_attempt,
+                            "error": str(exc),
+                            "mutations": [],
+                        }
+
+                    else:
+                        response_payload = {
+                            "success": False,
+                            "classification": "EXECUTION_REJECTED",
+                            "symbol": payload.symbol,
+                            "account_id": payload.account_id,
+                            "market": payload.market,
+                            "client_order_id": client_order_id,
+                            "error": str(exc),
+                            "mutations": [],
+                        }
 
     log_audit_event(
         db,
