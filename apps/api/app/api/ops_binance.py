@@ -9,6 +9,7 @@ from apps.api.app.models.user import User
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
 from apps.api.app.services.intent_service import get_intent
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+from apps.worker.app.engine.broker_positions import get_binance_positions
 
 from apps.worker.app.engine.binance_client import query_order_status_by_order_id
 from apps.worker.app.engine.execution_runtime import (
@@ -237,5 +238,91 @@ def reconcile_binance_intent(
         "consumption": record,
         "result": reconciliation.get("result"),
         "error": reconciliation.get("error"),
+        "mutations": [],
+    }
+
+@router.get("/binance/reconcile-position")
+def reconcile_binance_position(
+    symbol: str = Query(...),
+    account_id: str = Query("default"),
+    market: str = Query("FUTURES"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    symbol_norm = str(symbol or "").upper().strip()
+    market_norm = str(market or "FUTURES").upper().strip()
+    account_id_norm = str(account_id or "default").strip()
+
+    if market_norm != "FUTURES":
+        return {
+            "success": False,
+            "classification": "INVALID_MARKET",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": "binance_position_reconciliation_supports_futures_only",
+            "mutations": [],
+        }
+
+    creds = get_decrypted_exchange_secret(
+        db=db,
+        user_id=str(current_user.id),
+        exchange="BINANCE",
+    )
+
+    if not creds:
+        return {
+            "success": False,
+            "classification": "MISSING_CREDENTIALS",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": "Missing credentials for BINANCE",
+            "mutations": [],
+        }
+
+    try:
+        positions = get_binance_positions(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "classification": "POSITION_UNKNOWN",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": str(exc),
+            "mutations": [],
+        }
+
+    matched = None
+
+    for position in positions:
+        if str(position.get("symbol") or "").upper().strip() == symbol_norm:
+            matched = position
+            break
+
+    if matched is None:
+        return {
+            "success": True,
+            "classification": "NO_OPEN_POSITION",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": None,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    return {
+        "success": True,
+        "classification": "OPEN_POSITION",
+        "symbol": symbol_norm,
+        "account_id": account_id_norm,
+        "market": market_norm,
+        "position": matched,
+        "protected": "UNKNOWN",
         "mutations": [],
     }
