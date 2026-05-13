@@ -450,3 +450,65 @@ def test_execute_close_returns_cached_idempotent_response(monkeypatch):
     )
 
     assert result == cached
+
+def test_resolve_close_context_rejects_qty_mismatch():
+    result = module._resolve_binance_close_context(
+        positions=[{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.002}],
+        symbol="BTCUSDT",
+        requested_qty=0.001,
+        account_id="default",
+        market="FUTURES",
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "POSITION_QTY_MISMATCH"
+    assert result["mutations"] == []
+
+
+def test_resolve_close_context_rejects_ambiguous_position_as_hedge_unsupported():
+    result = module._resolve_binance_close_context(
+        positions=[
+            {"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001},
+            {"symbol": "BTCUSDT", "side": "SELL", "qty": 0.001},
+        ],
+        symbol="BTCUSDT",
+        requested_qty=0.001,
+        account_id="default",
+        market="FUTURES",
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "HEDGE_MODE_UNSUPPORTED"
+    assert result["mutations"] == []
+
+
+def test_resolve_close_context_derives_sell_for_long():
+    result = module._resolve_binance_close_context(
+        positions=[{"symbol": "BTCUSDT", "side": "BUY", "qty": 0.001}],
+        symbol="BTCUSDT",
+        requested_qty=0.001,
+        account_id="default",
+        market="FUTURES",
+    )
+
+    assert result["success"] is True
+    assert result["classification"] == "READY_TO_CLOSE"
+    assert result["position_direction"] == "LONG"
+    assert result["close_side"] == "SELL"
+    assert result["reduce_only"] is True
+
+
+def test_resolve_close_context_derives_buy_for_short():
+    result = module._resolve_binance_close_context(
+        positions=[{"symbol": "BTCUSDT", "side": "SELL", "qty": 0.001}],
+        symbol="BTCUSDT",
+        requested_qty=0.001,
+        account_id="default",
+        market="FUTURES",
+    )
+
+    assert result["success"] is True
+    assert result["classification"] == "READY_TO_CLOSE"
+    assert result["position_direction"] == "SHORT"
+    assert result["close_side"] == "BUY"
+    assert result["reduce_only"] is True

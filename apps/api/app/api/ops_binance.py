@@ -294,6 +294,140 @@ def reconcile_binance_intent(
         "mutations": [],
     }
 
+
+
+def _resolve_binance_close_context(
+    *,
+    positions: list,
+    symbol: str,
+    requested_qty: float | None = None,
+    account_id: str = "default",
+    market: str = "FUTURES",
+) -> dict:
+    symbol_norm = str(symbol or "").upper().strip()
+    account_id_norm = str(account_id or "default").strip()
+    market_norm = str(market or "FUTURES").upper().strip()
+
+    if market_norm != "FUTURES":
+        return {
+            "success": False,
+            "classification": "INVALID_MARKET",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "error": "binance_close_context_supports_futures_only",
+            "mutations": [],
+        }
+
+    matches = [
+        p for p in positions
+        if str(p.get("symbol") or "").upper().strip() == symbol_norm
+    ]
+
+    if len(matches) == 0:
+        return {
+            "success": False,
+            "classification": "NO_OPEN_POSITION",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position_detected": False,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if len(matches) > 1:
+        return {
+            "success": False,
+            "classification": "HEDGE_MODE_UNSUPPORTED",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "positions": matches,
+            "error": "multiple_position_legs_or_ambiguous_position_for_symbol",
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    position = matches[0]
+    side = str(position.get("side") or "").upper().strip()
+    qty = position.get("qty")
+
+    try:
+        qty_value = float(qty)
+    except Exception:
+        return {
+            "success": False,
+            "classification": "INVALID_POSITION_QTY",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if qty_value <= 0:
+        return {
+            "success": False,
+            "classification": "INVALID_POSITION_QTY",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if requested_qty is not None and float(requested_qty) != qty_value:
+        return {
+            "success": False,
+            "classification": "POSITION_QTY_MISMATCH",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "requested_qty": str(requested_qty),
+            "position_qty": str(qty_value),
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    if side == "BUY":
+        close_side = "SELL"
+        position_direction = "LONG"
+    elif side == "SELL":
+        close_side = "BUY"
+        position_direction = "SHORT"
+    else:
+        return {
+            "success": False,
+            "classification": "INVALID_POSITION_SIDE",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "position": position,
+            "protected": "UNKNOWN",
+            "mutations": [],
+        }
+
+    return {
+        "success": True,
+        "classification": "READY_TO_CLOSE",
+        "symbol": symbol_norm,
+        "account_id": account_id_norm,
+        "market": market_norm,
+        "position_detected": True,
+        "position": position,
+        "position_direction": position_direction,
+        "close_side": close_side,
+        "qty": str(qty_value),
+        "reduce_only": True,
+        "protected": "UNKNOWN",
+        "mutations": [],
+    }
+
+
 @router.get("/binance/reconcile-position")
 def reconcile_binance_position(
     symbol: str = Query(...),
@@ -579,15 +713,65 @@ def binance_execute_close(
             "mutations": [],
         }
     else:
-        response_payload = {
-            "success": False,
-            "classification": "NOT_IMPLEMENTED_SAFE_STOP",
-            "symbol": payload.symbol,
-            "account_id": payload.account_id,
-            "market": payload.market,
-            "error": "execute_close_send_order_not_enabled_yet",
-            "mutations": [],
-        }
+        creds = get_decrypted_exchange_secret(
+            db=db,
+            user_id=str(current_user.id),
+            exchange="BINANCE",
+        )
+        if not creds:
+            response_payload = {
+                "success": False,
+                "classification": "MISSING_CREDENTIALS",
+                "symbol": payload.symbol,
+                "account_id": payload.account_id,
+                "market": payload.market,
+                "error": "Missing credentials for BINANCE",
+                "mutations": [],
+            }
+        else:
+            try:
+                positions = get_binance_positions(
+                    api_key=creds["api_key"],
+                    api_secret=creds["api_secret"],
+                )
+                close_context = _resolve_binance_close_context(
+                    positions=positions,
+                    symbol=payload.symbol,
+                    requested_qty=payload.qty,
+                    account_id=payload.account_id,
+                    market=payload.market,
+                )
+            except Exception as exc:
+                close_context = {
+                    "success": False,
+                    "classification": "POSITION_UNKNOWN",
+                    "symbol": payload.symbol,
+                    "account_id": payload.account_id,
+                    "market": payload.market,
+                    "error": str(exc),
+                    "mutations": [],
+                }
+
+            if not close_context.get("success"):
+                response_payload = close_context
+            else:
+                client_order_id = f"csclose_{str(idempotency_key).replace('-', '')[:28]}"
+                response_payload = {
+                    "success": False,
+                    "classification": "EXECUTION_PIPELINE_READY",
+                    "symbol": payload.symbol,
+                    "account_id": payload.account_id,
+                    "market": payload.market,
+                    "position": close_context.get("position"),
+                    "position_direction": close_context.get("position_direction"),
+                    "close_side": close_context.get("close_side"),
+                    "qty": close_context.get("qty"),
+                    "order_type": "MARKET",
+                    "reduce_only": True,
+                    "client_order_id": client_order_id,
+                    "error": "execute_close_send_order_not_enabled_yet",
+                    "mutations": [],
+                }
 
     log_audit_event(
         db,
