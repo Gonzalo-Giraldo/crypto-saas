@@ -347,3 +347,106 @@ def test_close_preflight_no_open_position(monkeypatch):
     assert result["success"] is False
     assert result["classification"] == "NO_OPEN_POSITION"
     assert result["mutations"] == []
+
+def test_execute_close_requires_idempotency_key():
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        module.binance_execute_close(
+            payload=module.BinanceExecuteCloseRequest(
+                symbol="BTCUSDT",
+                qty=0.001,
+                account_id="default",
+                market="FUTURES",
+                confirm=False,
+                execution_authorized=False,
+            ),
+            db="fake-db",
+            current_user=SimpleNamespace(id="admin-1", role="admin"),
+            idempotency_key=None,
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "idempotency_key_required_for_close_execution"
+
+
+def test_execute_close_is_blocked_not_implemented_and_idempotent(monkeypatch):
+    calls = {"reserve": 0, "finalize": 0, "audit": 0, "commit": 0}
+
+    class _Db:
+        def commit(self):
+            calls["commit"] += 1
+
+    def fake_reserve(*args, **kwargs):
+        assert len(args) == 1
+        calls["reserve"] += 1
+        assert kwargs["endpoint"] == "/ops/admin/binance/execute-close"
+        assert kwargs["idempotency_key"] == "close-key-1"
+        return None
+
+    def fake_finalize(*args, **kwargs):
+        assert len(args) == 1
+        calls["finalize"] += 1
+        assert kwargs["endpoint"] == "/ops/admin/binance/execute-close"
+        assert kwargs["idempotency_key"] == "close-key-1"
+        assert kwargs["response_payload"]["classification"] == "NOT_IMPLEMENTED_SAFE_STOP"
+
+    def fake_audit(*args, **kwargs):
+        calls["audit"] += 1
+        assert kwargs["action"] == "execution.binance.close.blocked_not_implemented"
+
+    monkeypatch.setattr(module, "reserve_idempotent_intent", fake_reserve)
+    monkeypatch.setattr(module, "finalize_idempotent_intent", fake_finalize)
+    monkeypatch.setattr(module, "log_audit_event", fake_audit)
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=False,
+            execution_authorized=False,
+        ),
+        db=_Db(),
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-1",
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "NOT_IMPLEMENTED_SAFE_STOP"
+    assert result["mutations"] == []
+    assert calls == {"reserve": 1, "finalize": 1, "audit": 1, "commit": 1}
+
+
+def test_execute_close_returns_cached_idempotent_response(monkeypatch):
+    cached = {
+        "success": False,
+        "classification": "NOT_IMPLEMENTED_SAFE_STOP",
+        "cached": True,
+        "mutations": [],
+    }
+
+    monkeypatch.setattr(
+        module,
+        "reserve_idempotent_intent",
+        lambda *args, **kwargs: cached,
+    )
+
+
+    result = module.binance_execute_close(
+        payload=module.BinanceExecuteCloseRequest(
+            symbol="BTCUSDT",
+            qty=0.001,
+            account_id="default",
+            market="FUTURES",
+            confirm=False,
+            execution_authorized=False,
+        ),
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+        idempotency_key="close-key-1",
+    )
+
+    assert result == cached

@@ -1,7 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+
+from apps.api.app.services.audit import log_audit_event
+from apps.api.app.services.idempotency import (
+    reserve_idempotent_intent,
+    finalize_idempotent_intent,
+)
+
 
 from apps.api.app.api.deps import require_role
 from apps.api.app.db.session import get_db
@@ -21,6 +32,47 @@ from apps.worker.app.engine.execution_runtime import (
 
 router = APIRouter(prefix="/ops/admin", tags=["ops-admin"])
 
+
+class BinanceExecuteCloseRequest(BaseModel):
+    symbol: str
+    qty: float = Field(gt=0)
+    account_id: str = "default"
+    market: str = "FUTURES"
+    confirm: bool = False
+    execution_authorized: bool = False
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        symbol = str(value or "").upper().strip()
+
+        if not symbol:
+            raise ValueError("symbol_required")
+
+        if not symbol.endswith("USDT"):
+            raise ValueError("binance_symbol_must_end_with_USDT")
+
+        return symbol
+
+    @field_validator("account_id")
+    @classmethod
+    def validate_account_id(cls, value: str) -> str:
+        account_id = str(value or "").strip()
+
+        if not account_id:
+            raise ValueError("account_id_required")
+
+        return account_id
+
+    @field_validator("market")
+    @classmethod
+    def validate_market(cls, value: str) -> str:
+        market = str(value or "").upper().strip()
+
+        if market != "FUTURES":
+            raise ValueError("binance_execute_close_supports_futures_only")
+
+        return market
 
 @router.get("/binance/reconcile-order")
 def reconcile_binance_order(
@@ -483,3 +535,56 @@ def binance_close_preflight(
         "protected": "UNKNOWN",
         "mutations": [],
     }
+
+@router.post("/binance/execute-close")
+def binance_execute_close(
+    payload: BinanceExecuteCloseRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+    idempotency_key: Optional[str] = Header(default=None, alias="X-Idempotency-Key"),
+):
+    req_payload = payload.model_dump()
+
+    if not str(idempotency_key or "").strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="idempotency_key_required_for_close_execution")
+
+    cached = reserve_idempotent_intent(
+        db,
+        user_id=str(current_user.id),
+        endpoint="/ops/admin/binance/execute-close",
+        idempotency_key=str(idempotency_key),
+        request_payload=req_payload,
+    )
+    if cached is not None:
+        return cached
+
+    response_payload = {
+        "success": False,
+        "classification": "NOT_IMPLEMENTED_SAFE_STOP",
+        "symbol": payload.symbol,
+        "account_id": payload.account_id,
+        "market": payload.market,
+        "error": "execute_close_send_order_not_enabled_yet",
+        "mutations": [],
+    }
+
+    log_audit_event(
+        db,
+        action="execution.binance.close.blocked_not_implemented",
+        user_id=str(current_user.id),
+        entity_type="execution",
+        details=response_payload,
+    )
+    db.commit()
+
+    finalize_idempotent_intent(
+        db,
+        user_id=str(current_user.id),
+        endpoint="/ops/admin/binance/execute-close",
+        idempotency_key=str(idempotency_key),
+        request_payload=req_payload,
+        response_payload=response_payload,
+        status_code=200,
+    )
+
+    return response_payload
