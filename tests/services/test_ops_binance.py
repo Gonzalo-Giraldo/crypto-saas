@@ -390,11 +390,11 @@ def test_execute_close_is_blocked_not_implemented_and_idempotent(monkeypatch):
         calls["finalize"] += 1
         assert kwargs["endpoint"] == "/ops/admin/binance/execute-close"
         assert kwargs["idempotency_key"] == "close-key-1"
-        assert kwargs["response_payload"]["classification"] == "NOT_IMPLEMENTED_SAFE_STOP"
+        assert kwargs["response_payload"]["classification"] == "EXPLICIT_CONFIRMATION_REQUIRED"
 
     def fake_audit(*args, **kwargs):
         calls["audit"] += 1
-        assert kwargs["action"] == "execution.binance.close.blocked_not_implemented"
+        assert kwargs["action"] == "execution.binance.close.blocked"
 
     monkeypatch.setattr(module, "reserve_idempotent_intent", fake_reserve)
     monkeypatch.setattr(module, "finalize_idempotent_intent", fake_finalize)
@@ -415,7 +415,7 @@ def test_execute_close_is_blocked_not_implemented_and_idempotent(monkeypatch):
     )
 
     assert result["success"] is False
-    assert result["classification"] == "NOT_IMPLEMENTED_SAFE_STOP"
+    assert result["classification"] == "EXPLICIT_CONFIRMATION_REQUIRED"
     assert result["mutations"] == []
     assert calls == {"reserve": 1, "finalize": 1, "audit": 1, "commit": 1}
 

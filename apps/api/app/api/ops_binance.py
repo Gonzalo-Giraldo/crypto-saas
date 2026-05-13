@@ -558,19 +558,40 @@ def binance_execute_close(
     if cached is not None:
         return cached
 
-    response_payload = {
-        "success": False,
-        "classification": "NOT_IMPLEMENTED_SAFE_STOP",
-        "symbol": payload.symbol,
-        "account_id": payload.account_id,
-        "market": payload.market,
-        "error": "execute_close_send_order_not_enabled_yet",
-        "mutations": [],
-    }
+    if not payload.confirm or not payload.execution_authorized:
+        response_payload = {
+            "success": False,
+            "classification": "EXPLICIT_CONFIRMATION_REQUIRED",
+            "symbol": payload.symbol,
+            "account_id": payload.account_id,
+            "market": payload.market,
+            "error": "confirm_true_and_execution_authorized_true_required",
+            "mutations": [],
+        }
+    elif not get_trading_enabled(db):
+        response_payload = {
+            "success": False,
+            "classification": "TRADING_DISABLED",
+            "symbol": payload.symbol,
+            "account_id": payload.account_id,
+            "market": payload.market,
+            "error": "trading_enabled_required_for_close_execution",
+            "mutations": [],
+        }
+    else:
+        response_payload = {
+            "success": False,
+            "classification": "NOT_IMPLEMENTED_SAFE_STOP",
+            "symbol": payload.symbol,
+            "account_id": payload.account_id,
+            "market": payload.market,
+            "error": "execute_close_send_order_not_enabled_yet",
+            "mutations": [],
+        }
 
     log_audit_event(
         db,
-        action="execution.binance.close.blocked_not_implemented",
+        action="execution.binance.close.blocked",
         user_id=str(current_user.id),
         entity_type="execution",
         details=response_payload,
