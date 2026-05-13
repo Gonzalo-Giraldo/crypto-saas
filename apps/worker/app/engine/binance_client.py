@@ -132,21 +132,28 @@ def send_order_real(
     order_type: str = "MARKET",
     client_order_id: str | None = None,
     market: str = "FUTURES",
+    reduce_only: bool | None = None,
 ):
     market_norm = _normalize_market(market)
+
+    payload = {
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "symbol": symbol.upper(),
+        "side": side.upper(),
+        "type": order_type.upper(),
+        "qty": quantity,
+        "client_order_id": client_order_id,
+        "market": market_norm,
+    }
+
+    if reduce_only is not None:
+        payload["reduceOnly"] = reduce_only
 
     if _gateway_enabled():
         body = _post_gateway(
             "/binance/order",
-            {
-                "api_key": api_key,
-                "api_secret": api_secret,
-                "symbol": symbol.upper(),
-                "side": side.upper(),
-                "qty": quantity,
-                "client_order_id": client_order_id,
-                "market": market_norm,
-            },
+            payload,
             timeout=max(3, int(settings.BINANCE_GATEWAY_TIMEOUT_SECONDS)),
         )
         if not isinstance(body, dict):
@@ -172,7 +179,8 @@ def send_order_real(
 
     if client_order_id:
         params["newClientOrderId"] = client_order_id[:36]
-
+    if reduce_only is not None:
+        params["reduceOnly"] = "true" if reduce_only else "false"
     query = urlencode(params)
     signature = hmac.new(
         api_secret.encode("utf-8"),

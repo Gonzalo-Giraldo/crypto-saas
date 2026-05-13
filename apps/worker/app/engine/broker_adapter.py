@@ -17,6 +17,7 @@ class BrokerAdapter(ABC):
         order_type: str = "MARKET",
         client_order_id: str | None = None,
         market: str | None = None,
+        reduce_only: bool | None = None,
     ) -> dict[str, Any]:
         """Send an order to a broker and return a broker-specific response payload."""
 

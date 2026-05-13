@@ -20,6 +20,7 @@ class BinanceBrokerAdapter(BrokerAdapter):
         order_type: str = "MARKET",
         client_order_id: str | None = None,
         market: str | None = None,
+        reduce_only: bool | None = None,
     ) -> dict[str, Any]:
         return send_order_real(
             api_key=self._api_key,
@@ -29,6 +30,7 @@ class BinanceBrokerAdapter(BrokerAdapter):
             quantity=quantity,
             order_type=order_type,
             client_order_id=client_order_id,
+            reduce_only=reduce_only,
             market=(market or "FUTURES"),
         )
 
