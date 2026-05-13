@@ -792,13 +792,53 @@ def binance_execute_close(
                         error=reconciliation_attempt.get("error"),
                     )
 
+                    final_classification = reconciliation_classification
+                    final_success = False
+
+                    if reconciliation_classification == "EXECUTED":
+                        try:
+                            post_close_positions = get_binance_positions(
+                                api_key=creds["api_key"],
+                                api_secret=creds["api_secret"],
+                            )
+
+                            remaining_context = _resolve_binance_close_context(
+                                positions=post_close_positions,
+                                symbol=payload.symbol,
+                                requested_qty=None,
+                                account_id=payload.account_id,
+                                market=payload.market,
+                            )
+
+                            if remaining_context.get("classification") == "NO_OPEN_POSITION":
+                                final_classification = "CLOSE_SUCCESS"
+                                final_success = True
+
+                            else:
+                                final_classification = "CLOSE_POSITION_REMAINS"
+
+                                row = set_trading_enabled(db, enabled=False)
+
+                                log_audit_event(
+                                    db,
+                                    action="execution.binance.close.position_remains_freeze",
+                                    user_id=str(current_user.id),
+                                    entity_type="runtime_setting",
+                                    entity_id=str(row.id),
+                                    details={
+                                        "reason": "position_remains_after_close_execution",
+                                        "symbol": payload.symbol,
+                                        "client_order_id": client_order_id,
+                                        "market": payload.market,
+                                    },
+                                )
+
+                        except Exception:
+                            final_classification = "CLOSE_RECONCILIATION_UNKNOWN"
+
                     response_payload = {
-                        "success": False,
-                        "classification": (
-                            "EXECUTION_SUBMITTED"
-                            if reconciliation_classification == "EXECUTED"
-                            else reconciliation_classification
-                        ),
+                        "success": final_success,
+                        "classification": final_classification,
                         "symbol": payload.symbol,
                         "account_id": payload.account_id,
                         "market": payload.market,
