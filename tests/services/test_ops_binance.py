@@ -126,3 +126,61 @@ def test_reconcile_binance_intent_uses_consumption_and_classifies(monkeypatch):
     assert result["execution_ref_type"] == "client_order_id"
     assert result["mutations"] == []
     assert calls == {"creds": 1, "reconcile": 1}
+
+def test_reconcile_binance_intent_uses_order_id_helper_for_order_id_refs(monkeypatch):
+    calls = {"creds": 0, "client_reconcile": 0, "order_id_reconcile": 0}
+
+    intent = SimpleNamespace(
+        intent_id="intent-order-id",
+        user_id="user-1",
+        broker="BINANCE",
+        account_id="default",
+        symbol="BTCUSDT",
+        lifecycle_status="EXECUTED",
+    )
+
+    class _Store:
+        def get_consumption_record(self, **kwargs):
+            return {
+                "found": True,
+                "intent_key": "intent-order-id",
+                "broker_execution_id": "1010471699629",
+                "broker_execution_id_type": "orderId",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+            }
+
+    def fake_get_decrypted_exchange_secret(**kwargs):
+        calls["creds"] += 1
+        return {"api_key": "k", "api_secret": "s"}
+
+    def fake_client_reconcile(**kwargs):
+        calls["client_reconcile"] += 1
+        raise AssertionError("client_order_id reconciliation must not be used for orderId refs")
+
+    def fake_order_id_reconcile(**kwargs):
+        calls["order_id_reconcile"] += 1
+        assert kwargs["order_id"] == "1010471699629"
+        assert kwargs["symbol"] == "BTCUSDT"
+        assert kwargs["market"] == "FUTURES"
+        return {"status": "FILLED", "orderId": 1010471699629}
+
+    monkeypatch.setattr(module, "get_intent", lambda db, intent_id: intent)
+    monkeypatch.setattr(module, "IntentConsumptionStore", lambda: _Store())
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", fake_get_decrypted_exchange_secret)
+    monkeypatch.setattr(module, "_reconcile_binance_test_order_best_effort", fake_client_reconcile)
+    monkeypatch.setattr(module, "query_order_status_by_order_id", fake_order_id_reconcile)
+
+    result = module.reconcile_binance_intent(
+        intent_id="intent-order-id",
+        account_id="default",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is True
+    assert result["classification"] == "EXECUTED"
+    assert result["execution_ref"] == "1010471699629"
+    assert result["execution_ref_type"] == "orderId"
+    assert result["mutations"] == []
+    assert calls == {"creds": 1, "client_reconcile": 0, "order_id_reconcile": 1}

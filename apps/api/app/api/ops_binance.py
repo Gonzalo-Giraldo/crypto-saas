@@ -9,6 +9,8 @@ from apps.api.app.models.user import User
 from apps.api.app.services.exchange_secrets import get_decrypted_exchange_secret
 from apps.api.app.services.intent_service import get_intent
 from apps.worker.app.engine.minimal_execution_runtime import IntentConsumptionStore
+
+from apps.worker.app.engine.binance_client import query_order_status_by_order_id
 from apps.worker.app.engine.execution_runtime import (
     _classify_binance_reconciliation,
     _reconcile_binance_test_order_best_effort,
@@ -57,7 +59,6 @@ def reconcile_binance_order(
             "account_id": str(account_id or "default"),
             "market": market_norm,
         }
-
     reconciliation = _reconcile_binance_test_order_best_effort(
         api_key=creds["api_key"],
         api_secret=creds["api_secret"],
@@ -65,6 +66,7 @@ def reconcile_binance_order(
         client_order_id=client_order_id_norm,
         market=market_norm,
     )
+
     classification = _classify_binance_reconciliation(
         result=reconciliation.get("result"),
         error=reconciliation.get("error"),
@@ -177,13 +179,46 @@ def reconcile_binance_intent(
             "mutations": [],
         }
 
-    reconciliation = _reconcile_binance_test_order_best_effort(
-        api_key=creds["api_key"],
-        api_secret=creds["api_secret"],
-        symbol=symbol,
-        client_order_id=str(execution_ref),
-        market=market,
-    )
+    execution_ref_type = str(record.get("broker_execution_id_type") or "").strip()
+
+    if execution_ref_type == "orderId":
+        try:
+            reconciliation = {
+                "result": query_order_status_by_order_id(
+                    api_key=creds["api_key"],
+                    api_secret=creds["api_secret"],
+                    symbol=symbol,
+                    order_id=str(execution_ref),
+                    market=market,
+                ),
+                "error": None,
+            }
+        except Exception as exc:
+            reconciliation = {"result": None, "error": str(exc)}
+    elif execution_ref_type in {"client_order_id", "clientOrderId", "origClientOrderId"}:
+        reconciliation = _reconcile_binance_test_order_best_effort(
+            api_key=creds["api_key"],
+            api_secret=creds["api_secret"],
+            symbol=symbol,
+            client_order_id=str(execution_ref),
+            market=market,
+        )
+    else:
+        return {
+            "success": False,
+            "classification": "INVALID_EXECUTION_REF_TYPE",
+            "intent_id": str(intent.intent_id),
+            "account_id": account_id_norm,
+            "symbol": symbol,
+            "market": market,
+            "lifecycle_status": str(intent.lifecycle_status),
+            "execution_ref": str(execution_ref),
+            "execution_ref_type": execution_ref_type,
+            "consumption": record,
+            "error": "unsupported_binance_execution_ref_type",
+            "mutations": [],
+        }
+
     classification = _classify_binance_reconciliation(
         result=reconciliation.get("result"),
         error=reconciliation.get("error"),
@@ -198,7 +233,7 @@ def reconcile_binance_intent(
         "market": market,
         "lifecycle_status": str(intent.lifecycle_status),
         "execution_ref": str(execution_ref),
-        "execution_ref_type": record.get("broker_execution_id_type"),
+        "execution_ref_type": execution_ref_type,
         "consumption": record,
         "result": reconciliation.get("result"),
         "error": reconciliation.get("error"),

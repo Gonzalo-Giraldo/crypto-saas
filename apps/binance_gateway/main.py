@@ -58,12 +58,12 @@ class BinanceAccountStatusIn(BaseModel):
     api_key: str
     api_secret: str
 
-
 class BinanceOrderStatusIn(BaseModel):
     api_key: str
     api_secret: str
     symbol: str
-    orig_client_order_id: str
+    orig_client_order_id: str | None = None
+    order_id: int | str | None = None
     market: str | None = None
 
 class BinanceMyTradesIn(BaseModel):
@@ -586,9 +586,23 @@ def binance_order_status(payload: BinanceOrderStatusIn, x_internal_token: str = 
 
     params = {
         "symbol": payload.symbol.upper(),
-        "origClientOrderId": payload.orig_client_order_id,
         "timestamp": int(time.time() * 1000),
     }
+
+    orig_client_order_id = str(payload.orig_client_order_id or "").strip()
+    order_id = str(payload.order_id or "").strip()
+
+    if bool(orig_client_order_id) == bool(order_id):
+        raise HTTPException(
+            status_code=400,
+            detail="exactly_one_order_identifier_required",
+        )
+
+    if order_id:
+        params["orderId"] = order_id
+    else:
+        params["origClientOrderId"] = orig_client_order_id
+
     query = urlencode(params)
     signature = hmac.new(
         payload.api_secret.encode("utf-8"),
