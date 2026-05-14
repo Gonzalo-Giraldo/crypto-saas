@@ -840,6 +840,20 @@ def execute_binance_real_order_for_user(
                                         if not sl_client_algo_id or not tp_client_algo_id:
                                             raise ValueError("missing_exit_client_algo_id")
 
+                                        from apps.worker.app.engine.binance_exit_executor import (
+                                            create_exit_orders,
+                                        )
+
+                                        exit_creation_result = create_exit_orders(
+                                            bracket_orders=bracket_orders,
+                                        )
+
+                                        if exit_creation_result.get("error"):
+                                            raise ValueError(
+                                                f"exit_order_creation_failed:"
+                                                f"{exit_creation_result.get('error')}"
+                                            )
+
                                         persist_result = create_exit_protection(
                                             db_protection,
                                             exit_key=guard_result.exit_key,
