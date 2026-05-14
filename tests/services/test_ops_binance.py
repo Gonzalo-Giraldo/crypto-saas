@@ -1050,3 +1050,112 @@ def test_execute_close_filled_but_position_remains_is_not_success(monkeypatch):
     assert result["success"] is False
     assert calls["positions"] == 2
     assert calls["freeze"] == 1
+
+def test_reconcile_protection_rejects_non_futures_market():
+    result = module.reconcile_binance_protection(
+        symbol="BTCUSDT",
+        sl_client_algo_id="sl-1",
+        tp_client_algo_id="tp-1",
+        account_id="default",
+        market="SPOT",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "INVALID_MARKET"
+    assert result["mutations"] == []
+
+
+def test_reconcile_protection_requires_at_least_one_identifier():
+    result = module.reconcile_binance_protection(
+        symbol="BTCUSDT",
+        sl_client_algo_id=None,
+        tp_client_algo_id=None,
+        account_id="default",
+        market="FUTURES",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "INVALID_INPUT"
+    assert result["mutations"] == []
+
+
+def test_reconcile_protection_classifies_protected(monkeypatch):
+    calls = {"creds": 0, "shadow": 0}
+
+    def fake_get_decrypted_exchange_secret(**kwargs):
+        calls["creds"] += 1
+        return {"api_key": "k", "api_secret": "s"}
+
+    def fake_shadow_view(**kwargs):
+        calls["shadow"] += 1
+
+        return {
+            "shadow_mode": True,
+            "sl_status_fetch": {"status": "OK"},
+            "tp_status_fetch": {"status": "OK"},
+            "evidence_view": {
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+            },
+            "authority_granted": False,
+            "runtime_action_allowed": False,
+        }
+
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", fake_get_decrypted_exchange_secret)
+    monkeypatch.setattr(module, "build_exit_protection_shadow_view", fake_shadow_view)
+
+    result = module.reconcile_binance_protection(
+        symbol="BTCUSDT",
+        sl_client_algo_id="sl-1",
+        tp_client_algo_id="tp-1",
+        account_id="default",
+        market="FUTURES",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is True
+    assert result["classification"] == "PROTECTED"
+    assert result["protection_active_verifiable"] is True
+    assert result["mutations"] == []
+    assert calls == {"creds": 1, "shadow": 1}
+
+
+def test_reconcile_protection_returns_unknown_on_timeout(monkeypatch):
+    def fake_get_decrypted_exchange_secret(**kwargs):
+        return {"api_key": "k", "api_secret": "s"}
+
+    def fake_shadow_view(**kwargs):
+        return {
+            "shadow_mode": True,
+            "sl_status_fetch": {"status": "TIMEOUT"},
+            "tp_status_fetch": {"status": "OK"},
+            "evidence_view": {
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+            },
+            "authority_granted": False,
+            "runtime_action_allowed": False,
+        }
+
+    monkeypatch.setattr(module, "get_decrypted_exchange_secret", fake_get_decrypted_exchange_secret)
+    monkeypatch.setattr(module, "build_exit_protection_shadow_view", fake_shadow_view)
+
+    result = module.reconcile_binance_protection(
+        symbol="BTCUSDT",
+        sl_client_algo_id="sl-1",
+        tp_client_algo_id="tp-1",
+        account_id="default",
+        market="FUTURES",
+        db="fake-db",
+        current_user=SimpleNamespace(id="admin-1", role="admin"),
+    )
+
+    assert result["success"] is False
+    assert result["classification"] == "PROTECTION_UNKNOWN"
+    assert result["protection_unknown"] is True
+    assert result["mutations"] == []

@@ -24,6 +24,13 @@ from apps.worker.app.engine.broker_positions import get_binance_positions
 from apps.api.app.services.trading_controls import get_trading_enabled
 
 from apps.worker.app.engine.binance_client import query_order_status_by_order_id
+from apps.worker.app.engine.binance_exit_protection_shadow_view import (
+    build_exit_protection_shadow_view,
+)
+
+from apps.worker.app.engine.binance_protection_reconciliation import (
+    reconcile_exit_protection_state,
+)
 from apps.worker.app.engine.execution_runtime import (
     _classify_binance_reconciliation,
     _reconcile_binance_test_order_best_effort,
@@ -298,6 +305,109 @@ def reconcile_binance_intent(
     }
 
 
+
+@router.get("/binance/reconcile-protection")
+def reconcile_binance_protection(
+    symbol: str = Query(...),
+    sl_client_algo_id: str | None = Query(default=None),
+    tp_client_algo_id: str | None = Query(default=None),
+    account_id: str = Query("default"),
+    market: str = Query("FUTURES"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    symbol_norm = str(symbol or "").upper().strip()
+    market_norm = str(market or "FUTURES").upper().strip()
+    account_id_norm = str(account_id or "default").strip()
+
+    sl_client_algo_id_norm = (
+        str(sl_client_algo_id).strip()
+        if sl_client_algo_id is not None
+        else None
+    )
+
+    if sl_client_algo_id_norm == "":
+        sl_client_algo_id_norm = None
+
+    tp_client_algo_id_norm = (
+        str(tp_client_algo_id).strip()
+        if tp_client_algo_id is not None
+        else None
+    )
+
+    if tp_client_algo_id_norm == "":
+        tp_client_algo_id_norm = None
+
+    if market_norm != "FUTURES":
+        return {
+            "success": False,
+            "classification": "INVALID_MARKET",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "mutations": [],
+        }
+
+    if not sl_client_algo_id_norm and not tp_client_algo_id_norm:
+        return {
+            "success": False,
+            "classification": "INVALID_INPUT",
+            "error": "at_least_one_protection_identifier_required",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "mutations": [],
+        }
+
+    creds = get_decrypted_exchange_secret(
+        db=db,
+        user_id=str(current_user.id),
+        exchange="BINANCE",
+    )
+
+    if not creds:
+        return {
+            "success": False,
+            "classification": "MISSING_CREDENTIALS",
+            "symbol": symbol_norm,
+            "account_id": account_id_norm,
+            "market": market_norm,
+            "mutations": [],
+        }
+
+    shadow_view = build_exit_protection_shadow_view(
+        api_key=creds["api_key"],
+        api_secret=creds["api_secret"],
+        symbol=symbol_norm,
+        sl_client_algo_id=sl_client_algo_id_norm,
+        tp_client_algo_id=tp_client_algo_id_norm,
+    )
+
+    evidence_view = shadow_view.get("evidence_view") or {}
+
+    reconciliation = reconcile_exit_protection_state(
+        sl_classification=evidence_view.get("sl_classification"),
+        tp_classification=evidence_view.get("tp_classification"),
+        sl_fetch_status=(shadow_view.get("sl_status_fetch") or {}).get("status"),
+        tp_fetch_status=(shadow_view.get("tp_status_fetch") or {}).get("status"),
+    )
+
+    protection_state = reconciliation["protection_state"]
+
+    return {
+        "success": protection_state != "PROTECTION_UNKNOWN",
+        "classification": protection_state,
+        "symbol": symbol_norm,
+        "account_id": account_id_norm,
+        "market": market_norm,
+        "sl_client_algo_id": sl_client_algo_id_norm,
+        "tp_client_algo_id": tp_client_algo_id_norm,
+        **reconciliation,
+        "shadow_mode": shadow_view.get("shadow_mode"),
+        "authority_granted": shadow_view.get("authority_granted"),
+        "runtime_action_allowed": shadow_view.get("runtime_action_allowed"),
+        "mutations": [],
+    }
 
 def _resolve_binance_close_context(
     *,

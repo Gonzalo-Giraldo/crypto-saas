@@ -40,8 +40,8 @@ def build_exit_protection_shadow_view(
     )
 
     evidence_view = build_exit_protection_evidence_view(
-        sl_payload=sl_status_fetch.get("data"),
-        tp_payload=tp_status_fetch.get("data"),
+        sl_payload=sl_status_fetch.get("response") or sl_status_fetch.get("data"),
+        tp_payload=tp_status_fetch.get("response") or tp_status_fetch.get("data"),
     )
 
     return {
