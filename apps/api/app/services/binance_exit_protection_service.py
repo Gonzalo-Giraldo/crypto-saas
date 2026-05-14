@@ -96,3 +96,68 @@ def create_exit_protection(
     except IntegrityError:
         db.rollback()
         return {"status": "duplicate", "exit_key": exit_key}
+
+_VALID_LEG_STATUSES = {
+    "PENDING",
+    "SUBMITTED",
+    "FAILED",
+    "CANCELED",
+    "TRIGGERED",
+    "UNKNOWN",
+}
+
+_VALID_PROTECTION_STATUSES = {
+    "UNPROTECTED",
+    "PARTIALLY_PROTECTED",
+    "PROTECTED",
+    "FAILED",
+    "UNKNOWN",
+}
+
+
+def update_exit_protection_reconciliation(
+    db: Session,
+    *,
+    exit_key: str,
+    sl_status: str,
+    tp_status: str,
+    protection_status: str,
+    last_error: str | None = None,
+    increment_attempt_count: bool = False,
+):
+    if not exit_key:
+        raise ValueError("exit_key_required")
+
+    sl = str(sl_status or "").upper().strip()
+    tp = str(tp_status or "").upper().strip()
+    protection = str(protection_status or "").upper().strip()
+
+    if sl not in _VALID_LEG_STATUSES:
+        raise ValueError("invalid_sl_status")
+
+    if tp not in _VALID_LEG_STATUSES:
+        raise ValueError("invalid_tp_status")
+
+    if protection not in _VALID_PROTECTION_STATUSES:
+        raise ValueError("invalid_protection_status")
+
+    obj = (
+        db.query(BinanceExitProtection)
+        .filter(BinanceExitProtection.exit_key == exit_key)
+        .one_or_none()
+    )
+
+    if obj is None:
+        raise ValueError("exit_protection_not_found")
+
+    obj.sl_status = sl
+    obj.tp_status = tp
+    obj.protection_status = protection
+    obj.last_error = last_error
+
+    if increment_attempt_count:
+        obj.attempt_count = int(obj.attempt_count or 0) + 1
+
+    db.commit()
+
+    return {"status": "updated", "exit_key": exit_key}
