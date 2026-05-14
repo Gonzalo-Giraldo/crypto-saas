@@ -443,3 +443,231 @@ def test_runtime_blocks_persist_when_exit_creation_fails(monkeypatch):
     )
 
     assert persist_called["value"] is False
+
+def test_runtime_logs_post_fill_exit_diff_observability(monkeypatch):
+    class _DB:
+
+        def execute(self, *args, **kwargs):
+            class _Result:
+                def fetchone(self):
+                    return (1,)
+
+                def scalar_one_or_none(self):
+                    return None
+
+            return _Result()
+
+        def add(self, obj):
+            return None
+
+        def flush(self):
+            return None
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            return {"accepted": True}
+
+    audit_events = []
+    post_fill_calls = {"count": 0}
+    diff_calls = {"count": 0}
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(
+        runtime,
+        "log_audit_event",
+        lambda db, action, user_id, entity_type, details: audit_events.append(
+            {
+                "action": action,
+                "details": details,
+            }
+        ),
+    )
+
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+
+    import apps.api.app.services.exchange_secrets as exchange_secrets_module
+
+    monkeypatch.setattr(
+        exchange_secrets_module,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+
+    import apps.api.app.services.binance_fill_manual_runner as fill_runner
+    import apps.api.app.services.binance_trades_gateway_client as trades_client
+    import apps.api.app.services.binance_fill_db as fill_db
+
+    monkeypatch.setattr(
+        fill_runner,
+        "run_binance_fill_ingestion_for_intent",
+        lambda **kwargs: {
+            "trades": [{"price": "101000", "qty": "0.001"}],
+            "matched_count": 1,
+            "attempt": 1,
+            "reconciliation": {"status": "MATCHED"},
+        },
+    )
+    monkeypatch.setattr(trades_client, "fetch_binance_trades", lambda **kwargs: [])
+    monkeypatch.setattr(fill_db, "persist_binance_fills_db", lambda **kwargs: None)
+
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {"normalized_qty": requested_qty},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_build_binance_client_order_id",
+        lambda **kwargs: "cid-exit-wire-3",
+    )
+    monkeypatch.setattr(runtime, "_build_binance_broker_adapter", lambda **kwargs: _Adapter())
+
+    class _IntentStore:
+        def attach_execution(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(runtime, "IntentConsumptionStore", lambda: _IntentStore())
+    monkeypatch.setattr(
+        runtime,
+        "query_order_status",
+        lambda **kwargs: {"status": "FILLED", "orderId": "oid-3"},
+    )
+    monkeypatch.setattr(runtime, "mark_intent_executed", lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        runtime,
+        "derive_binance_entry_fill_basis",
+        lambda **kwargs: {
+            "avg_entry_price": "101000",
+            "filled_qty": "0.001",
+            "usable_for_exits": True,
+        },
+    )
+
+    import apps.api.app.services.risk.post_fill_exit_plan as post_fill_plan_module
+    import apps.api.app.services.risk.post_fill_exit_diff as post_fill_diff_module
+
+    class _AuthoritativePlan:
+        stop_loss = 99990.0
+        take_profit = 103020.0
+
+    def _build_post_fill_plan(**kwargs):
+        post_fill_calls["count"] += 1
+        assert kwargs["side"] == "BUY"
+        assert kwargs["avg_entry_price"] == 101000.0
+        assert kwargs["risk_pct"] == 1.0
+        assert kwargs["reward_risk_ratio"] == 2.0
+        return _AuthoritativePlan()
+
+    def _compare_diff(**kwargs):
+        diff_calls["count"] += 1
+        assert kwargs["provisional_stop_loss"] == 99000.0
+        assert kwargs["provisional_take_profit"] == 102000.0
+        assert kwargs["authoritative_stop_loss"] == 99990.0
+        assert kwargs["authoritative_take_profit"] == 103020.0
+
+        class _Diff:
+            sl_diff_abs = 990.0
+            tp_diff_abs = 1020.0
+            sl_diff_pct = 1.0
+            tp_diff_pct = 1.0
+            min_diff_pct = 0.5
+            correction_required = True
+
+        return _Diff()
+
+    monkeypatch.setattr(
+        post_fill_plan_module,
+        "build_post_fill_reward_risk_plan",
+        _build_post_fill_plan,
+    )
+    monkeypatch.setattr(
+        post_fill_diff_module,
+        "compare_post_fill_exit_plan_diff",
+        _compare_diff,
+    )
+
+    import apps.worker.app.engine.binance_exit_plan as exit_plan_module
+
+    monkeypatch.setattr(
+        exit_plan_module,
+        "build_binance_exit_plan",
+        lambda **kwargs: {
+            "available": True,
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "filled_qty": "0.001",
+            "avg_entry_price": "101000",
+            "stop_loss": "99000",
+            "take_profit": "102000",
+            "client_order_id": "cid-exit-wire-3",
+        },
+    )
+
+    class _Guard:
+        allowed = True
+        reason = None
+        exit_side = "SELL"
+        qty = "0.001"
+        exit_key = "exit-key-3"
+
+    import apps.worker.app.engine.binance_exit_guard as exit_guard_module
+
+    monkeypatch.setattr(exit_guard_module, "guard_binance_exit", lambda **kwargs: _Guard())
+
+    class _Bracket:
+        stop_loss_order = {"type": "STOP_MARKET", "clientAlgoId": "sl-3"}
+        take_profit_order = {"type": "TAKE_PROFIT_MARKET", "clientAlgoId": "tp-3"}
+
+    import apps.worker.app.engine.binance_futures_exit_orders as exit_orders_module
+    import apps.worker.app.engine.binance_exit_executor as exit_executor_module
+
+    monkeypatch.setattr(
+        exit_orders_module,
+        "build_binance_futures_bracket_orders",
+        lambda **kwargs: _Bracket(),
+    )
+    monkeypatch.setattr(
+        exit_executor_module,
+        "create_exit_orders",
+        lambda **kwargs: {"sl": {"clientAlgoId": "sl-3"}, "tp": {"clientAlgoId": "tp-3"}},
+    )
+
+    runtime.execute_binance_real_order_for_user(
+        user_id="user-1",
+        symbol="BTCUSDT",
+        side="BUY",
+        qty=0.001,
+        intent_key="intent-exit-wire-3",
+        account_id="default",
+        market="FUTURES",
+        risk_decision={
+            "stop_loss": 99000.0,
+            "take_profit": 102000.0,
+            "expected_qty": 0.001,
+            "risk_pct": 1.0,
+            "reward_risk_ratio": 2.0,
+        },
+    )
+
+    assert post_fill_calls["count"] == 1
+    assert diff_calls["count"] == 1
+    assert any(
+        event["action"] == "execution.binance.post_fill_exit_diff"
+        and event["details"]["correction_required"] is True
+        for event in audit_events
+    )

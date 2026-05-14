@@ -560,6 +560,8 @@ def _extract_binance_risk_exit_inputs(risk_decision):
         "stop_loss": _get_value("stop_loss"),
         "take_profit": _get_value("take_profit"),
         "expected_qty": _get_value("expected_qty"),
+        "risk_pct": _get_value("risk_pct"),
+        "reward_risk_ratio": _get_value("reward_risk_ratio"),
     }
 
     missing = sorted(key for key, value in out.items() if value is None)
@@ -768,6 +770,90 @@ def execute_binance_real_order_for_user(
                                 trades=(fill_ingestion_result.get("trades") or []),
                                 reconciliation_status=((fill_ingestion_result.get("reconciliation") or {}).get("status")),
                             )
+
+                            try:
+                                from apps.api.app.services.risk.post_fill_exit_timing import (
+                                    should_build_authoritative_post_fill_plan,
+                                )
+                                from apps.api.app.services.risk.post_fill_exit_plan import (
+                                    build_post_fill_reward_risk_plan,
+                                )
+                                from apps.api.app.services.risk.post_fill_exit_diff import (
+                                    compare_post_fill_exit_plan_diff,
+                                )
+
+                                reconciliation_status = (
+                                    (fill_ingestion_result.get("reconciliation") or {}).get("status")
+                                )
+
+                                should_build_authoritative = (
+                                    should_build_authoritative_post_fill_plan(
+                                        reconciliation_status=reconciliation_status,
+                                    )
+                                )
+
+                                if (
+                                    should_build_authoritative is True
+                                    and risk_inputs.get("available") is True
+                                ):
+                                    authoritative_plan = build_post_fill_reward_risk_plan(
+                                        side=side,
+                                        avg_entry_price=float(fill_basis["avg_entry_price"]),
+                                        risk_pct=float(risk_inputs["risk_pct"]),
+                                        reward_risk_ratio=float(
+                                            risk_inputs["reward_risk_ratio"]
+                                        ),
+                                    )
+
+                                    diff_result = compare_post_fill_exit_plan_diff(
+                                        provisional_stop_loss=float(
+                                            risk_inputs["stop_loss"]
+                                        ),
+                                        provisional_take_profit=float(
+                                            risk_inputs["take_profit"]
+                                        ),
+                                        authoritative_stop_loss=float(
+                                            authoritative_plan.stop_loss
+                                        ),
+                                        authoritative_take_profit=float(
+                                            authoritative_plan.take_profit
+                                        ),
+                                    )
+
+                                    log_audit_event(
+                                        db_ingest,
+                                        action="execution.binance.post_fill_exit_diff",
+                                        user_id=user_id,
+                                        entity_type="execution",
+                                        details={
+                                            "intent_key": str(intent_key),
+                                            "broker_order_id": str(broker_order_id),
+                                            "symbol": symbol,
+                                            "market": market,
+                                            "correction_required": bool(
+                                                diff_result.correction_required
+                                            ),
+                                            "sl_diff_pct": float(
+                                                diff_result.sl_diff_pct
+                                            ),
+                                            "tp_diff_pct": float(
+                                                diff_result.tp_diff_pct
+                                            ),
+                                        },
+                                    )
+
+                            except Exception as post_fill_observability_exc:
+                                log_audit_event(
+                                    db_ingest,
+                                    action="execution.binance.post_fill_exit_diff.skipped",
+                                    user_id=user_id,
+                                    entity_type="execution",
+                                    details={
+                                        "intent_key": str(intent_key),
+                                        "broker_order_id": str(broker_order_id),
+                                        "reason": str(post_fill_observability_exc),
+                                    },
+                                )
 
                             log_audit_event(
                                 db_ingest,
