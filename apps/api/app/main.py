@@ -35,6 +35,7 @@ import apps.api.app.models.learning_outcome
 import apps.api.app.models.learning_rollup_hourly
 
 import threading
+import os
 import time
 
 from apps.api.app.api.users import router as users_router
@@ -177,6 +178,23 @@ app.include_router(trading_control_router)
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+
+@app.get("/ops/admin/version")
+def ops_admin_version():
+    db = SessionLocal()
+    try:
+        from apps.api.app.services.trading_controls import get_trading_enabled
+
+        return {
+            "service": "api",
+            "commit": str(os.getenv("RENDER_GIT_COMMIT") or "unknown"),
+            "branch": str(os.getenv("RENDER_GIT_BRANCH") or "unknown"),
+            "trading_enabled": bool(get_trading_enabled(db)),
+            "mutations": [],
+        }
+    finally:
+        db.close()
 
 @app.get("/")
 def root():
