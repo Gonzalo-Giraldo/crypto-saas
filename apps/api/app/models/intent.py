@@ -7,6 +7,7 @@ from sqlalchemy import (
     Index,
     func,
 )
+from sqlalchemy import JSON
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 import uuid
 from apps.api.app.models.base import Base
@@ -27,7 +28,7 @@ class Intent(Base):
     strategy_id = Column(String, nullable=True)
     risk_pct = Column(Numeric(10, 4), nullable=True)
     risk_abs = Column(Numeric(24, 8), nullable=True)
-    policy_snapshot = Column(JSONB, nullable=True)
+    policy_snapshot = Column(JSONB().with_variant(JSON(), "sqlite"), nullable=True)
     order_type = Column(String, nullable=False)
     source = Column(String, nullable=False)
     lifecycle_status = Column(String, nullable=False, index=True)

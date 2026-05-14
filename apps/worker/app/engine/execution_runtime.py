@@ -983,6 +983,56 @@ def execute_binance_real_order_for_user(
                                             tp_client_algo_id=tp_client_algo_id,
                                         )
 
+                                        from apps.worker.app.engine.binance_protection_reconciliation import (
+                                            reconcile_exit_protection_state,
+                                        )
+                                        from apps.api.app.services.binance_exit_protection_service import (
+                                            update_exit_protection_reconciliation,
+                                        )
+
+                                        evidence_view = shadow_view.get("evidence_view") or {}
+
+                                        protection_reconciliation = reconcile_exit_protection_state(
+                                            sl_classification=evidence_view.get("sl_classification"),
+                                            tp_classification=evidence_view.get("tp_classification"),
+                                            sl_fetch_status=(shadow_view.get("sl_status_fetch") or {}).get("status"),
+                                            tp_fetch_status=(shadow_view.get("tp_status_fetch") or {}).get("status"),
+                                        )
+
+                                        update_exit_protection_reconciliation(
+                                            db_protection,
+                                            exit_key=guard_result.exit_key,
+                                            sl_status=(
+                                                "SUBMITTED"
+                                                if protection_reconciliation.get("sl_classification")
+                                                == "ACTIVE_EVIDENCE_PRESENT"
+                                                else "UNKNOWN"
+                                            ),
+                                            tp_status=(
+                                                "SUBMITTED"
+                                                if protection_reconciliation.get("tp_classification")
+                                                == "ACTIVE_EVIDENCE_PRESENT"
+                                                else "UNKNOWN"
+                                            ),
+                                            protection_status=(
+                                                protection_reconciliation.get("protection_state")
+                                                if protection_reconciliation.get("protection_state")
+                                                in {
+                                                    "UNPROTECTED",
+                                                    "PARTIALLY_PROTECTED",
+                                                    "PROTECTED",
+                                                    "UNKNOWN",
+                                                }
+                                                else "UNKNOWN"
+                                            ),
+                                            last_error=(
+                                                None
+                                                if protection_reconciliation.get("protection_unknown") is False
+                                                else "exit_protection_reconciliation_unknown"
+                                            ),
+                                            increment_attempt_count=True,
+                                        )
+
                                         log_audit_event(
                                             db_ingest,
                                             action="execution.binance.exit_protection.shadow_view",

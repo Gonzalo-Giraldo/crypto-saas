@@ -872,3 +872,253 @@ def test_runtime_skips_post_fill_exit_diff_when_reconciliation_not_matched(monke
 
     assert post_fill_calls["count"] == 0
     assert diff_calls["count"] == 0
+
+def test_runtime_persists_exit_protection_reconciliation_projection(monkeypatch):
+    class _DB:
+
+        def execute(self, *args, **kwargs):
+            class _Result:
+                def fetchone(self):
+                    return (1,)
+
+                def scalar_one_or_none(self):
+                    return None
+
+            return _Result()
+
+        def add(self, obj):
+            return None
+
+        def flush(self):
+            return None
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    class _Adapter:
+        def send_order(self, **kwargs):
+            return {"accepted": True}
+
+    reconciliation_calls = []
+    projection_calls = []
+
+    monkeypatch.setattr(runtime, "SessionLocal", lambda: _DB())
+    monkeypatch.setattr(runtime, "_assert_binance_gateway_policy", lambda: None)
+    monkeypatch.setattr(runtime, "log_audit_event", lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        runtime,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+
+    import apps.api.app.services.exchange_secrets as exchange_secrets_module
+
+    monkeypatch.setattr(
+        exchange_secrets_module,
+        "get_decrypted_exchange_secret",
+        lambda db, user_id, exchange: {"api_key": "k", "api_secret": "s"},
+    )
+
+    import apps.api.app.services.binance_fill_manual_runner as fill_runner
+    import apps.api.app.services.binance_trades_gateway_client as trades_client
+    import apps.api.app.services.binance_fill_db as fill_db
+
+    monkeypatch.setattr(
+        fill_runner,
+        "run_binance_fill_ingestion_for_intent",
+        lambda **kwargs: {
+            "trades": [{"price": "101000", "qty": "0.001"}],
+            "matched_count": 1,
+            "attempt": 1,
+            "reconciliation": {"status": "MATCHED"},
+        },
+    )
+    monkeypatch.setattr(trades_client, "fetch_binance_trades", lambda **kwargs: [])
+    monkeypatch.setattr(fill_db, "persist_binance_fills_db", lambda **kwargs: None)
+
+    monkeypatch.setattr(
+        runtime,
+        "prepare_binance_market_order_quantity",
+        lambda symbol, requested_qty, market: {"normalized_qty": requested_qty},
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_build_binance_client_order_id",
+        lambda **kwargs: "cid-exit-wire-5",
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_build_binance_broker_adapter",
+        lambda **kwargs: _Adapter(),
+    )
+
+    class _IntentStore:
+        def attach_execution(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(runtime, "IntentConsumptionStore", lambda: _IntentStore())
+    monkeypatch.setattr(
+        runtime,
+        "query_order_status",
+        lambda **kwargs: {"status": "FILLED", "orderId": "oid-5"},
+    )
+    monkeypatch.setattr(runtime, "mark_intent_executed", lambda *a, **k: None)
+
+    monkeypatch.setattr(
+        runtime,
+        "derive_binance_entry_fill_basis",
+        lambda **kwargs: {
+            "avg_entry_price": "101000",
+            "filled_qty": "0.001",
+            "usable_for_exits": True,
+        },
+    )
+
+    import apps.worker.app.engine.binance_exit_plan as exit_plan_module
+
+    monkeypatch.setattr(
+        exit_plan_module,
+        "build_binance_exit_plan",
+        lambda **kwargs: {
+            "available": True,
+            "symbol": "BTCUSDT",
+            "direction": "LONG",
+            "filled_qty": "0.001",
+            "avg_entry_price": "101000",
+            "stop_loss": "99000",
+            "take_profit": "102000",
+            "client_order_id": "cid-exit-wire-5",
+        },
+    )
+
+    class _Guard:
+        allowed = True
+        reason = None
+        exit_side = "SELL"
+        qty = "0.001"
+        exit_key = "exit-key-5"
+
+    import apps.worker.app.engine.binance_exit_guard as exit_guard_module
+
+    monkeypatch.setattr(
+        exit_guard_module,
+        "guard_binance_exit",
+        lambda **kwargs: _Guard(),
+    )
+
+    class _Bracket:
+        stop_loss_order = {"type": "STOP_MARKET", "clientAlgoId": "sl-5"}
+        take_profit_order = {"type": "TAKE_PROFIT_MARKET", "clientAlgoId": "tp-5"}
+
+    import apps.worker.app.engine.binance_futures_exit_orders as exit_orders_module
+    import apps.worker.app.engine.binance_exit_executor as exit_executor_module
+
+    monkeypatch.setattr(
+        exit_orders_module,
+        "build_binance_futures_bracket_orders",
+        lambda **kwargs: _Bracket(),
+    )
+    monkeypatch.setattr(
+        exit_executor_module,
+        "create_exit_orders",
+        lambda **kwargs: {
+            "sl": {"clientAlgoId": "sl-5"},
+            "tp": {"clientAlgoId": "tp-5"},
+        },
+    )
+
+    import apps.api.app.services.binance_exit_protection_service as protection_module
+
+    monkeypatch.setattr(
+        protection_module,
+        "create_exit_protection",
+        lambda *args, **kwargs: {"status": "created", "exit_key": kwargs["exit_key"]},
+    )
+
+    def _update_projection(*args, **kwargs):
+        projection_calls.append(kwargs)
+        return {"status": "updated", "exit_key": kwargs["exit_key"]}
+
+    monkeypatch.setattr(
+        protection_module,
+        "update_exit_protection_reconciliation",
+        _update_projection,
+    )
+
+    import apps.worker.app.engine.binance_exit_protection_shadow_view as shadow_module
+
+    monkeypatch.setattr(
+        shadow_module,
+        "build_exit_protection_shadow_view",
+        lambda **kwargs: {
+            "shadow_mode": True,
+            "sl_status_fetch": {"status": "OK"},
+            "tp_status_fetch": {"status": "OK"},
+            "evidence_view": {
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+            },
+        },
+    )
+
+    import apps.worker.app.engine.binance_protection_reconciliation as reconciliation_module
+
+    def _reconcile(**kwargs):
+        reconciliation_calls.append(kwargs)
+        return {
+            "protection_state": "PROTECTED",
+            "protection_active_verifiable": True,
+            "protection_unknown": False,
+            "sl_classification": kwargs["sl_classification"],
+            "tp_classification": kwargs["tp_classification"],
+        }
+
+    monkeypatch.setattr(
+        reconciliation_module,
+        "reconcile_exit_protection_state",
+        _reconcile,
+    )
+
+    runtime.execute_binance_real_order_for_user(
+        user_id="user-1",
+        symbol="BTCUSDT",
+        side="BUY",
+        qty=0.001,
+        intent_key="intent-exit-wire-5",
+        account_id="default",
+        market="FUTURES",
+        risk_decision={
+            "stop_loss": 99000.0,
+            "take_profit": 102000.0,
+            "expected_qty": 0.001,
+            "risk_pct": 1.0,
+            "reward_risk_ratio": 2.0,
+        },
+    )
+
+    assert reconciliation_calls == [
+        {
+            "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+            "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+            "sl_fetch_status": "OK",
+            "tp_fetch_status": "OK",
+        }
+    ]
+
+    assert projection_calls == [
+        {
+            "exit_key": "exit-key-5",
+            "sl_status": "SUBMITTED",
+            "tp_status": "SUBMITTED",
+            "protection_status": "PROTECTED",
+            "last_error": None,
+            "increment_attempt_count": True,
+        }
+    ]
