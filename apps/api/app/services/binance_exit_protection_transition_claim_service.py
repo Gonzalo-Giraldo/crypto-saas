@@ -4,9 +4,12 @@ from sqlalchemy.orm import Session
 from apps.api.app.models.binance_exit_protection_transition_claim import (
     BinanceExitProtectionTransitionClaim,
 )
+from apps.api.app.services.runtime_actions import (
+    ACTION_START_AUTHORITATIVE_REPLACEMENT,
+)
 
 ALLOWED_TRANSITION_ACTIONS = {
-    "START_AUTHORITATIVE_REPLACEMENT",
+    ACTION_START_AUTHORITATIVE_REPLACEMENT,
 }
 
 

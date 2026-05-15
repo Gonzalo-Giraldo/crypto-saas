@@ -6,6 +6,7 @@ from apps.worker.app.engine.binance_protected_position_runtime_context import (
 from apps.worker.app.engine.binance_protected_position_reevaluation_runner import (
     reevaluate_protected_position_once,
 )
+from apps.api.app.services.runtime_actions import ACTION_ACTIVATE_TRAILING
 
 
 def reevaluate_active_protected_positions_once(
@@ -75,7 +76,7 @@ def reevaluate_active_protected_positions_once(
             if callable(claim_transition):
                 claim = claim_transition(
                     exit_key=exit_key,
-                    required_action="ACTION_ACTIVATE_TRAILING",
+                    required_action=ACTION_ACTIVATE_TRAILING,
                     owner_id=owner_id,
                 )
 
@@ -111,7 +112,7 @@ def reevaluate_active_protected_positions_once(
 
                 complete_transition(
                     exit_key=exit_key,
-                    required_action="ACTION_ACTIVATE_TRAILING",
+                    required_action=ACTION_ACTIVATE_TRAILING,
                     owner_id=owner_id,
                     final_status=final_status,
                 )
