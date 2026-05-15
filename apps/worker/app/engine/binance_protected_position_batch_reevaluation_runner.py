@@ -16,6 +16,7 @@ def reevaluate_active_protected_positions_once(
     fetch_current_price=None,
     owner_id: str | None = None,
     claim_transition=None,
+    complete_transition=None,
     run_replacement=None,
 ) -> list[dict]:
     results: list[dict] = []
@@ -97,6 +98,23 @@ def reevaluate_active_protected_positions_once(
                 replacement_client_order_id=f"{exit_key}-TRAIL",
                 run_replacement=run_replacement,
             )
+
+            if callable(complete_transition):
+                result_status = str(result.get("status") or "").lower().strip()
+
+                if result_status == "replaced":
+                    final_status = "FINALIZED"
+                elif result_status == "noop":
+                    final_status = "RELEASED"
+                else:
+                    final_status = "ABANDONED"
+
+                complete_transition(
+                    exit_key=exit_key,
+                    required_action="ACTION_ACTIVATE_TRAILING",
+                    owner_id=owner_id,
+                    final_status=final_status,
+                )
 
             results.append(
                 {

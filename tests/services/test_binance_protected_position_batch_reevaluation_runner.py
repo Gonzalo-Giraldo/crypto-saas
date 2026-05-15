@@ -228,3 +228,125 @@ def test_batch_runner_blocks_replacement_when_claim_is_not_owned():
             },
         )
     ]
+
+
+def test_batch_runner_completes_claim_as_finalized_after_replacement_success():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[
+            {
+                "exit_key": "exit-key-complete-1",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "direction": "LONG",
+                "filled_qty": Decimal("0.01"),
+                "avg_entry_price": Decimal("100"),
+                "sl_client_algo_id": "sl-complete-1",
+                "tp_client_algo_id": "tp-complete-1",
+                "sl_status": "SUBMITTED",
+                "tp_status": "SUBMITTED",
+                "protection_status": "PROTECTED",
+            }
+        ],
+        protection_reconciliation_by_exit_key={
+            "exit-key-complete-1": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={"exit-key-complete-1": Decimal("90")},
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-1",
+        claim_transition=lambda **kwargs: calls.append(("claim", kwargs)) or {"status": "claimed"},
+        complete_transition=lambda **kwargs: calls.append(("complete", kwargs)) or {"status": kwargs["final_status"]},
+        run_replacement=lambda **kwargs: calls.append(("replace", kwargs)) or {"status": "replaced"},
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-complete-1",
+            "result": {"status": "replaced"},
+        }
+    ]
+
+    assert calls[-1] == (
+        "complete",
+        {
+            "exit_key": "exit-key-complete-1",
+            "required_action": "ACTION_ACTIVATE_TRAILING",
+            "owner_id": "worker-1",
+            "final_status": "FINALIZED",
+        },
+    )
+
+
+def test_batch_runner_completes_claim_as_abandoned_after_blocked_result():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[
+            {
+                "exit_key": "exit-key-complete-2",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "direction": "LONG",
+                "filled_qty": Decimal("0.01"),
+                "avg_entry_price": Decimal("100"),
+                "sl_client_algo_id": "sl-complete-2",
+                "tp_client_algo_id": "tp-complete-2",
+                "sl_status": "SUBMITTED",
+                "tp_status": "SUBMITTED",
+                "protection_status": "PROTECTED",
+            }
+        ],
+        protection_reconciliation_by_exit_key={
+            "exit-key-complete-2": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={"exit-key-complete-2": Decimal("90")},
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-1",
+        claim_transition=lambda **kwargs: calls.append(("claim", kwargs)) or {"status": "claimed"},
+        complete_transition=lambda **kwargs: calls.append(("complete", kwargs)) or {"status": kwargs["final_status"]},
+        run_replacement=lambda **kwargs: calls.append(("replace", kwargs)) or {
+            "status": "blocked",
+            "reason": "replacement_sl_not_active",
+        },
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-complete-2",
+            "result": {
+                "status": "blocked",
+                "reason": "replacement_sl_not_active",
+            },
+        }
+    ]
+
+    assert calls[-1] == (
+        "complete",
+        {
+            "exit_key": "exit-key-complete-2",
+            "required_action": "ACTION_ACTIVATE_TRAILING",
+            "owner_id": "worker-1",
+            "final_status": "ABANDONED",
+        },
+    )
