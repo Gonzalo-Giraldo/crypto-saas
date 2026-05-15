@@ -95,3 +95,136 @@ def test_batch_runner_reports_blocked_context_without_replacement():
         }
     ]
     assert calls == []
+
+
+def test_batch_runner_claims_trailing_transition_before_replacement():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    protected_positions = [
+        {
+            "exit_key": "exit-key-claim-1",
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "direction": "LONG",
+            "filled_qty": Decimal("0.01"),
+            "avg_entry_price": Decimal("100"),
+            "sl_client_algo_id": "sl-claim-1",
+            "tp_client_algo_id": "tp-claim-1",
+            "sl_status": "SUBMITTED",
+            "tp_status": "SUBMITTED",
+            "protection_status": "PROTECTED",
+        }
+    ]
+
+    def fake_claim(**kwargs):
+        calls.append(("claim", kwargs))
+        return {"status": "claimed"}
+
+    def fake_replace(**kwargs):
+        calls.append(("replace", kwargs))
+        return {"status": "replaced"}
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=protected_positions,
+        protection_reconciliation_by_exit_key={
+            "exit-key-claim-1": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={"exit-key-claim-1": Decimal("90")},
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-1",
+        claim_transition=fake_claim,
+        run_replacement=fake_replace,
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-claim-1",
+            "result": {"status": "replaced"},
+        }
+    ]
+
+    assert calls[0] == (
+        "claim",
+        {
+            "exit_key": "exit-key-claim-1",
+            "required_action": "ACTION_ACTIVATE_TRAILING",
+            "owner_id": "worker-1",
+        },
+    )
+    assert calls[1][0] == "replace"
+
+
+def test_batch_runner_blocks_replacement_when_claim_is_not_owned():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    protected_positions = [
+        {
+            "exit_key": "exit-key-claim-2",
+            "symbol": "BTCUSDT",
+            "market": "FUTURES",
+            "direction": "LONG",
+            "filled_qty": Decimal("0.01"),
+            "avg_entry_price": Decimal("100"),
+            "sl_client_algo_id": "sl-claim-2",
+            "tp_client_algo_id": "tp-claim-2",
+            "sl_status": "SUBMITTED",
+            "tp_status": "SUBMITTED",
+            "protection_status": "PROTECTED",
+        }
+    ]
+
+    def fake_claim(**kwargs):
+        calls.append(("claim", kwargs))
+        return {"status": "blocked", "reason": "transition_claim_already_owned"}
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=protected_positions,
+        protection_reconciliation_by_exit_key={
+            "exit-key-claim-2": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={"exit-key-claim-2": Decimal("90")},
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-2",
+        claim_transition=fake_claim,
+        run_replacement=lambda **kwargs: calls.append(("replace", kwargs)),
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-claim-2",
+            "result": {
+                "status": "blocked",
+                "reason": "transition_claim_not_owned",
+            },
+        }
+    ]
+    assert calls == [
+        (
+            "claim",
+            {
+                "exit_key": "exit-key-claim-2",
+                "required_action": "ACTION_ACTIVATE_TRAILING",
+                "owner_id": "worker-2",
+            },
+        )
+    ]

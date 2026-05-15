@@ -14,7 +14,9 @@ def reevaluate_active_protected_positions_once(
     protection_reconciliation_by_exit_key: dict,
     sl_stop_price_by_exit_key: dict | None = None,
     fetch_current_price=None,
-    run_replacement,
+    owner_id: str | None = None,
+    claim_transition=None,
+    run_replacement=None,
 ) -> list[dict]:
     results: list[dict] = []
 
@@ -68,6 +70,25 @@ def reevaluate_active_protected_positions_once(
                     }
                 )
                 continue
+
+            if callable(claim_transition):
+                claim = claim_transition(
+                    exit_key=exit_key,
+                    required_action="ACTION_ACTIVATE_TRAILING",
+                    owner_id=owner_id,
+                )
+
+                if (claim or {}).get("status") != "claimed":
+                    results.append(
+                        {
+                            "exit_key": exit_key,
+                            "result": {
+                                "status": "blocked",
+                                "reason": "transition_claim_not_owned",
+                            },
+                        }
+                    )
+                    continue
 
             result = reevaluate_protected_position_once(
                 position=context["position"],
