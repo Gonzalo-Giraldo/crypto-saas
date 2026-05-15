@@ -37,6 +37,8 @@ def reevaluate_active_protected_positions_once(
             )
             continue
 
+        claim_acquired = False
+
         try:
             protected_position_for_context = dict(protected_position)
             stop_price = (sl_stop_price_by_exit_key or {}).get(exit_key)
@@ -92,6 +94,8 @@ def reevaluate_active_protected_positions_once(
                     )
                     continue
 
+                claim_acquired = True
+
             result = reevaluate_protected_position_once(
                 position=context["position"],
                 protection_reconciliation=protection_reconciliation,
@@ -125,6 +129,14 @@ def reevaluate_active_protected_positions_once(
             )
 
         except Exception as exc:
+            if claim_acquired and callable(complete_transition):
+                complete_transition(
+                    exit_key=exit_key,
+                    required_action=ACTION_ACTIVATE_TRAILING,
+                    owner_id=owner_id,
+                    final_status="ABANDONED",
+                )
+
             results.append(
                 {
                     "exit_key": exit_key,

@@ -350,3 +350,69 @@ def test_batch_runner_completes_claim_as_abandoned_after_blocked_result():
             "final_status": "ABANDONED",
         },
     )
+
+
+def test_batch_runner_abandons_claim_when_replacement_raises_after_claim():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    def raise_after_claim(**kwargs):
+        calls.append(("replace", kwargs))
+        raise RuntimeError("replacement_runtime_error")
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[
+            {
+                "exit_key": "exit-key-exception-1",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "direction": "LONG",
+                "filled_qty": Decimal("0.01"),
+                "avg_entry_price": Decimal("100"),
+                "sl_client_algo_id": "sl-exception-1",
+                "tp_client_algo_id": "tp-exception-1",
+                "sl_status": "SUBMITTED",
+                "tp_status": "SUBMITTED",
+                "protection_status": "PROTECTED",
+            }
+        ],
+        protection_reconciliation_by_exit_key={
+            "exit-key-exception-1": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={"exit-key-exception-1": Decimal("90")},
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-1",
+        claim_transition=lambda **kwargs: calls.append(("claim", kwargs)) or {"status": "claimed"},
+        complete_transition=lambda **kwargs: calls.append(("complete", kwargs)) or {"status": kwargs["final_status"]},
+        run_replacement=raise_after_claim,
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-exception-1",
+            "result": {
+                "status": "blocked",
+                "reason": "protected_position_reevaluation_error",
+                "error": "replacement_runtime_error",
+            },
+        }
+    ]
+
+    assert calls[-1] == (
+        "complete",
+        {
+            "exit_key": "exit-key-exception-1",
+            "required_action": "ACTION_ACTIVATE_TRAILING",
+            "owner_id": "worker-1",
+            "final_status": "ABANDONED",
+        },
+    )
