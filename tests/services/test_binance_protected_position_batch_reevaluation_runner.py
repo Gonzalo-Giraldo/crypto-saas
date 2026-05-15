@@ -573,3 +573,99 @@ def test_batch_runner_acquires_transition_claim_only_once_per_position():
     ]
     assert len(claim_calls) == 1
     assert len(replace_calls) == 1
+
+def test_batch_runner_persists_unknown_quarantine_after_pending_cleanup():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    protected_position = {
+        "exit_key": "exit-key-pending-cleanup-quarantine",
+        "symbol": "BTCUSDT",
+        "market": "FUTURES",
+        "direction": "LONG",
+        "filled_qty": Decimal("0.01"),
+        "avg_entry_price": Decimal("100"),
+        "sl_client_algo_id": "sl-pending-cleanup-quarantine-old",
+        "tp_client_algo_id": "tp-pending-cleanup-quarantine",
+        "sl_status": "SUBMITTED",
+        "tp_status": "SUBMITTED",
+        "protection_status": "PROTECTED",
+    }
+
+    def fake_claim(**kwargs):
+        calls.append(("claim", kwargs))
+        return {"status": "claimed"}
+
+    def fake_complete(**kwargs):
+        calls.append(("complete", kwargs))
+        return {"status": kwargs["final_status"]}
+
+    def fake_persist_reconciliation(**kwargs):
+        calls.append(("persist_reconciliation", kwargs))
+        return {"status": "updated", "exit_key": kwargs["exit_key"]}
+
+    def fake_replace(**kwargs):
+        calls.append(("replace", kwargs))
+        return {
+            "status": "replacement_pending_cleanup",
+            "reason": "old_sl_cancel_failed",
+            "old_sl_client_algo_id": "sl-pending-cleanup-quarantine-old",
+            "new_sl_client_algo_id": "sl-pending-cleanup-quarantine-new",
+        }
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[protected_position],
+        protection_reconciliation_by_exit_key={
+            "exit-key-pending-cleanup-quarantine": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={
+            "exit-key-pending-cleanup-quarantine": Decimal("90")
+        },
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-pending-cleanup-quarantine",
+        claim_transition=fake_claim,
+        complete_transition=fake_complete,
+        persist_reconciliation=fake_persist_reconciliation,
+        run_replacement=fake_replace,
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-pending-cleanup-quarantine",
+            "result": {
+                "status": "replacement_pending_cleanup",
+                "reason": "old_sl_cancel_failed",
+                "old_sl_client_algo_id": "sl-pending-cleanup-quarantine-old",
+                "new_sl_client_algo_id": "sl-pending-cleanup-quarantine-new",
+            },
+        }
+    ]
+
+    assert ("persist_reconciliation", {
+        "exit_key": "exit-key-pending-cleanup-quarantine",
+        "sl_status": "UNKNOWN",
+        "tp_status": "SUBMITTED",
+        "protection_status": "UNKNOWN",
+        "last_error": "replacement_pending_cleanup:old_sl_cancel_failed",
+        "increment_attempt_count": True,
+    }) in calls
+
+    complete_calls = [call for call in calls if call[0] == "complete"]
+    assert complete_calls[-1] == (
+        "complete",
+        {
+            "exit_key": "exit-key-pending-cleanup-quarantine",
+            "required_action": "ACTION_ACTIVATE_TRAILING",
+            "owner_id": "worker-pending-cleanup-quarantine",
+            "final_status": "ABANDONED",
+        },
+    )

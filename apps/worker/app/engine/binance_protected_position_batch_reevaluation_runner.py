@@ -18,6 +18,7 @@ def reevaluate_active_protected_positions_once(
     owner_id: str | None = None,
     claim_transition=None,
     complete_transition=None,
+    persist_reconciliation=None,
     run_replacement=None,
 ) -> list[dict]:
     results: list[dict] = []
@@ -124,10 +125,25 @@ def reevaluate_active_protected_positions_once(
                 run_replacement=run_replacement,
             )
 
+            result_status = str(
+                result.get("status") or ""
+            ).lower().strip()
+
+            if (
+                result_status == "replacement_pending_cleanup"
+                and callable(persist_reconciliation)
+            ):
+                persist_reconciliation(
+                    exit_key=exit_key,
+                    sl_status="UNKNOWN",
+                    tp_status=str(protected_position.get("tp_status") or "UNKNOWN").upper().strip(),
+                    protection_status="UNKNOWN",
+                    last_error="replacement_pending_cleanup:"
+                    + str(result.get("reason") or "unknown"),
+                    increment_attempt_count=True,
+                )
+
             if callable(complete_transition):
-                result_status = str(
-                    result.get("status") or ""
-                ).lower().strip()
 
                 if result_status == "replaced":
                     final_status = "FINALIZED"

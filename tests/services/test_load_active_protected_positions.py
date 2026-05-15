@@ -75,3 +75,32 @@ def test_loader_returns_empty_when_no_authoritative_protected_positions():
     db.commit()
 
     assert load_active_protected_positions(db) == []
+
+def test_loader_excludes_unknown_quarantine_positions():
+    from apps.api.app.services.load_active_protected_positions import (
+        load_active_protected_positions,
+    )
+
+    db = _db()
+
+    db.add(
+        _row(
+            exit_key="protected-ok",
+            protection_status="PROTECTED",
+            sl_status="SUBMITTED",
+        )
+    )
+
+    db.add(
+        _row(
+            exit_key="pending-cleanup-quarantine",
+            protection_status="UNKNOWN",
+            sl_status="UNKNOWN",
+        )
+    )
+
+    db.commit()
+
+    out = load_active_protected_positions(db)
+
+    assert [row["exit_key"] for row in out] == ["protected-ok"]
