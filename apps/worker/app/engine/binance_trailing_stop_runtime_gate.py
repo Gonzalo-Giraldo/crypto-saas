@@ -4,18 +4,29 @@ from __future__ import annotations
 _REQUIRED_ACTIVE_CLASSIFICATION = "ACTIVE_EVIDENCE_PRESENT"
 _REQUIRED_PROTECTION_STATE = "PROTECTED"
 
-
 def can_run_trailing_stop_replacement(
     *,
     protection_reconciliation: dict | None,
     trailing_decision: dict | None,
     old_sl_client_algo_id: str,
+    transition_claim: dict | None = None,
 ) -> dict:
     old_sl_id = str(old_sl_client_algo_id or "").strip()
     if not old_sl_id:
         return {
             "allowed": False,
             "reason": "old_sl_client_algo_id_required",
+        }
+
+    claim = transition_claim or {}
+    claim_status = str(
+        claim.get("claim_status") or ""
+    ).upper().strip()
+
+    if claim_status != "ACTIVE":
+        return {
+            "allowed": False,
+            "reason": "active_transition_claim_required",
         }
 
     if trailing_decision is None:
