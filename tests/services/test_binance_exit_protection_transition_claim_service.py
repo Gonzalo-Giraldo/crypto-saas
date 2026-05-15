@@ -187,3 +187,92 @@ def test_evaluate_transition_claim_staleness_marks_non_active_claim_not_active()
         "status": "NOT_ACTIVE",
         "reason": "claim_not_active",
     }
+
+
+def test_complete_transition_claim_finalizes_active_claim_for_owner():
+    from apps.api.app.models.binance_exit_protection_transition_claim import (
+        BinanceExitProtectionTransitionClaim,
+    )
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        claim_exit_protection_transition,
+        complete_exit_protection_transition_claim,
+    )
+
+    db = _build_db()
+
+    claim_exit_protection_transition(
+        db,
+        exit_key="exit-key-finalize-1",
+        required_action="START_AUTHORITATIVE_REPLACEMENT",
+        owner_id="worker-1",
+    )
+
+    result = complete_exit_protection_transition_claim(
+        db,
+        exit_key="exit-key-finalize-1",
+        required_action="START_AUTHORITATIVE_REPLACEMENT",
+        owner_id="worker-1",
+        final_status="FINALIZED",
+    )
+
+    assert result == {
+        "status": "FINALIZED",
+        "exit_key": "exit-key-finalize-1",
+        "required_action": "START_AUTHORITATIVE_REPLACEMENT",
+        "owner_id": "worker-1",
+    }
+
+    row = db.query(BinanceExitProtectionTransitionClaim).filter_by(
+        exit_key="exit-key-finalize-1"
+    ).one()
+    assert row.claim_status == "FINALIZED"
+
+
+def test_complete_transition_claim_rejects_wrong_owner():
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        claim_exit_protection_transition,
+        complete_exit_protection_transition_claim,
+    )
+
+    db = _build_db()
+
+    claim_exit_protection_transition(
+        db,
+        exit_key="exit-key-finalize-2",
+        required_action="START_AUTHORITATIVE_REPLACEMENT",
+        owner_id="worker-1",
+    )
+
+    with pytest.raises(ValueError, match="transition_claim_not_owned"):
+        complete_exit_protection_transition_claim(
+            db,
+            exit_key="exit-key-finalize-2",
+            required_action="START_AUTHORITATIVE_REPLACEMENT",
+            owner_id="worker-2",
+            final_status="FINALIZED",
+        )
+
+
+def test_complete_transition_claim_rejects_invalid_final_status():
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        claim_exit_protection_transition,
+        complete_exit_protection_transition_claim,
+    )
+
+    db = _build_db()
+
+    claim_exit_protection_transition(
+        db,
+        exit_key="exit-key-finalize-3",
+        required_action="START_AUTHORITATIVE_REPLACEMENT",
+        owner_id="worker-1",
+    )
+
+    with pytest.raises(ValueError, match="invalid_final_claim_status"):
+        complete_exit_protection_transition_claim(
+            db,
+            exit_key="exit-key-finalize-3",
+            required_action="START_AUTHORITATIVE_REPLACEMENT",
+            owner_id="worker-1",
+            final_status="ACTIVE",
+        )
