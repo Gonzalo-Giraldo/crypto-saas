@@ -276,3 +276,54 @@ def test_complete_transition_claim_rejects_invalid_final_status():
             owner_id="worker-1",
             final_status="ACTIVE",
         )
+
+
+def test_can_recover_stale_claim_for_same_owner():
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        can_recover_stale_transition_claim,
+    )
+
+    result = can_recover_stale_transition_claim(
+        staleness_status="STALE",
+        claim_owner_id="worker-1",
+        requester_owner_id="worker-1",
+    )
+
+    assert result == {
+        "allowed": True,
+        "reason": "stale_claim_recoverable",
+    }
+
+
+def test_rejects_recovery_for_different_owner():
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        can_recover_stale_transition_claim,
+    )
+
+    result = can_recover_stale_transition_claim(
+        staleness_status="STALE",
+        claim_owner_id="worker-1",
+        requester_owner_id="worker-2",
+    )
+
+    assert result == {
+        "allowed": False,
+        "reason": "stale_claim_owned_by_different_owner",
+    }
+
+
+def test_rejects_recovery_for_non_stale_claim():
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        can_recover_stale_transition_claim,
+    )
+
+    result = can_recover_stale_transition_claim(
+        staleness_status="ACTIVE",
+        claim_owner_id="worker-1",
+        requester_owner_id="worker-1",
+    )
+
+    assert result == {
+        "allowed": False,
+        "reason": "claim_not_stale",
+    }

@@ -188,3 +188,37 @@ def complete_exit_protection_transition_claim(
         "required_action": required_action_value,
         "owner_id": owner_id_value,
     }
+
+
+def can_recover_stale_transition_claim(
+    *,
+    staleness_status,
+    claim_owner_id,
+    requester_owner_id,
+):
+    staleness = str(staleness_status or "").upper().strip()
+    claim_owner = str(claim_owner_id or "").strip()
+    requester = str(requester_owner_id or "").strip()
+
+    if staleness != "STALE":
+        return {
+            "allowed": False,
+            "reason": "claim_not_stale",
+        }
+
+    if not claim_owner or not requester:
+        return {
+            "allowed": False,
+            "reason": "owner_id_required",
+        }
+
+    if claim_owner != requester:
+        return {
+            "allowed": False,
+            "reason": "stale_claim_owned_by_different_owner",
+        }
+
+    return {
+        "allowed": True,
+        "reason": "stale_claim_recoverable",
+    }
