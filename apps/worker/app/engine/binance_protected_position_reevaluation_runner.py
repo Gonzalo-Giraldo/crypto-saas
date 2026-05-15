@@ -35,5 +35,6 @@ def reevaluate_protected_position_once(
         position=position,
         old_sl_client_algo_id=old_sl_client_algo_id,
         replacement_client_order_id=replacement_client_order_id,
+        transition_claim=transition_claim,
         replace_stop_loss=run_replacement,
     )

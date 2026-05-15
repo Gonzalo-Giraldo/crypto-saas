@@ -8,6 +8,7 @@ def run_trailing_stop_replacement_once(
     position: dict,
     old_sl_client_algo_id: str,
     replacement_client_order_id: str,
+    transition_claim: dict | None,
     replace_stop_loss,
 ) -> dict:
     old_sl_id = str(old_sl_client_algo_id or "").strip()
@@ -54,4 +55,5 @@ def run_trailing_stop_replacement_once(
         new_stop_loss=decision["new_sl"],
         old_sl_client_algo_id=old_sl_id,
         replacement_client_order_id=replacement_id,
+        transition_claim=transition_claim,
     )

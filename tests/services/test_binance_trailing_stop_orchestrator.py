@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 def test_trailing_orchestrator_calls_replacement_when_candidate_sl_exists():
     from apps.worker.app.engine.binance_trailing_stop_orchestrator import (
         run_trailing_stop_replacement_once,
@@ -11,6 +10,11 @@ def test_trailing_orchestrator_calls_replacement_when_candidate_sl_exists():
     def fake_replace(**kwargs):
         calls.append(kwargs)
         return {"status": "replaced", "new_sl_client_algo_id": "trail-1-SL"}
+
+    transition_claim = {
+        "claim_status": "ACTIVE",
+        "owner_id": "worker-1",
+    }
 
     result = run_trailing_stop_replacement_once(
         position={
@@ -25,6 +29,7 @@ def test_trailing_orchestrator_calls_replacement_when_candidate_sl_exists():
         },
         old_sl_client_algo_id="old-sl-1",
         replacement_client_order_id="trail-1",
+        transition_claim=transition_claim,
         replace_stop_loss=fake_replace,
     )
 
@@ -39,9 +44,9 @@ def test_trailing_orchestrator_calls_replacement_when_candidate_sl_exists():
             "new_stop_loss": 100.0,
             "old_sl_client_algo_id": "old-sl-1",
             "replacement_client_order_id": "trail-1",
+            "transition_claim": transition_claim,
         }
     ]
-
 
 def test_trailing_orchestrator_noops_when_no_candidate_sl_exists():
     from apps.worker.app.engine.binance_trailing_stop_orchestrator import (
@@ -63,6 +68,10 @@ def test_trailing_orchestrator_noops_when_no_candidate_sl_exists():
         },
         old_sl_client_algo_id="old-sl-1",
         replacement_client_order_id="trail-1",
+        transition_claim={
+            "claim_status": "ACTIVE",
+            "owner_id": "worker-1",
+        },
         replace_stop_loss=lambda **kwargs: calls.append(kwargs),
     )
 
@@ -71,7 +80,6 @@ def test_trailing_orchestrator_noops_when_no_candidate_sl_exists():
         "reason": "no_trailing_candidate",
     }
     assert calls == []
-
 
 def test_trailing_orchestrator_fails_closed_without_old_sl_id():
     from apps.worker.app.engine.binance_trailing_stop_orchestrator import (
@@ -90,6 +98,10 @@ def test_trailing_orchestrator_fails_closed_without_old_sl_id():
         },
         old_sl_client_algo_id="",
         replacement_client_order_id="trail-1",
+        transition_claim={
+            "claim_status": "ACTIVE",
+            "owner_id": "worker-1",
+        },
         replace_stop_loss=lambda **kwargs: {"status": "should_not_call"},
     )
 
