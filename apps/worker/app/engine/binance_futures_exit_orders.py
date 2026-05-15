@@ -56,6 +56,37 @@ def _validate_sl_tp_for_direction(
     raise ValueError("direction_must_be_LONG_or_SHORT")
 
 
+def build_binance_futures_stop_loss_order(
+    *,
+    symbol: Any,
+    direction: Any,
+    qty: Any,
+    stop_loss: Any,
+    client_order_id: str,
+) -> dict[str, Any]:
+    symbol_norm = _normalize_symbol(symbol)
+    direction_norm = _normalize_direction(direction)
+    qty_dec = _decimal_positive(qty, "qty")
+    sl_dec = _decimal_positive(stop_loss, "stop_loss")
+
+    client_id = str(client_order_id or "").strip()
+    if not client_id:
+        raise ValueError("client_order_id_required")
+
+    exit_side = "SELL" if direction_norm == "LONG" else "BUY"
+
+    return {
+        "symbol": symbol_norm,
+        "market": "FUTURES",
+        "side": exit_side,
+        "type": "STOP_MARKET",
+        "quantity": str(qty_dec),
+        "stopPrice": str(sl_dec),
+        "reduceOnly": True,
+        "clientAlgoId": f"{client_id[:28]}-SL"[:36],
+    }
+
+
 def build_binance_futures_bracket_orders(
     *,
     symbol: Any,
@@ -96,16 +127,13 @@ def build_binance_futures_bracket_orders(
         "newClientOrderId": client_id[:36],
     }
 
-    stop_loss_order = {
-        "symbol": symbol_norm,
-        "market": "FUTURES",
-        "side": exit_side,
-        "type": "STOP_MARKET",
-        "quantity": str(qty_dec),
-        "stopPrice": str(sl_dec),
-        "reduceOnly": True,
-        "clientAlgoId": f"{client_id[:28]}-SL"[:36],
-    }
+    stop_loss_order = build_binance_futures_stop_loss_order(
+        symbol=symbol_norm,
+        direction=direction_norm,
+        qty=qty_dec,
+        stop_loss=sl_dec,
+        client_order_id=client_id,
+    )
 
     take_profit_order = {
         "symbol": symbol_norm,
