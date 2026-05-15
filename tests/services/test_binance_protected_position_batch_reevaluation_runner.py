@@ -38,7 +38,11 @@ def test_batch_runner_processes_each_loaded_protected_position_once():
         },
         sl_stop_price_by_exit_key={"exit-key-1": Decimal("90")},
         fetch_current_price=lambda symbol, market: Decimal("111"),
-        run_replacement=lambda **kwargs: calls.append(kwargs) or {"status": "replaced"},
+        owner_id="worker-1",
+        claim_transition=lambda **kwargs: {"status": "claimed"},
+        run_replacement=lambda **kwargs: (
+            calls.append(kwargs) or {"status": "replaced"}
+        ),
     )
 
     assert result == [
@@ -161,8 +165,13 @@ def test_batch_runner_claims_trailing_transition_before_replacement():
             "owner_id": "worker-1",
         },
     )
-    assert calls[1][0] == "replace"
 
+    replace_calls = [
+        call for call in calls
+        if call[0] == "replace"
+    ]
+
+    assert len(replace_calls) == 1
 
 def test_batch_runner_blocks_replacement_when_claim_is_not_owned():
     from decimal import Decimal
