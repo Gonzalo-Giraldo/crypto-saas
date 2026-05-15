@@ -443,3 +443,47 @@ def test_replacement_pending_cleanup_when_old_sl_cancel_response_is_ambiguous():
         ("status", "trail-ambiguous-SL"),
         ("cancel", "old-sl-ambiguous"),
     ]
+
+def test_replacement_blocks_when_new_sl_status_payload_is_malformed():
+    from apps.worker.app.engine.binance_exit_stop_loss_replacement import (
+        replace_exit_stop_loss_authoritatively,
+    )
+
+    calls = []
+
+    def fake_create_sl(order_payload):
+        calls.append(("create", order_payload["clientAlgoId"]))
+        return {"status": "OK", "data": {"algoId": 666}}
+
+    def fake_fetch_status(*, client_algo_id, **kwargs):
+        calls.append(("status", client_algo_id))
+        return {"status": "OK", "response": None}
+
+    def fake_cancel_old(**kwargs):
+        calls.append(("cancel", kwargs))
+        return {"status": "CANCELED"}
+
+    result = replace_exit_stop_loss_authoritatively(
+        symbol="BTCUSDT",
+        direction="LONG",
+        qty="0.01",
+        entry_price="100",
+        old_stop_loss="90",
+        new_stop_loss="100",
+        old_sl_client_algo_id="old-sl-malformed",
+        replacement_client_order_id="trail-malformed",
+        create_sl_order=fake_create_sl,
+        fetch_sl_status=fake_fetch_status,
+        cancel_old_sl=fake_cancel_old,
+    )
+
+    assert result == {
+        "status": "blocked",
+        "reason": "replacement_sl_not_active",
+        "replacement_sl_classification": "UNKNOWN",
+    }
+
+    assert calls == [
+        ("create", "trail-malformed-SL"),
+        ("status", "trail-malformed-SL"),
+    ]
