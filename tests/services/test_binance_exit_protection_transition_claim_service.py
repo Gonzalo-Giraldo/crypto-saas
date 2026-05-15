@@ -327,3 +327,19 @@ def test_rejects_recovery_for_non_stale_claim():
         "allowed": False,
         "reason": "claim_not_stale",
     }
+
+def test_rejects_recovery_when_staleness_is_unknown():
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        can_recover_stale_transition_claim,
+    )
+
+    result = can_recover_stale_transition_claim(
+        staleness_status="UNKNOWN",
+        claim_owner_id="worker-1",
+        requester_owner_id="worker-1",
+    )
+
+    assert result == {
+        "allowed": False,
+        "reason": "claim_not_stale",
+    }
