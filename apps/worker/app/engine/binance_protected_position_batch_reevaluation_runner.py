@@ -174,22 +174,34 @@ def reevaluate_active_protected_positions_once(
             )
 
         except Exception as exc:
+            lifecycle_cleanup_error = None
+
             if claim_acquired and callable(complete_transition):
-                complete_transition(
-                    exit_key=exit_key,
-                    required_action=ACTION_ACTIVATE_TRAILING,
-                    owner_id=owner_id,
-                    final_status="ABANDONED",
+                try:
+                    complete_transition(
+                        exit_key=exit_key,
+                        required_action=ACTION_ACTIVATE_TRAILING,
+                        owner_id=owner_id,
+                        final_status="ABANDONED",
+                    )
+                except Exception as cleanup_exc:
+                    lifecycle_cleanup_error = str(cleanup_exc)
+
+            error_result = {
+                "status": "blocked",
+                "reason": "protected_position_reevaluation_error",
+                "error": str(exc),
+            }
+
+            if lifecycle_cleanup_error is not None:
+                error_result["lifecycle_cleanup_error"] = (
+                    lifecycle_cleanup_error
                 )
 
             results.append(
                 {
                     "exit_key": exit_key,
-                    "result": {
-                        "status": "blocked",
-                        "reason": "protected_position_reevaluation_error",
-                        "error": str(exc),
-                    },
+                    "result": error_result,
                 }
             )
 

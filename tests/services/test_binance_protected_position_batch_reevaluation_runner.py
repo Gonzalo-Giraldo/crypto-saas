@@ -51,6 +51,7 @@ def test_batch_runner_processes_each_loaded_protected_position_once():
             "result": {"status": "replaced"},
         }
     ]
+
     assert len(calls) == 1
 
 
@@ -425,3 +426,89 @@ def test_batch_runner_abandons_claim_when_replacement_raises_after_claim():
             "final_status": "ABANDONED",
         },
     )
+
+def test_batch_runner_abandons_claim_when_complete_transition_raises():
+    from decimal import Decimal
+
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    def fake_claim(**kwargs):
+        calls.append(("claim", kwargs))
+        return {"status": "claimed"}
+
+    def fake_replace(**kwargs):
+        calls.append(("replace", kwargs))
+        return {"status": "replaced"}
+
+    def fake_complete(**kwargs):
+        calls.append(("complete", kwargs))
+        raise RuntimeError("db_commit_failed")
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[
+            {
+                "exit_key": "exit-key-complete-exception",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "direction": "LONG",
+                "filled_qty": Decimal("0.01"),
+                "avg_entry_price": Decimal("100"),
+                "sl_client_algo_id": "sl-complete-exception",
+                "tp_client_algo_id": "tp-complete-exception",
+                "sl_status": "SUBMITTED",
+                "tp_status": "SUBMITTED",
+                "protection_status": "PROTECTED",
+            }
+        ],
+        protection_reconciliation_by_exit_key={
+            "exit-key-complete-exception": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={
+            "exit-key-complete-exception": Decimal("90")
+        },
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-1",
+        claim_transition=fake_claim,
+        complete_transition=fake_complete,
+        run_replacement=fake_replace,
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-complete-exception",
+            "result": {
+                "status": "blocked",
+                "reason": "protected_position_reevaluation_error",
+                "error": "db_commit_failed",
+                "lifecycle_cleanup_error": "db_commit_failed",
+            },
+        }
+    ]
+
+    claim_calls = [
+        call for call in calls
+        if call[0] == "claim"
+    ]
+
+    replace_calls = [
+        call for call in calls
+        if call[0] == "replace"
+    ]
+
+    complete_calls = [
+        call for call in calls
+        if call[0] == "complete"
+    ]
+
+    assert len(claim_calls) >= 1
+    assert len(replace_calls) == 1
+    assert len(complete_calls) >= 1
