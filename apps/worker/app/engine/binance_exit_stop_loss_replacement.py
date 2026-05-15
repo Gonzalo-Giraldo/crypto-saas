@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from apps.worker.app.engine.binance_algo_order_classifier import (
+    classify_algo_order_evidence,
+)
+from apps.worker.app.engine.binance_algo_order_evidence import (
+    extract_algo_order_evidence,
+)
 from apps.worker.app.engine.binance_futures_exit_orders import (
     build_binance_futures_stop_loss_order,
 )
 
 
-_ACTIVE_ALGO_STATUSES = {
-    "NEW",
-    "WORKING",
-    "ACCEPTED",
-}
+_ACTIVE_REPLACEMENT_CLASSIFICATION = "ACTIVE_EVIDENCE_PRESENT"
 
 
 def _is_favorable_replacement(
@@ -78,13 +80,15 @@ def replace_exit_stop_loss_authoritatively(
         client_algo_id=stop_loss_order["clientAlgoId"],
     )
 
-    response = status_result.get("response") or {}
-    algo_status = str(response.get("status") or "").upper().strip()
+    response = status_result.get("response") or status_result.get("data")
+    replacement_evidence = extract_algo_order_evidence(response)
+    replacement_classification = classify_algo_order_evidence(replacement_evidence)
 
-    if algo_status not in _ACTIVE_ALGO_STATUSES:
+    if replacement_classification != _ACTIVE_REPLACEMENT_CLASSIFICATION:
         return {
             "status": "blocked",
             "reason": "replacement_sl_not_active",
+            "replacement_sl_classification": replacement_classification,
         }
 
     cancel_result = cancel_old_sl(

@@ -293,3 +293,99 @@ def test_replacement_reports_pending_cleanup_when_old_sl_cancel_fails():
         ("status", "trail-2-SL"),
         ("cancel", "old-sl-1"),
     ]
+
+
+def test_replacement_uses_algo_evidence_classifier_before_canceling_old_sl():
+    from apps.worker.app.engine.binance_exit_stop_loss_replacement import (
+        replace_exit_stop_loss_authoritatively,
+    )
+
+    calls = []
+
+    def fake_create_sl(order_payload):
+        calls.append(("create", order_payload["clientAlgoId"]))
+        return {"status": "OK", "data": {"algoId": 555}}
+
+    def fake_fetch_status(*, client_algo_id, **kwargs):
+        calls.append(("status", client_algo_id))
+        return {
+            "status": "OK",
+            "response": {
+                "status": "PENDING_NEW",
+                "algoId": 555,
+                "clientAlgoId": client_algo_id,
+            },
+        }
+
+    def fake_cancel_old(*, client_algo_id, **kwargs):
+        calls.append(("cancel", client_algo_id))
+        return {"status": "CANCELED", "clientAlgoId": client_algo_id}
+
+    result = replace_exit_stop_loss_authoritatively(
+        symbol="BTCUSDT",
+        direction="LONG",
+        qty="0.01",
+        entry_price="100",
+        old_stop_loss="90",
+        new_stop_loss="100",
+        old_sl_client_algo_id="old-sl-1",
+        replacement_client_order_id="trail-classifier-1",
+        create_sl_order=fake_create_sl,
+        fetch_sl_status=fake_fetch_status,
+        cancel_old_sl=fake_cancel_old,
+    )
+
+    assert result["status"] == "replaced"
+    assert calls == [
+        ("create", "trail-classifier-1-SL"),
+        ("status", "trail-classifier-1-SL"),
+        ("cancel", "old-sl-1"),
+    ]
+
+
+def test_replacement_blocks_when_algo_evidence_classifier_is_unknown():
+    from apps.worker.app.engine.binance_exit_stop_loss_replacement import (
+        replace_exit_stop_loss_authoritatively,
+    )
+
+    calls = []
+
+    def fake_create_sl(order_payload):
+        calls.append(("create", order_payload["clientAlgoId"]))
+        return {"status": "OK", "data": {"algoId": 666}}
+
+    def fake_fetch_status(*, client_algo_id, **kwargs):
+        calls.append(("status", client_algo_id))
+        return {
+            "status": "TIMEOUT",
+            "error": "gateway_read_timeout",
+        }
+
+    def fake_cancel_old(*, client_algo_id, **kwargs):
+        calls.append(("cancel", client_algo_id))
+        return {"status": "CANCELED", "clientAlgoId": client_algo_id}
+
+    result = replace_exit_stop_loss_authoritatively(
+        symbol="BTCUSDT",
+        direction="LONG",
+        qty="0.01",
+        entry_price="100",
+        old_stop_loss="90",
+        new_stop_loss="100",
+        old_sl_client_algo_id="old-sl-1",
+        replacement_client_order_id="trail-classifier-2",
+        create_sl_order=fake_create_sl,
+        fetch_sl_status=fake_fetch_status,
+        cancel_old_sl=fake_cancel_old,
+    )
+
+    assert result == {
+        "status": "blocked",
+        "reason": "replacement_sl_not_active",
+        "replacement_sl_classification": "UNKNOWN",
+    }
+
+    assert calls == [
+        ("create", "trail-classifier-2-SL"),
+        ("status", "trail-classifier-2-SL"),
+    ]
