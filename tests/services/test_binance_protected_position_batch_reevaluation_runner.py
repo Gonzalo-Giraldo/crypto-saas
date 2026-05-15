@@ -512,3 +512,64 @@ def test_batch_runner_abandons_claim_when_complete_transition_raises():
     assert len(claim_calls) >= 1
     assert len(replace_calls) == 1
     assert len(complete_calls) >= 1
+
+def test_batch_runner_acquires_transition_claim_only_once_per_position():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    def fake_claim(**kwargs):
+        calls.append(("claim", kwargs))
+        if len([call for call in calls if call[0] == "claim"]) == 1:
+            return {"status": "claimed"}
+        return {"status": "already_owned"}
+
+    def fake_replace(**kwargs):
+        calls.append(("replace", kwargs))
+        return {"status": "replaced"}
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[
+            {
+                "exit_key": "exit-key-single-claim",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "direction": "LONG",
+                "filled_qty": Decimal("0.01"),
+                "avg_entry_price": Decimal("100"),
+                "sl_client_algo_id": "sl-single-claim",
+                "tp_client_algo_id": "tp-single-claim",
+                "sl_status": "SUBMITTED",
+                "tp_status": "SUBMITTED",
+                "protection_status": "PROTECTED",
+            }
+        ],
+        protection_reconciliation_by_exit_key={
+            "exit-key-single-claim": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={"exit-key-single-claim": Decimal("90")},
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-single-claim",
+        claim_transition=fake_claim,
+        run_replacement=fake_replace,
+    )
+
+    claim_calls = [call for call in calls if call[0] == "claim"]
+    replace_calls = [call for call in calls if call[0] == "replace"]
+
+    assert result == [
+        {
+            "exit_key": "exit-key-single-claim",
+            "result": {"status": "replaced"},
+        }
+    ]
+    assert len(claim_calls) == 1
+    assert len(replace_calls) == 1
