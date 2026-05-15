@@ -93,3 +93,38 @@ def claim_exit_protection_transition(
         "required_action": required_action_value,
         "owner_id": owner_id_value,
     }
+
+
+def evaluate_transition_claim_staleness(
+    *,
+    claim_status,
+    updated_at,
+    now,
+    stale_after_seconds: int,
+):
+    status = str(claim_status or "").upper().strip()
+
+    if status != "ACTIVE":
+        return {
+            "status": "NOT_ACTIVE",
+            "reason": "claim_not_active",
+        }
+
+    try:
+        age_seconds = (now - updated_at).total_seconds()
+    except Exception:
+        return {
+            "status": "UNKNOWN",
+            "reason": "claim_age_unknown",
+        }
+
+    if age_seconds > stale_after_seconds:
+        return {
+            "status": "STALE",
+            "reason": "active_claim_stale",
+        }
+
+    return {
+        "status": "ACTIVE",
+        "reason": "active_claim_fresh",
+    }

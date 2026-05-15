@@ -125,3 +125,65 @@ def test_unsupported_required_action_fails_closed():
             required_action="UNSAFE_UNKNOWN_ACTION",
             owner_id="worker-1",
         )
+
+
+def test_evaluate_transition_claim_staleness_marks_old_active_claim_stale():
+    from datetime import datetime, timedelta
+
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        evaluate_transition_claim_staleness,
+    )
+
+    result = evaluate_transition_claim_staleness(
+        claim_status="ACTIVE",
+        updated_at=datetime.utcnow() - timedelta(minutes=31),
+        now=datetime.utcnow(),
+        stale_after_seconds=1800,
+    )
+
+    assert result == {
+        "status": "STALE",
+        "reason": "active_claim_stale",
+    }
+
+
+def test_evaluate_transition_claim_staleness_keeps_fresh_active_claim_active():
+    from datetime import datetime, timedelta
+
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        evaluate_transition_claim_staleness,
+    )
+
+    now = datetime.utcnow()
+
+    result = evaluate_transition_claim_staleness(
+        claim_status="ACTIVE",
+        updated_at=now - timedelta(minutes=5),
+        now=now,
+        stale_after_seconds=1800,
+    )
+
+    assert result == {
+        "status": "ACTIVE",
+        "reason": "active_claim_fresh",
+    }
+
+
+def test_evaluate_transition_claim_staleness_marks_non_active_claim_not_active():
+    from datetime import datetime
+
+    from apps.api.app.services.binance_exit_protection_transition_claim_service import (
+        evaluate_transition_claim_staleness,
+    )
+
+    result = evaluate_transition_claim_staleness(
+        claim_status="FINALIZED",
+        updated_at=datetime.utcnow(),
+        now=datetime.utcnow(),
+        stale_after_seconds=1800,
+    )
+
+    assert result == {
+        "status": "NOT_ACTIVE",
+        "reason": "claim_not_active",
+    }
