@@ -389,3 +389,57 @@ def test_replacement_blocks_when_algo_evidence_classifier_is_unknown():
         ("create", "trail-classifier-2-SL"),
         ("status", "trail-classifier-2-SL"),
     ]
+
+def test_replacement_pending_cleanup_when_old_sl_cancel_response_is_ambiguous():
+    from apps.worker.app.engine.binance_exit_stop_loss_replacement import (
+        replace_exit_stop_loss_authoritatively,
+    )
+
+    calls = []
+
+    def fake_create_sl(order_payload):
+        calls.append(("create", order_payload["clientAlgoId"]))
+        return {"status": "OK", "data": {"algoId": 555}}
+
+    def fake_fetch_status(*, client_algo_id, **kwargs):
+        calls.append(("status", client_algo_id))
+        return {
+            "status": "OK",
+            "response": {
+                "status": "NEW",
+                "algoId": 555,
+                "clientAlgoId": client_algo_id,
+            },
+        }
+
+    def fake_cancel_old(*, client_algo_id, **kwargs):
+        calls.append(("cancel", client_algo_id))
+        return {"status": "UNKNOWN", "clientAlgoId": client_algo_id}
+
+    result = replace_exit_stop_loss_authoritatively(
+        symbol="BTCUSDT",
+        direction="LONG",
+        qty="0.01",
+        entry_price="100",
+        old_stop_loss="90",
+        new_stop_loss="100",
+        old_sl_client_algo_id="old-sl-ambiguous",
+        replacement_client_order_id="trail-ambiguous",
+        create_sl_order=fake_create_sl,
+        fetch_sl_status=fake_fetch_status,
+        cancel_old_sl=fake_cancel_old,
+    )
+
+    assert result == {
+        "status": "replacement_pending_cleanup",
+        "reason": "old_sl_cancel_failed",
+        "old_sl_client_algo_id": "old-sl-ambiguous",
+        "new_sl_client_algo_id": "trail-ambiguous-SL",
+        "new_sl_algo_id": 555,
+    }
+
+    assert calls == [
+        ("create", "trail-ambiguous-SL"),
+        ("status", "trail-ambiguous-SL"),
+        ("cancel", "old-sl-ambiguous"),
+    ]
