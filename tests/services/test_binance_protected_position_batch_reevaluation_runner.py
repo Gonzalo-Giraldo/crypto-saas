@@ -669,3 +669,65 @@ def test_batch_runner_persists_unknown_quarantine_after_pending_cleanup():
             "final_status": "ABANDONED",
         },
     )
+
+def test_batch_runner_blocks_trailing_mutation_when_trading_disabled():
+    from decimal import Decimal
+    from apps.worker.app.engine.binance_protected_position_batch_reevaluation_runner import (
+        reevaluate_active_protected_positions_once,
+    )
+
+    calls = []
+
+    def fake_claim(**kwargs):
+        calls.append(("claim", kwargs))
+        return {"status": "claimed"}
+
+    def fake_replace(**kwargs):
+        calls.append(("replace", kwargs))
+        return {"status": "replaced"}
+
+    result = reevaluate_active_protected_positions_once(
+        protected_positions=[
+            {
+                "exit_key": "exit-key-kill-switch",
+                "symbol": "BTCUSDT",
+                "market": "FUTURES",
+                "direction": "LONG",
+                "filled_qty": Decimal("0.01"),
+                "avg_entry_price": Decimal("100"),
+                "sl_client_algo_id": "sl-kill-switch",
+                "tp_client_algo_id": "tp-kill-switch",
+                "sl_status": "SUBMITTED",
+                "tp_status": "SUBMITTED",
+                "protection_status": "PROTECTED",
+            }
+        ],
+        protection_reconciliation_by_exit_key={
+            "exit-key-kill-switch": {
+                "protection_state": "PROTECTED",
+                "sl_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "tp_classification": "ACTIVE_EVIDENCE_PRESENT",
+                "protection_unknown": False,
+            }
+        },
+        sl_stop_price_by_exit_key={
+            "exit-key-kill-switch": Decimal("90")
+        },
+        fetch_current_price=lambda symbol, market: Decimal("111"),
+        owner_id="worker-kill-switch",
+        is_trading_enabled=lambda: False,
+        claim_transition=fake_claim,
+        run_replacement=fake_replace,
+    )
+
+    assert result == [
+        {
+            "exit_key": "exit-key-kill-switch",
+            "result": {
+                "status": "blocked",
+                "reason": "trading_disabled",
+            },
+        }
+    ]
+
+    assert calls == []

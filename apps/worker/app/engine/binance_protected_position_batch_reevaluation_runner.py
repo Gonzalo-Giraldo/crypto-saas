@@ -16,6 +16,7 @@ def reevaluate_active_protected_positions_once(
     sl_stop_price_by_exit_key: dict | None = None,
     fetch_current_price=None,
     owner_id: str | None = None,
+    is_trading_enabled=None,
     claim_transition=None,
     complete_transition=None,
     persist_reconciliation=None,
@@ -77,6 +78,33 @@ def reevaluate_active_protected_positions_once(
                 continue
 
             transition_claim = None
+
+            if callable(is_trading_enabled):
+                try:
+                    trading_enabled = is_trading_enabled()
+                except Exception:
+                    results.append(
+                        {
+                            "exit_key": exit_key,
+                            "result": {
+                                "status": "blocked",
+                                "reason": "trading_enabled_unknown",
+                            },
+                        }
+                    )
+                    continue
+
+                if trading_enabled is not True:
+                    results.append(
+                        {
+                            "exit_key": exit_key,
+                            "result": {
+                                "status": "blocked",
+                                "reason": "trading_disabled",
+                            },
+                        }
+                    )
+                    continue
 
             if not callable(claim_transition):
                 results.append(
