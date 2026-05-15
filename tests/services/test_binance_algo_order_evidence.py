@@ -61,3 +61,38 @@ def test_accepts_alternate_identifier_spellings_without_classifying():
     assert evidence["client_algo_id"] == "cid-tp"
     assert evidence["executed_qty"] == "0.01"
     assert evidence["protection_active_declared"] is False
+
+
+def test_extract_algo_order_evidence_preserves_stop_price_when_present():
+    from apps.worker.app.engine.binance_algo_order_evidence import (
+        extract_algo_order_evidence,
+    )
+
+    out = extract_algo_order_evidence(
+        {
+            "status": "NEW",
+            "algoId": 123,
+            "clientAlgoId": "sl-1",
+            "stopPrice": "90000",
+        }
+    )
+
+    assert out["stop_price"] == "90000"
+    assert out["has_stop_price"] is True
+
+
+def test_extract_algo_order_evidence_marks_missing_stop_price():
+    from apps.worker.app.engine.binance_algo_order_evidence import (
+        extract_algo_order_evidence,
+    )
+
+    out = extract_algo_order_evidence(
+        {
+            "status": "NEW",
+            "algoId": 123,
+            "clientAlgoId": "sl-1",
+        }
+    )
+
+    assert out["stop_price"] is None
+    assert out["has_stop_price"] is False

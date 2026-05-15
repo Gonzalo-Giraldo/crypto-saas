@@ -15,6 +15,8 @@ def extract_algo_order_evidence(payload: dict[str, Any] | None) -> dict[str, Any
             "has_client_algo_id": False,
             "executed_qty": None,
             "has_executed_qty": False,
+            "stop_price": None,
+            "has_stop_price": False,
             "raw_payload_type": type(payload).__name__,
             "protection_active_declared": False,
         }
@@ -31,6 +33,12 @@ def extract_algo_order_evidence(payload: dict[str, Any] | None) -> dict[str, Any
         or payload.get("cumQty")
         or payload.get("cumBase")
     )
+    stop_price = (
+        payload.get("stopPrice")
+        or payload.get("stop_price")
+        or payload.get("triggerPrice")
+        or payload.get("trigger_price")
+    )
 
     return {
         "has_payload": True,
@@ -42,6 +50,8 @@ def extract_algo_order_evidence(payload: dict[str, Any] | None) -> dict[str, Any
         "has_client_algo_id": bool(str(client_algo_id or "").strip()),
         "executed_qty": executed_qty,
         "has_executed_qty": executed_qty is not None,
+        "stop_price": stop_price,
+        "has_stop_price": stop_price is not None,
         "raw_payload_type": "dict",
         "protection_active_declared": False,
     }
