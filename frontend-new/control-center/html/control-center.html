@@ -6,6 +6,8 @@
   <title>Control Center</title>
   <!-- Responsibility: Shell visual mínimo del módulo principal y contenedor del módulo activo -->
   <link rel="stylesheet" href="../css/control-center.css">
+  <link rel="stylesheet" href="../../modules/runtime-status/css/runtime-status.css">
+  <link rel="stylesheet" href="../../modules/autopick-status/css/autopick-status.css">
   <link rel="stylesheet" href="../../modules/testing-center/css/testing-center.css">
   <link rel="stylesheet" href="../../modules/broker-connectivity/css/broker-connectivity.css">
 </head>
@@ -60,8 +62,19 @@
   </div>
 
   <script src="../../shared/js/config.js"></script>
+  <script src="../../shared/js/event-bus.js"></script>
+  <script src="../../shared/js/runtime-store.js"></script>
   <script src="../../shared/js/api-client.js"></script>
   <script src="../../shared/js/request-runner.js"></script>
+  <script src="../../modules/runtime-status/js/runtime-status.service.js"></script>
+  <script src="../../modules/runtime-status/js/runtime-status.presenter.js"></script>
+  <script src="../../modules/runtime-status/js/runtime-status.controller.js"></script>
+  <script src="../../modules/runtime-status/js/runtime-status.module.js"></script>
+  <script src="../../modules/autopick-status/js/autopick-status.service.js"></script>
+  <script src="../../modules/autopick-status/js/autopick-status.presenter.js"></script>
+  <script src="../../modules/autopick-status/js/autopick-status.controller.js"></script>
+  <script src="../../modules/autopick-status/js/autopick-status.module.js"></script>
+  <script src="../js/control-center.orchestrator.js"></script>
   <script src="../../modules/testing-center/js/testing-center.js"></script>
   <script src="../js/control-center.js"></script>
   <script src="../../modules/broker-connectivity/js/broker-connectivity.js"></script>

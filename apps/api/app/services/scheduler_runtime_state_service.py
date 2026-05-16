@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
+
+from apps.api.app.models.scheduler_runtime_state import SchedulerRuntimeState
+
+
+AUTO_PICK_SCHEDULER_NAME = "auto_pick_internal"
+
+
+def upsert_scheduler_runtime_state(
+    db: Session,
+    *,
+    scheduler_name: str,
+    last_tick_status: str,
+    dry_run: bool,
+    trading_enabled: bool,
+    last_tick_duration_ms: int | None = None,
+    last_error: str | None = None,
+    overlap_blocked: bool = False,
+    runtime_locked: bool = False,
+    last_candidate_symbol: str | None = None,
+    last_candidate_score: str | None = None,
+    last_execution_mode: str | None = None,
+) -> SchedulerRuntimeState:
+    scheduler_name_value = str(scheduler_name or "").strip()
+    if not scheduler_name_value:
+        raise ValueError("scheduler_name_required")
+
+    status_value = str(last_tick_status or "UNKNOWN").upper().strip()
+    if not status_value:
+        status_value = "UNKNOWN"
+
+    row = db.get(SchedulerRuntimeState, scheduler_name_value)
+
+    if row is None:
+        row = SchedulerRuntimeState(scheduler_name=scheduler_name_value)
+        db.add(row)
+
+    row.last_tick_at = datetime.now(timezone.utc)
+    row.last_tick_status = status_value
+    row.last_tick_duration_ms = last_tick_duration_ms
+    row.last_error = last_error
+    row.overlap_blocked = bool(overlap_blocked)
+    row.runtime_locked = bool(runtime_locked)
+    row.dry_run = bool(dry_run)
+    row.trading_enabled = bool(trading_enabled)
+    row.last_candidate_symbol = last_candidate_symbol
+    row.last_candidate_score = last_candidate_score
+    row.last_execution_mode = last_execution_mode
+
+    db.flush()
+    return row
+
+
+def get_scheduler_runtime_state(
+    db: Session,
+    *,
+    scheduler_name: str,
+) -> SchedulerRuntimeState | None:
+    scheduler_name_value = str(scheduler_name or "").strip()
+    if not scheduler_name_value:
+        return None
+
+    return db.get(SchedulerRuntimeState, scheduler_name_value)
+
+
+def record_scheduler_tick_ok(
+    db: Session,
+    *,
+    scheduler_name: str,
+    duration_ms: int,
+    dry_run: bool,
+    trading_enabled: bool,
+    last_candidate_symbol: str | None = None,
+    last_candidate_score: str | None = None,
+    last_execution_mode: str | None = None,
+) -> SchedulerRuntimeState:
+    return upsert_scheduler_runtime_state(
+        db,
+        scheduler_name=scheduler_name,
+        last_tick_status="OK",
+        last_tick_duration_ms=duration_ms,
+        dry_run=dry_run,
+        trading_enabled=trading_enabled,
+        last_error=None,
+        overlap_blocked=False,
+        runtime_locked=False,
+        last_candidate_symbol=last_candidate_symbol,
+        last_candidate_score=last_candidate_score,
+        last_execution_mode=last_execution_mode,
+    )
+
+
+def record_scheduler_tick_error(
+    db: Session,
+    *,
+    scheduler_name: str,
+    duration_ms: int,
+    dry_run: bool,
+    trading_enabled: bool,
+    last_error: str,
+    last_execution_mode: str | None = None,
+) -> SchedulerRuntimeState:
+    return upsert_scheduler_runtime_state(
+        db,
+        scheduler_name=scheduler_name,
+        last_tick_status="ERROR",
+        last_tick_duration_ms=duration_ms,
+        dry_run=dry_run,
+        trading_enabled=trading_enabled,
+        last_error=last_error,
+        overlap_blocked=False,
+        runtime_locked=False,
+        last_execution_mode=last_execution_mode,
+    )
+
+
+def record_scheduler_overlap_blocked(
+    db: Session,
+    *,
+    scheduler_name: str,
+    dry_run: bool,
+    trading_enabled: bool,
+    last_execution_mode: str | None = None,
+) -> SchedulerRuntimeState:
+    return upsert_scheduler_runtime_state(
+        db,
+        scheduler_name=scheduler_name,
+        last_tick_status="OVERLAP_BLOCKED",
+        dry_run=dry_run,
+        trading_enabled=trading_enabled,
+        last_error=None,
+        overlap_blocked=True,
+        runtime_locked=True,
+        last_execution_mode=last_execution_mode,
+    )

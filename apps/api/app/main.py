@@ -27,6 +27,8 @@ import apps.api.app.models.session_revocation
 import apps.api.app.models.runtime_setting
 import apps.api.app.models.idempotency_key
 import apps.api.app.models.binance_exit_protection_transition_claim
+import apps.api.app.models.scheduler_runtime_state
+import apps.api.app.models.scheduler_tick_journal
 import apps.api.app.models.risk_profile_config
 import apps.api.app.models.user_risk_settings
 import apps.api.app.models.strategy_runtime_policy
@@ -38,15 +40,25 @@ import apps.api.app.models.learning_rollup_hourly
 import threading
 import os
 import time
+from datetime import datetime, timezone
 
 from apps.api.app.api.users import router as users_router
 from apps.api.app.api.admin_recovery import router as admin_recovery_router
 from apps.api.app.api.trading_control import router as trading_control_router
+from apps.api.app.api.runtime_status import router as runtime_status_router
 
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
 from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
+from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
+from apps.api.app.services.scheduler_runtime_state_service import (
+    AUTO_PICK_SCHEDULER_NAME,
+    record_scheduler_overlap_blocked,
+    record_scheduler_tick_error,
+    record_scheduler_tick_ok,
+)
+from apps.api.app.services.trading_controls import get_trading_enabled
 
 
 @asynccontextmanager
@@ -152,6 +164,9 @@ def _ensure_ibkr_fills_columns():
             conn.execute(text("ALTER TABLE ibkr_fills ADD COLUMN IF NOT EXISTS avg_price DOUBLE PRECISION"))
 
 
+
+
+
 def _safe_startup_schema_ensures():
     for ensure_func in (
         _ensure_runtime_policy_columns,
@@ -175,6 +190,7 @@ app.include_router(binance_portfolio_router)
 app.include_router(binance_execution_router)
 app.include_router(admin_recovery_router)
 app.include_router(trading_control_router)
+app.include_router(runtime_status_router)
 
 @app.get("/healthz")
 def healthz():
@@ -264,6 +280,8 @@ def _global_shadow_tick_once(*, db) -> dict | None:
 
 
 def _auto_pick_tick_once() -> None:
+    started_at = time.monotonic()
+    started_at_wall = datetime.now(timezone.utc)
     db = SessionLocal()
     try:
         exit_out = {
@@ -313,9 +331,7 @@ def _auto_pick_tick_once() -> None:
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
         shadow_out = _global_shadow_tick_once(db=db)
-        print(
-            "[auto-pick-scheduler] tick ok",
-            {
+        tick_details = {
                 "monitor_inserted": monitor.get("inserted", 0),
                 "executed_count": out.get("executed_count", 0),
                 "dry_run": out.get("dry_run", True),
@@ -332,10 +348,73 @@ def _auto_pick_tick_once() -> None:
                 "shadow_symbol": (shadow_out or {}).get("symbol"),
                 "shadow_persisted": (shadow_out or {}).get("persisted"),
                 "shadow_executed": (shadow_out or {}).get("executed"),
-            },
-            flush=True,
+            }
+
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        trading_enabled = bool(get_trading_enabled(db))
+        execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
+        candidate_symbol = (shadow_out or {}).get("symbol")
+        candidate_score = str((shadow_out or {}).get("score")) if (shadow_out or {}).get("score") is not None else None
+
+        record_scheduler_tick_ok(
+            db,
+            scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+            duration_ms=duration_ms,
+            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            trading_enabled=trading_enabled,
+            last_candidate_symbol=candidate_symbol,
+            last_candidate_score=candidate_score,
+            last_execution_mode=execution_mode,
         )
+        record_scheduler_tick_journal(
+            db,
+            scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+            started_at=started_at_wall,
+            finished_at=datetime.now(timezone.utc),
+            duration_ms=duration_ms,
+            status="OK",
+            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            trading_enabled=trading_enabled,
+            candidate_symbol=candidate_symbol,
+            candidate_score=candidate_score,
+            execution_mode=execution_mode,
+            mutation_attempted=False,
+            mutation_executed=False,
+        )
+        db.commit()
+
+        print("[auto-pick-scheduler] tick ok", tick_details, flush=True)
     except Exception as exc:
+        try:
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            trading_enabled = bool(get_trading_enabled(db))
+            execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
+            record_scheduler_tick_error(
+                db,
+                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+                duration_ms=duration_ms,
+                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                trading_enabled=trading_enabled,
+                last_error=str(exc),
+                last_execution_mode=execution_mode,
+            )
+            record_scheduler_tick_journal(
+                db,
+                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+                started_at=started_at_wall,
+                finished_at=datetime.now(timezone.utc),
+                duration_ms=duration_ms,
+                status="ERROR",
+                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                trading_enabled=trading_enabled,
+                execution_mode=execution_mode,
+                mutation_attempted=False,
+                mutation_executed=False,
+                error=str(exc),
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
         print(f"[auto-pick-scheduler] tick error: {exc}", flush=True)
     finally:
         db.close()
@@ -350,6 +429,38 @@ def _auto_pick_tick_once_with_lock() -> None:
             conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _AUTO_PICK_LOCK_KEY}).scalar()
         )
     if not got_lock:
+        db = SessionLocal()
+        started_at_wall = datetime.now(timezone.utc)
+        try:
+            trading_enabled = bool(get_trading_enabled(db))
+            execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
+            record_scheduler_overlap_blocked(
+                db,
+                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                trading_enabled=trading_enabled,
+                last_execution_mode=execution_mode,
+            )
+            record_scheduler_tick_journal(
+                db,
+                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+                started_at=started_at_wall,
+                finished_at=datetime.now(timezone.utc),
+                duration_ms=0,
+                status="OVERLAP_BLOCKED",
+                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                trading_enabled=trading_enabled,
+                overlap_blocked=True,
+                runtime_locked=True,
+                execution_mode=execution_mode,
+                mutation_attempted=False,
+                mutation_executed=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
         return
     try:
         _auto_pick_tick_once()

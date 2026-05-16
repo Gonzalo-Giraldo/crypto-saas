@@ -1,0 +1,128 @@
+.autopick-status {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.autopick-status-header,
+.autopick-panel,
+.autopick-card {
+  background: #ffffff;
+  border: 1px solid #d9e1e8;
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+}
+
+.autopick-status-header {
+  padding: 20px;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+}
+
+.autopick-status-header h3,
+.autopick-panel h4 {
+  margin: 0;
+  color: #16202a;
+}
+
+.autopick-status-header p {
+  margin: 8px 0 0;
+  max-width: 860px;
+  color: #5f6c7b;
+  line-height: 1.5;
+}
+
+.autopick-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.autopick-card {
+  padding: 18px;
+}
+
+.autopick-card-label {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #e8eef5;
+  color: #1f3a5f;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.autopick-card strong {
+  display: block;
+  color: #16202a;
+  font-size: 1.25rem;
+}
+
+.autopick-card p {
+  margin: 8px 0 0;
+  color: #5f6c7b;
+  line-height: 1.45;
+}
+
+.autopick-panel {
+  padding: 20px;
+}
+
+.autopick-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.autopick-button {
+  min-width: 120px;
+  padding: 10px 14px;
+  border: 1px solid #1f3a5f;
+  border-radius: 12px;
+  background: #1f3a5f;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.autopick-console {
+  min-height: 280px;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.autopick-console.is-error {
+  border-color: #7f1d1d;
+  color: #fecaca;
+}
+
+@media (max-width: 1100px) {
+  .autopick-grid {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .autopick-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .autopick-panel-header {
+    flex-direction: column;
+  }
+}
