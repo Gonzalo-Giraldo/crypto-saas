@@ -52,3 +52,91 @@ def test_failed_transition_requires_error_message():
         return
 
     raise AssertionError("FAILED transition must require error_message")
+
+
+def test_verified_transition_requires_checksum():
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "EXPORTED"
+        checksum = ""
+        finished_at = object()
+        destination_path_or_uri = "/tmp/export"
+        snapshot_count = 1
+        candidate_count = 0
+
+    try:
+        apply_export_transition(Row(), "VERIFIED")
+    except ValueError as exc:
+        assert "verified_export_requires_checksum" in str(exc)
+        return
+
+    raise AssertionError("VERIFIED transition must require checksum")
+
+
+def test_verified_transition_requires_finished_at():
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "EXPORTED"
+        checksum = "abc123"
+        finished_at = None
+        destination_path_or_uri = "/tmp/export"
+        snapshot_count = 1
+        candidate_count = 0
+
+    try:
+        apply_export_transition(Row(), "VERIFIED")
+    except ValueError as exc:
+        assert "verified_export_requires_finished_at" in str(exc)
+        return
+
+    raise AssertionError("VERIFIED transition must require finished_at")
+
+
+def test_verified_transition_requires_destination():
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "EXPORTED"
+        checksum = "abc123"
+        finished_at = object()
+        destination_path_or_uri = ""
+        snapshot_count = 1
+        candidate_count = 0
+
+    try:
+        apply_export_transition(Row(), "VERIFIED")
+    except ValueError as exc:
+        assert "verified_export_requires_destination" in str(exc)
+        return
+
+    raise AssertionError("VERIFIED transition must require destination")
+
+
+def test_verified_transition_requires_exported_rows():
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "EXPORTED"
+        checksum = "abc123"
+        finished_at = object()
+        destination_path_or_uri = "/tmp/export"
+        snapshot_count = 0
+        candidate_count = 0
+
+    try:
+        apply_export_transition(Row(), "VERIFIED")
+    except ValueError as exc:
+        assert "verified_export_requires_rows" in str(exc)
+        return
+
+    raise AssertionError("VERIFIED transition must require exported rows")

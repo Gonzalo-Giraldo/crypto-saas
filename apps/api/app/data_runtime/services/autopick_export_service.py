@@ -80,5 +80,22 @@ def apply_export_transition(row, next_status: str):
     if nxt == "FAILED" and not str(getattr(row, "error_message", "") or "").strip():
         raise ValueError("export_failure_requires_error_message")
 
+    if nxt == "VERIFIED" and not str(getattr(row, "checksum", "") or "").strip():
+        raise ValueError("verified_export_requires_checksum")
+
+    if nxt == "VERIFIED" and getattr(row, "finished_at", None) is None:
+        raise ValueError("verified_export_requires_finished_at")
+
+    if nxt == "VERIFIED" and not str(
+        getattr(row, "destination_path_or_uri", "") or ""
+    ).strip():
+        raise ValueError("verified_export_requires_destination")
+
+    snapshot_count = int(getattr(row, "snapshot_count", 0) or 0)
+    candidate_count = int(getattr(row, "candidate_count", 0) or 0)
+
+    if nxt == "VERIFIED" and snapshot_count <= 0 and candidate_count <= 0:
+        raise ValueError("verified_export_requires_rows")
+
     row.status = nxt
     return row
