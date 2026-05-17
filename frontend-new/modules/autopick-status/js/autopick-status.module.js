@@ -9,6 +9,7 @@
       window.AutopickStatusController.unmount();
     }
   }
+
   function setText(selector, value) {
     const node = root ? root.querySelector(selector) : null;
     if (node) {
@@ -35,6 +36,7 @@
     body.textContent = '';
 
     const safeRows = Array.isArray(rows) ? rows : [];
+
     if (safeRows.length === 0) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
@@ -45,7 +47,7 @@
       return;
     }
 
-    safeRows.forEach((candidate) => {
+    safeRows.slice(0, 5).forEach((candidate) => {
       const row = document.createElement('tr');
       row.classList.toggle('is-selected', Boolean(candidate.selected));
 
@@ -57,10 +59,10 @@
         candidate.atrRisk,
         candidate.volumeRelative,
         candidate.reason,
-        candidate.selected ? 'YES' : 'NO',
+        '→',
       ].forEach((value) => {
         const cell = document.createElement('td');
-        cell.textContent = value;
+        cell.textContent = value === null || value === undefined ? 'N/A' : value;
         row.appendChild(cell);
       });
 
@@ -77,38 +79,25 @@
     container.textContent = '';
 
     const safeRows = Array.isArray(rows) ? rows : [];
+
     if (safeRows.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'autopick-trace-empty';
-      empty.textContent = 'No auto-pick trace available.';
-      container.appendChild(empty);
+      container.textContent = 'No auto-pick trace available.';
       return;
     }
 
-    safeRows.forEach((row, index) => {
+    safeRows.slice(0, 5).forEach((traceRow, index) => {
       const item = document.createElement('article');
-      item.className = 'autopick-trace-step';
+      item.className = 'ap-trace-step';
 
-      const stepIndex = document.createElement('div');
-      stepIndex.className = 'autopick-trace-index';
-      stepIndex.textContent = String(index + 1);
-
-      const component = document.createElement('div');
-      component.className = 'autopick-trace-component';
-      component.textContent = row.label || 'Step';
-
-      const status = document.createElement('div');
-      status.className = 'autopick-trace-status';
-      status.textContent = row.value || 'UNKNOWN';
-
-      const detail = document.createElement('div');
-      detail.className = 'autopick-trace-detail';
-      detail.textContent = row.detail || '';
-
-      item.appendChild(stepIndex);
-      item.appendChild(component);
-      item.appendChild(status);
-      item.appendChild(detail);
+      item.innerHTML = `
+        <div class="ap-trace-number">${index + 1}</div>
+        <div class="ap-trace-icon">${
+          ['◷', '◎', '◌', '▤', '⌘'][index] || '•'
+        }</div>
+        <strong>${traceRow.label || 'Step'}</strong>
+        <span class="ap-badge">${traceRow.value || 'UNKNOWN'}</span>
+        <p>${traceRow.detail || ''}</p>
+      `;
 
       container.appendChild(item);
     });
@@ -116,143 +105,125 @@
 
   function getTemplate() {
     return `
-      <section class="autopick-status" aria-label="Auto-pick Status module">
-        <header class="autopick-header">
+      <section class="ap" aria-label="Auto-pick Status module">
+        <header class="ap-header">
           <div>
             <h3>Auto-pick Status</h3>
-            <p>Operational visibility for scheduler ticks, dry-run/live posture, overlap blocking, last candidate, and tick errors.</p>
+            <p>Real-time auto-pick runtime status, observation summary, and candidate ranking.</p>
           </div>
+          <button id="autopick-refresh-button" type="button" class="ap-refresh">⟳ Refresh Now</button>
         </header>
 
-        <section class="autopick-grid" aria-label="Auto-pick status cards">
-          <article class="autopick-card">
-            <span class="autopick-card-label">Scheduler</span>
-            <strong id="autopick-scheduler-state">UNKNOWN</strong>
-            <p id="autopick-interval">Interval unknown.</p>
+        <section class="ap-cards" aria-label="Auto-pick status cards">
+          <article class="ap-card">
+            <div class="ap-card-icon">◷</div>
+            <div>
+              <h4>Scheduler</h4>
+              <p>Interval: <strong id="autopick-interval">UNKNOWN</strong></p>
+              <p>Mode: <strong id="autopick-mode">UNKNOWN</strong></p>
+              <p>Execution: <strong id="autopick-execution-mode">UNKNOWN</strong></p>
+            </div>
           </article>
 
-          <article class="autopick-card">
-            <span class="autopick-card-label">Mode</span>
-            <strong id="autopick-mode">UNKNOWN</strong>
-            <p id="autopick-trading-state">Trading state unknown.</p>
+          <article class="ap-card">
+            <div class="ap-card-icon">⌁</div>
+            <div>
+              <h4>Last Tick</h4>
+              <p>Status: <strong id="autopick-last-tick-status">UNKNOWN</strong></p>
+              <p>At: <strong id="autopick-last-tick-at">NO TICK RECORDED</strong></p>
+            </div>
           </article>
 
-          <article class="autopick-card">
-            <span class="autopick-card-label">Last Tick</span>
-            <strong id="autopick-last-tick-status">UNKNOWN</strong>
-            <p id="autopick-last-tick-at">No tick recorded.</p>
+          <article class="ap-card">
+            <div class="ap-card-icon">▥</div>
+            <div>
+              <h4>Trading</h4>
+              <p>State: <strong id="autopick-trading-state">UNKNOWN</strong></p>
+              <p>Lock: <strong id="autopick-lock-state">UNKNOWN</strong></p>
+              <p>Duration: <strong id="autopick-duration">UNKNOWN</strong></p>
+            </div>
           </article>
 
-          <article class="autopick-card">
-            <span class="autopick-card-label">Runtime Lock</span>
-            <strong id="autopick-lock-state">UNKNOWN</strong>
-            <p id="autopick-duration">Duration unknown.</p>
-          </article>
-
-          <article class="autopick-card">
-            <span class="autopick-card-label">Candidate</span>
-            <strong id="autopick-candidate">NONE</strong>
-            <p id="autopick-score">Score unavailable.</p>
-          </article>
-
-          <article class="autopick-card">
-            <span class="autopick-card-label">Execution Mode</span>
-            <strong id="autopick-execution-mode">UNKNOWN</strong>
-            <p id="autopick-last-error">No error.</p>
+          <article class="ap-card">
+            <div class="ap-card-icon">◎</div>
+            <div>
+              <h4>Candidate</h4>
+              <p>Symbol: <strong id="autopick-candidate">NONE</strong></p>
+              <p>Score: <strong id="autopick-score">N/A</strong></p>
+            </div>
           </article>
         </section>
 
-        <section class="autopick-panel" aria-label="Auto-pick observation summary">
-          <div class="autopick-panel-header">
-            <div>
-              <span class="autopick-card-label">Observation Summary</span>
-              <h4>Selection Contract</h4>
-            </div>
-          </div>
-
-          <section class="autopick-observation-summary">
-            <article class="autopick-mini-card">
+        <section class="ap-panel">
+          <h4>Observation Summary</h4>
+          <div class="ap-summary">
+            <div class="ap-summary-item">
               <span>Decision</span>
-              <strong id="autopick-decision-status">UNKNOWN</strong>
-            </article>
-            <article class="autopick-mini-card">
+              <strong id="autopick-decision-status" class="ap-decision">UNKNOWN</strong>
+            </div>
+            <div class="ap-summary-item">
               <span>Selected Symbol</span>
               <strong id="autopick-selected-symbol">NONE</strong>
-            </article>
-            <article class="autopick-mini-card">
+            </div>
+            <div class="ap-summary-item">
               <span>Selected Rank</span>
               <strong id="autopick-selected-rank">N/A</strong>
-            </article>
-            <article class="autopick-mini-card">
+            </div>
+            <div class="ap-summary-item">
               <span>Ranked Count</span>
               <strong id="autopick-ranked-count">N/A</strong>
-            </article>
-            <article class="autopick-mini-card">
+            </div>
+            <div class="ap-summary-item">
               <span>Top N</span>
               <strong id="autopick-top-n">N/A</strong>
-            </article>
-            <article class="autopick-mini-card">
+            </div>
+            <div class="ap-summary-item">
               <span>Selected Score</span>
               <strong id="autopick-selected-score">N/A</strong>
-            </article>
-          </section>
-        </section>
-
-        <section class="autopick-panel" aria-label="Auto-pick candidate ranking">
-          <div class="autopick-panel-header">
-            <div>
-              <span class="autopick-card-label">Candidate Ranking</span>
-              <h4>Top N Observational Candidates</h4>
-              <div class="autopick-average-score">
-                <strong id="autopick-average-score">N/A</strong>
-                <span>Average score = sum(N scores) / N</span>
-              </div>
             </div>
           </div>
+        </section>
 
-          <div class="autopick-ranking-table-wrap">
-            <table class="autopick-ranking-table">
+        <section class="ap-grid">
+          <article class="ap-panel">
+            <h4>Candidate Ranking (Top N)</h4>
+            <div class="ap-average">
+              <span>Score Promedio</span>
+              <strong id="autopick-average-score">N/A</strong>
+            </div>
+
+            <table class="ap-table">
               <thead>
                 <tr>
                   <th>Rank</th>
                   <th>Symbol</th>
                   <th>Score</th>
-                  <th>Spread</th>
-                  <th>ATR</th>
-                  <th>Volume Rel</th>
-                  <th>Reasons</th>
-                  <th>Selected</th>
+                  <th>Reason: Spread</th>
+                  <th>Reason: ATR</th>
+                  <th>Reason: Volume</th>
+                  <th>Reason</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="autopick-candidate-ranking-body">
-                <tr>
-                  <td colspan="8">No candidate ranking loaded.</td>
-                </tr>
+                <tr><td colspan="8">No candidate ranking loaded.</td></tr>
               </tbody>
             </table>
-          </div>
+
+            <p class="ap-table-note">
+              Scores observacionales. No muta Risk, Intent, Execution ni Auto-pick core.
+            </p>
+          </article>
+
+          <article class="ap-panel">
+            <h4>Trace (Last Decision Cycle)</h4>
+            <section id="autopick-trace-rows" class="ap-trace">No auto-pick trace loaded.</section>
+          </article>
         </section>
 
-        <section class="autopick-panel" aria-label="Auto-pick execution trace">
-          <div class="autopick-panel-header">
-            <div>
-              <span class="autopick-card-label">Auto-pick Trace</span>
-              <h4>Read-only Step Tracking</h4>
-            </div>
-          </div>
-          <section id="autopick-trace-rows" class="autopick-trace-horizontal">No auto-pick trace loaded.</section>
-        </section>
-
-        <section class="autopick-panel" aria-label="Auto-pick raw response">
-          <div class="autopick-panel-header">
-            <div>
-              <span class="autopick-card-label">Backend Snapshot</span>
-              <h4>Authoritative Auto-pick Payload</h4>
-            </div>
-            <button id="autopick-refresh-button" type="button" class="autopick-refresh-button">Refresh</button>
-          </div>
-
-          <pre id="autopick-status-output" class="autopick-output">No auto-pick status loaded.</pre>
+        <section class="ap-panel">
+          <h4>Raw Output / Message</h4>
+          <pre id="autopick-status-output" class="ap-output">No auto-pick status loaded.</pre>
         </section>
       </section>
     `;
@@ -264,20 +235,19 @@
     }
 
     const view = window.AutopickStatusPresenter.present(status);
+    const observation = view.observationSummary || {};
 
-    setText('#autopick-scheduler-state', view.schedulerState);
-    setText('#autopick-interval', `Interval: ${view.interval}`);
+    setText('#autopick-interval', view.interval);
     setText('#autopick-mode', view.dryRun);
-    setText('#autopick-trading-state', `Trading: ${view.tradingState}`);
+    setText('#autopick-execution-mode', view.executionMode);
     setText('#autopick-last-tick-status', view.lastTickStatus);
     setText('#autopick-last-tick-at', view.lastTickAt);
+    setText('#autopick-trading-state', view.tradingState);
     setText('#autopick-lock-state', view.lockState);
-    setText('#autopick-duration', `Duration: ${view.duration} | Stale: ${view.staleState} | Age: ${view.staleDuration}`);
+    setText('#autopick-duration', view.duration);
     setText('#autopick-candidate', view.candidate);
-    setText('#autopick-score', `Score: ${view.score}`);
-    setText('#autopick-execution-mode', view.executionMode);
-    setText('#autopick-last-error', `Last error: ${view.lastError}`);
-    const observation = view.observationSummary || {};
+    setText('#autopick-score', view.score);
+
     setText('#autopick-decision-status', observation.decisionStatus || 'UNKNOWN');
     setText('#autopick-selected-symbol', observation.selectedSymbol || 'NONE');
     setText('#autopick-selected-rank', String(observation.selectedRank || 'N/A'));
@@ -285,6 +255,7 @@
     setText('#autopick-top-n', String(observation.topN || 'N/A'));
     setText('#autopick-selected-score', String(observation.selectedScore || 'N/A'));
     setText('#autopick-average-score', String(view.averageScore || 'N/A'));
+
     renderCandidateRows(view.candidateRows);
     renderTraceRows(view.traceRows);
     setOutput(view.loading ? 'Loading auto-pick status...' : view.rawText, view.isError);
@@ -292,7 +263,6 @@
 
   function mount(target) {
     destroyCurrentController();
-
     root = target;
 
     if (!root) {

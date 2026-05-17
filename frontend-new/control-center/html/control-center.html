@@ -6,42 +6,55 @@
   <title>Control Center</title>
 
   <link rel="stylesheet" href="../css/control-center.css">
+  <link rel="stylesheet" href="../../modules/session-gateway/css/session-gateway.css">
+  <link rel="stylesheet" href="../../modules/admin-tracking/css/admin-tracking.css">
+  <link rel="stylesheet" href="../../modules/broker-placeholder/css/broker-placeholder.css">
   <link rel="stylesheet" href="../../modules/runtime-status/css/runtime-status.css">
   <link rel="stylesheet" href="../../modules/autopick-status/css/autopick-status.css">
   <link rel="stylesheet" href="../../modules/testing-center/css/testing-center.css">
   <link rel="stylesheet" href="../../modules/broker-connectivity/css/broker-connectivity.css">
-  <link rel="stylesheet" href="../../modules/session-gateway/css/session-gateway.css">
-  <link rel="stylesheet" href="../../modules/admin-tracking/css/admin-tracking.css">
-  <link rel="stylesheet" href="../../modules/broker-placeholder/css/broker-placeholder.css">
 </head>
 
 <body>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <section class="brand">
-        <div class="brand-mark">CC</div>
-        <h1>Control Center</h1>
-        <p>Operational frontend shell</p>
+  <div class="cc-shell">
+    <aside class="cc-sidebar" aria-label="Control Center sidebar">
+      <section class="cc-brand">
+        <div class="cc-mark">CC</div>
+        <strong>Control Center</strong>
       </section>
 
-      <section>
-        <p class="nav-title">Modules</p>
-        <nav class="module-nav" aria-label="Control center modules"></nav>
+      <section class="cc-sidebar-section">
+        <p class="cc-section-label">ACCESS</p>
+        <nav class="cc-access" aria-label="Access routes">
+          <button type="button" data-access="admin"><span class="cc-access-icon">⌘</span><span>Administrator</span></button>
+          <button type="button" data-access="binance"><span class="cc-access-icon">◈</span><span>Binance</span></button>
+          <button type="button" data-access="ibkr"><span class="cc-access-icon">▣</span><span>IBKR</span></button>
+        </nav>
       </section>
 
-      <section class="operator-card">
-        <h2>Mock Session</h2>
-        <p>operator.local</p>
+      <section class="cc-sidebar-section">
+        <p class="cc-section-label">MODULES</p>
+        <nav class="cc-nav module-nav" aria-label="Control center modules"></nav>
+      </section>
+
+      <section class="cc-session-card">
+        <strong>ADMIN</strong>
+        <span>operator.local</span>
+        <p>Session active</p>
+        <button type="button" id="cc-logout-button">Logout</button>
       </section>
     </aside>
 
-    <main class="main-panel">
-      <header class="module-header">
-        <span>Active Module</span>
-        <h2 id="active-module-title">Runtime Access</h2>
+    <main class="cc-main">
+      <header class="cc-topbar">
+        <div>
+          <span>Operational Control Plane</span>
+          <h1 id="active-module-title">Runtime Access</h1>
+        </div>
+        <button type="button" id="cc-refresh-button">⟳ Refresh Now</button>
       </header>
 
-      <section id="active-module-root" class="module-root"></section>
+      <section id="active-module-root" class="cc-content"></section>
     </main>
   </div>
 
