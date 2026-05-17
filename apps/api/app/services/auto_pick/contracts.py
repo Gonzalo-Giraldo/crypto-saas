@@ -87,6 +87,7 @@ class AutoPickObservationReport:
     started_at: str | None = None
     finished_at: str | None = None
     production_priority: bool = True
+    model_version: str = "binance_auto_pick_pipeline_v1"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -104,4 +105,5 @@ class AutoPickObservationReport:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "production_priority": self.production_priority,
+            "model_version": self.model_version,
         }
