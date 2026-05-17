@@ -30,6 +30,7 @@ def _klines():
 
 def test_runs_autopick_observation_from_snapshot(monkeypatch):
     import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+    import apps.api.app.services.auto_pick.binance.evaluation_engine as engine
 
     snapshot = BinanceMarketObservationSnapshot(
         snapshot_id="snapshot-1",
@@ -84,7 +85,9 @@ def test_runs_autopick_observation_from_snapshot(monkeypatch):
         ),
     )
 
-    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT", "ETHUSDT"])
+    symbols = lambda rows: ["BTCUSDT", "ETHUSDT"]
+    monkeypatch.setattr(runtime, "build_candidate_symbols", symbols)
+    monkeypatch.setattr(engine, "build_candidate_symbols", symbols)
 
     def fake_build_crypto_model_input(*, symbol, klines_1h, klines_15m, ticker_24h):
         return {
@@ -105,7 +108,9 @@ def test_runs_autopick_observation_from_snapshot(monkeypatch):
         }
 
     monkeypatch.setattr(runtime, "build_crypto_model_input", fake_build_crypto_model_input)
+    monkeypatch.setattr(engine, "build_crypto_model_input", fake_build_crypto_model_input)
     monkeypatch.setattr(runtime, "compute_final_score", fake_compute_final_score)
+    monkeypatch.setattr(engine, "compute_final_score", fake_compute_final_score)
 
     report = run_binance_auto_pick_observation_from_snapshot(snapshot, top_n=2)
 
@@ -141,6 +146,7 @@ def _snapshot_with_read_order(reads):
 
 def test_snapshot_decision_is_stable_when_reads_are_reordered(monkeypatch):
     import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+    import apps.api.app.services.auto_pick.binance.evaluation_engine as engine
 
     ticker_read = BinanceMarketReadResult(
         source_type="ticker_24h",
@@ -156,28 +162,27 @@ def test_snapshot_decision_is_stable_when_reads_are_reordered(monkeypatch):
     eth_1h = BinanceMarketReadResult("klines", "ETHUSDT", "1h", "OK", _klines(), None, 10)
     eth_15m = BinanceMarketReadResult("klines", "ETHUSDT", "15m", "OK", _klines(), None, 10)
 
-    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT", "ETHUSDT"])
-    monkeypatch.setattr(
-        runtime,
-        "build_crypto_model_input",
-        lambda **kwargs: {
-            "symbol": kwargs["symbol"],
-            "entry_price": kwargs["ticker_24h"]["lastPrice"],
-            "market_metrics": {},
-            "ohlc": {},
-        },
-    )
-    monkeypatch.setattr(
-        runtime,
-        "compute_final_score",
-        lambda candidate: {
-            "symbol": candidate["symbol"],
-            "side": "BUY",
-            "valid": True,
-            "reason": "ok",
-            "final_score": {"BTCUSDT": 0.7, "ETHUSDT": 0.9}[candidate["symbol"]],
-        },
-    )
+    symbols = lambda rows: ["BTCUSDT", "ETHUSDT"]
+    monkeypatch.setattr(runtime, "build_candidate_symbols", symbols)
+    monkeypatch.setattr(engine, "build_candidate_symbols", symbols)
+    build_input = lambda **kwargs: {
+        "symbol": kwargs["symbol"],
+        "entry_price": kwargs["ticker_24h"]["lastPrice"],
+        "market_metrics": {},
+        "ohlc": {},
+    }
+    monkeypatch.setattr(runtime, "build_crypto_model_input", build_input)
+    monkeypatch.setattr(engine, "build_crypto_model_input", build_input)
+
+    score = lambda candidate: {
+        "symbol": candidate["symbol"],
+        "side": "BUY",
+        "valid": True,
+        "reason": "ok",
+        "final_score": {"BTCUSDT": 0.7, "ETHUSDT": 0.9}[candidate["symbol"]],
+    }
+    monkeypatch.setattr(runtime, "compute_final_score", score)
+    monkeypatch.setattr(engine, "compute_final_score", score)
 
     report_a = run_binance_auto_pick_observation_from_snapshot(
         _snapshot_with_read_order((ticker_read, btc_1h, btc_15m, eth_1h, eth_15m)),
@@ -195,8 +200,11 @@ def test_snapshot_decision_is_stable_when_reads_are_reordered(monkeypatch):
 
 def test_snapshot_decision_ignores_unrelated_symbol_reads(monkeypatch):
     import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+    import apps.api.app.services.auto_pick.binance.evaluation_engine as engine
 
-    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT"])
+    symbols = lambda rows: ["BTCUSDT"]
+    monkeypatch.setattr(runtime, "build_candidate_symbols", symbols)
+    monkeypatch.setattr(engine, "build_candidate_symbols", symbols)
     monkeypatch.setattr(
         runtime,
         "build_crypto_model_input",
@@ -289,6 +297,7 @@ def test_snapshot_decision_reports_missing_klines_rejections():
 
 def test_snapshot_decision_reports_candidate_input_exception(monkeypatch):
     import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+    import apps.api.app.services.auto_pick.binance.evaluation_engine as engine
 
     snapshot = BinanceMarketObservationSnapshot(
         snapshot_id="snapshot-input-error",
@@ -301,12 +310,15 @@ def test_snapshot_decision_reports_candidate_input_exception(monkeypatch):
         ),
     )
 
-    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT"])
+    symbols = lambda rows: ["BTCUSDT"]
+    monkeypatch.setattr(runtime, "build_candidate_symbols", symbols)
+    monkeypatch.setattr(engine, "build_candidate_symbols", symbols)
 
     def boom(**kwargs):
         raise ValueError("ticker_24h_required")
 
     monkeypatch.setattr(runtime, "build_crypto_model_input", boom)
+    monkeypatch.setattr(engine, "build_crypto_model_input", boom)
 
     report = run_binance_auto_pick_observation_from_snapshot(snapshot, top_n=10)
 
