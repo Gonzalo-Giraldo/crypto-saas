@@ -237,3 +237,84 @@ def test_snapshot_decision_ignores_unrelated_symbol_reads(monkeypatch):
     assert report.decision_status == "SELECTED"
     assert report.selected_symbol == "BTCUSDT"
     assert [row.symbol for row in report.candidates] == ["BTCUSDT"]
+
+
+def test_snapshot_decision_reports_missing_klines_rejections():
+    snapshot = BinanceMarketObservationSnapshot(
+        snapshot_id="snapshot-rejections",
+        broker="BINANCE",
+        market="FUTURES",
+        reads=(
+            BinanceMarketReadResult(
+                "ticker_24h",
+                None,
+                None,
+                "OK",
+                [_ticker("BTCUSDT"), _ticker("ETHUSDT")],
+                None,
+                10,
+            ),
+            BinanceMarketReadResult(
+                "klines",
+                "BTCUSDT",
+                "1h",
+                "OK",
+                _klines(),
+                None,
+                10,
+            ),
+            BinanceMarketReadResult(
+                "klines",
+                "BTCUSDT",
+                "15m",
+                "OK",
+                _klines(),
+                None,
+                10,
+            ),
+        ),
+    )
+
+    report = run_binance_auto_pick_observation_from_snapshot(snapshot, top_n=10)
+
+    assert report.decision_status == "SELECTED"
+    assert report.selected_symbol == "BTCUSDT"
+    assert report.rejected_candidates == [
+        {
+            "symbol": "ETHUSDT",
+            "reason": "missing_1h_klines",
+        }
+    ]
+
+
+def test_snapshot_decision_reports_candidate_input_exception(monkeypatch):
+    import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+
+    snapshot = BinanceMarketObservationSnapshot(
+        snapshot_id="snapshot-input-error",
+        broker="BINANCE",
+        market="FUTURES",
+        reads=(
+            BinanceMarketReadResult("ticker_24h", None, None, "OK", [_ticker("BTCUSDT")], None, 10),
+            BinanceMarketReadResult("klines", "BTCUSDT", "1h", "OK", _klines(), None, 10),
+            BinanceMarketReadResult("klines", "BTCUSDT", "15m", "OK", _klines(), None, 10),
+        ),
+    )
+
+    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT"])
+
+    def boom(**kwargs):
+        raise ValueError("ticker_24h_required")
+
+    monkeypatch.setattr(runtime, "build_crypto_model_input", boom)
+
+    report = run_binance_auto_pick_observation_from_snapshot(snapshot, top_n=10)
+
+    assert report.decision_status == "NO_SELECTION"
+    assert report.no_selection_reason == "no_valid_candidates"
+    assert report.rejected_candidates == [
+        {
+            "symbol": "BTCUSDT",
+            "reason": "candidate_input_exception:ticker_24h_required",
+        }
+    ]

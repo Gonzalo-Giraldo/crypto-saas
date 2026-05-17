@@ -83,6 +83,7 @@ class AutoPickObservationReport:
     ranked_count: int
     top_n: int
     candidates: list[AutoPickCandidateProjection] = field(default_factory=list)
+    rejected_candidates: list[dict[str, Any]] = field(default_factory=list)
     started_at: str | None = None
     finished_at: str | None = None
     production_priority: bool = True
@@ -99,6 +100,7 @@ class AutoPickObservationReport:
             "ranked_count": self.ranked_count,
             "top_n": self.top_n,
             "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "rejected_candidates": [dict(candidate) for candidate in self.rejected_candidates],
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "production_priority": self.production_priority,

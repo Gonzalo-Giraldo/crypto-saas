@@ -58,7 +58,12 @@ def extract_snapshot_market_context(snapshot: BinanceMarketObservationSnapshot) 
         "klines_15m": klines_15m,
     }
 
-def _no_selection_report(*, reason: str, top_n: int) -> AutoPickObservationReport:
+def _no_selection_report(
+    *,
+    reason: str,
+    top_n: int,
+    rejected_candidates: list[dict[str, str]] | None = None,
+) -> AutoPickObservationReport:
     return AutoPickObservationReport(
         decision_status="NO_SELECTION",
         broker="BINANCE",
@@ -70,6 +75,7 @@ def _no_selection_report(*, reason: str, top_n: int) -> AutoPickObservationRepor
         ranked_count=0,
         top_n=top_n,
         candidates=[],
+        rejected_candidates=list(rejected_candidates or []),
         production_priority=True,
     )
 
@@ -108,16 +114,23 @@ def run_binance_auto_pick_observation_from_snapshot(
     klines_15m_by_symbol = context["klines_15m"]
 
     evaluated: list[dict[str, Any]] = []
+    rejected_candidates: list[dict[str, str]] = []
 
     for symbol in symbols:
         ticker = next((row for row in ticker_rows if row.get("symbol") == symbol), None)
         if not ticker:
+            rejected_candidates.append({"symbol": symbol, "reason": "missing_ticker"})
             continue
 
         klines_1h = klines_1h_by_symbol.get(symbol) or []
         klines_15m = klines_15m_by_symbol.get(symbol) or []
 
-        if not klines_1h or not klines_15m:
+        if not klines_1h:
+            rejected_candidates.append({"symbol": symbol, "reason": "missing_1h_klines"})
+            continue
+
+        if not klines_15m:
+            rejected_candidates.append({"symbol": symbol, "reason": "missing_15m_klines"})
             continue
 
         try:
@@ -128,7 +141,11 @@ def run_binance_auto_pick_observation_from_snapshot(
                 ticker_24h=ticker,
             )
             score = compute_final_score(candidate_input)
-        except Exception:
+        except Exception as exc:
+            rejected_candidates.append({
+                "symbol": symbol,
+                "reason": f"candidate_input_exception:{str(exc) or exc.__class__.__name__}",
+            })
             continue
 
         if score.get("valid"):
@@ -149,6 +166,11 @@ def run_binance_auto_pick_observation_from_snapshot(
                     },
                 }
             )
+        else:
+            rejected_candidates.append({
+                "symbol": symbol,
+                "reason": str(score.get("reason") or "invalid_score"),
+            })
 
     ranked = sorted(
         evaluated,
@@ -157,7 +179,11 @@ def run_binance_auto_pick_observation_from_snapshot(
     )
 
     if not ranked:
-        return _no_selection_report(reason="no_valid_candidates", top_n=top_n)
+        return _no_selection_report(
+            reason="no_valid_candidates",
+            top_n=top_n,
+            rejected_candidates=rejected_candidates,
+        )
 
     selected_symbol = str(ranked[0]["symbol"])
     projections: list[AutoPickCandidateProjection] = []
@@ -190,6 +216,7 @@ def run_binance_auto_pick_observation_from_snapshot(
         ranked_count=len(ranked),
         top_n=int(top_n),
         candidates=projections,
+        rejected_candidates=rejected_candidates,
         production_priority=True,
     )
 
