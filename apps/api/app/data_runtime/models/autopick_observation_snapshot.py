@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text, func
 
 from apps.api.app.data_runtime.session import DataBase
 
@@ -16,7 +16,7 @@ class AutopickObservationSnapshot(DataBase):
 
     __tablename__ = "autopick_observation_snapshots"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     snapshot_id = Column(String(64), unique=True, nullable=False)
     snapshot_hash = Column(String(64), nullable=False)
 
