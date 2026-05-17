@@ -51,3 +51,31 @@ def create_autopick_export_batch(
     db.flush()
 
     return row
+
+
+_ALLOWED_EXPORT_TRANSITIONS = {
+    "PENDING": {"EXPORTING"},
+    "EXPORTING": {"EXPORTED", "FAILED"},
+    "EXPORTED": {"VERIFIED", "FAILED"},
+    "VERIFIED": {"PURGED", "FAILED"},
+    "FAILED": set(),
+    "PURGED": set(),
+}
+
+
+def validate_export_transition(current_status: str, next_status: str) -> bool:
+    current = str(current_status or "").upper().strip()
+    nxt = str(next_status or "").upper().strip()
+
+    return nxt in _ALLOWED_EXPORT_TRANSITIONS.get(current, set())
+
+
+def apply_export_transition(row, next_status: str):
+    current = str(getattr(row, "status", "") or "").upper().strip()
+    nxt = str(next_status or "").upper().strip()
+
+    if not validate_export_transition(current, nxt):
+        raise ValueError(f"invalid_export_transition:{current}->{nxt}")
+
+    row.status = nxt
+    return row
