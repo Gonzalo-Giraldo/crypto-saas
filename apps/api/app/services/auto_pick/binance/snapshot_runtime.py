@@ -8,11 +8,7 @@ from apps.api.app.services.auto_pick.binance.observation_contracts import (
 from apps.api.app.services.auto_pick.binance.evaluation_engine import (
     evaluate_binance_autopick_market_context,
 )
-from apps.api.app.services.auto_pick.binance.universe import build_candidate_symbols
-from apps.api.app.services.auto_pick_binance_input_adapter_v1 import build_crypto_model_input
-from apps.api.app.services.auto_pick_binance_model_v1 import compute_final_score
 from apps.api.app.services.auto_pick.binance.orchestrator import (
-    AutoPickCandidateProjection,
     AutoPickObservationReport,
 )
 

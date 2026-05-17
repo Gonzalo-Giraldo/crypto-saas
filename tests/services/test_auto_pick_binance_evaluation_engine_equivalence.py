@@ -88,7 +88,6 @@ def test_evaluation_engine_matches_snapshot_runtime(monkeypatch):
     )
 
     symbols = lambda rows: ["BTCUSDT", "ETHUSDT"]
-    monkeypatch.setattr(runtime, "build_candidate_symbols", symbols)
     monkeypatch.setattr(engine, "build_candidate_symbols", symbols)
 
     build_input = lambda **kwargs: {
@@ -97,7 +96,6 @@ def test_evaluation_engine_matches_snapshot_runtime(monkeypatch):
         "market_metrics": {},
         "ohlc": {},
     }
-    monkeypatch.setattr(runtime, "build_crypto_model_input", build_input)
     monkeypatch.setattr(engine, "build_crypto_model_input", build_input)
 
     score = lambda candidate: {
@@ -107,7 +105,6 @@ def test_evaluation_engine_matches_snapshot_runtime(monkeypatch):
         "reason": "ok",
         "final_score": {"BTCUSDT": 0.7, "ETHUSDT": 0.9}[candidate["symbol"]],
     }
-    monkeypatch.setattr(runtime, "compute_final_score", score)
     monkeypatch.setattr(engine, "compute_final_score", score)
 
     expected = run_binance_auto_pick_observation_from_snapshot(
