@@ -128,3 +128,112 @@ def test_snapshot_missing_market_data_returns_no_selection():
     assert report.decision_status == "NO_SELECTION"
     assert report.selected_symbol is None
     assert report.no_selection_reason == "no_ticker_data"
+
+
+def _snapshot_with_read_order(reads):
+    return BinanceMarketObservationSnapshot(
+        snapshot_id="snapshot-determinism",
+        broker="BINANCE",
+        market="FUTURES",
+        reads=tuple(reads),
+    )
+
+
+def test_snapshot_decision_is_stable_when_reads_are_reordered(monkeypatch):
+    import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+
+    ticker_read = BinanceMarketReadResult(
+        source_type="ticker_24h",
+        symbol=None,
+        interval=None,
+        status="OK",
+        rows=[_ticker("BTCUSDT"), _ticker("ETHUSDT")],
+        error_code=None,
+        latency_ms=10,
+    )
+    btc_1h = BinanceMarketReadResult("klines", "BTCUSDT", "1h", "OK", _klines(), None, 10)
+    btc_15m = BinanceMarketReadResult("klines", "BTCUSDT", "15m", "OK", _klines(), None, 10)
+    eth_1h = BinanceMarketReadResult("klines", "ETHUSDT", "1h", "OK", _klines(), None, 10)
+    eth_15m = BinanceMarketReadResult("klines", "ETHUSDT", "15m", "OK", _klines(), None, 10)
+
+    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT", "ETHUSDT"])
+    monkeypatch.setattr(
+        runtime,
+        "build_crypto_model_input",
+        lambda **kwargs: {
+            "symbol": kwargs["symbol"],
+            "entry_price": kwargs["ticker_24h"]["lastPrice"],
+            "market_metrics": {},
+            "ohlc": {},
+        },
+    )
+    monkeypatch.setattr(
+        runtime,
+        "compute_final_score",
+        lambda candidate: {
+            "symbol": candidate["symbol"],
+            "side": "BUY",
+            "valid": True,
+            "reason": "ok",
+            "final_score": {"BTCUSDT": 0.7, "ETHUSDT": 0.9}[candidate["symbol"]],
+        },
+    )
+
+    report_a = run_binance_auto_pick_observation_from_snapshot(
+        _snapshot_with_read_order((ticker_read, btc_1h, btc_15m, eth_1h, eth_15m)),
+        top_n=2,
+    )
+    report_b = run_binance_auto_pick_observation_from_snapshot(
+        _snapshot_with_read_order((eth_15m, btc_15m, ticker_read, eth_1h, btc_1h)),
+        top_n=2,
+    )
+
+    assert report_a.selected_symbol == report_b.selected_symbol == "ETHUSDT"
+    assert [row.symbol for row in report_a.candidates] == [row.symbol for row in report_b.candidates]
+    assert [row.final_score for row in report_a.candidates] == [row.final_score for row in report_b.candidates]
+
+
+def test_snapshot_decision_ignores_unrelated_symbol_reads(monkeypatch):
+    import apps.api.app.services.auto_pick.binance.snapshot_runtime as runtime
+
+    monkeypatch.setattr(runtime, "build_candidate_symbols", lambda rows: ["BTCUSDT"])
+    monkeypatch.setattr(
+        runtime,
+        "build_crypto_model_input",
+        lambda **kwargs: {
+            "symbol": kwargs["symbol"],
+            "entry_price": kwargs["ticker_24h"]["lastPrice"],
+            "market_metrics": {},
+            "ohlc": {},
+        },
+    )
+    monkeypatch.setattr(
+        runtime,
+        "compute_final_score",
+        lambda candidate: {
+            "symbol": candidate["symbol"],
+            "side": "BUY",
+            "valid": True,
+            "reason": "ok",
+            "final_score": 0.8,
+        },
+    )
+
+    snapshot = BinanceMarketObservationSnapshot(
+        snapshot_id="snapshot-unrelated",
+        broker="BINANCE",
+        market="FUTURES",
+        reads=(
+            BinanceMarketReadResult("ticker_24h", None, None, "OK", [_ticker("BTCUSDT")], None, 10),
+            BinanceMarketReadResult("klines", "BTCUSDT", "1h", "OK", _klines(), None, 10),
+            BinanceMarketReadResult("klines", "BTCUSDT", "15m", "OK", _klines(), None, 10),
+            BinanceMarketReadResult("klines", "DOGEUSDT", "1h", "OK", _klines(), None, 10),
+            BinanceMarketReadResult("klines", "DOGEUSDT", "15m", "OK", _klines(), None, 10),
+        ),
+    )
+
+    report = run_binance_auto_pick_observation_from_snapshot(snapshot, top_n=10)
+
+    assert report.decision_status == "SELECTED"
+    assert report.selected_symbol == "BTCUSDT"
+    assert [row.symbol for row in report.candidates] == ["BTCUSDT"]
