@@ -97,5 +97,8 @@ def apply_export_transition(row, next_status: str):
     if nxt == "VERIFIED" and snapshot_count <= 0 and candidate_count <= 0:
         raise ValueError("verified_export_requires_rows")
 
+    if nxt == "PURGED" and getattr(row, "purged_at", None) is None:
+        raise ValueError("purged_export_requires_timestamp")
+
     row.status = nxt
     return row
