@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -23,6 +24,12 @@ def record_scheduler_tick_journal(
     candidate_symbol: str | None = None,
     candidate_score: str | None = None,
     execution_mode: str | None = None,
+    decision_status: str | None = None,
+    selected_rank: int | None = None,
+    ranked_count: int | None = None,
+    top_n: int | None = None,
+    observation_payload: dict | None = None,
+    analytics_exported: bool = False,
     mutation_attempted: bool = False,
     mutation_executed: bool = False,
     error: str | None = None,
@@ -62,6 +69,12 @@ def record_scheduler_tick_journal(
         candidate_symbol=candidate_symbol,
         candidate_score=candidate_score,
         execution_mode=execution_mode,
+        decision_status=str(decision_status).upper().strip() if decision_status else None,
+        selected_rank=int(selected_rank) if selected_rank is not None else None,
+        ranked_count=int(ranked_count) if ranked_count is not None else None,
+        top_n=int(top_n) if top_n is not None else None,
+        observation_payload_json=json.dumps(observation_payload, sort_keys=True) if observation_payload is not None else None,
+        analytics_exported=bool(analytics_exported),
         mutation_attempted=bool(mutation_attempted),
         mutation_executed=bool(mutation_executed),
         error=error,

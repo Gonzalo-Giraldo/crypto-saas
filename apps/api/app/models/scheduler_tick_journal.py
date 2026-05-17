@@ -24,6 +24,13 @@ class SchedulerTickJournal(Base):
     candidate_score = Column(String, nullable=True)
     execution_mode = Column(String, nullable=True)
 
+    decision_status = Column(String, nullable=True)
+    selected_rank = Column(Integer, nullable=True)
+    ranked_count = Column(Integer, nullable=True)
+    top_n = Column(Integer, nullable=True)
+    observation_payload_json = Column(Text, nullable=True)
+    analytics_exported = Column(Boolean, nullable=False, default=False)
+
     mutation_attempted = Column(Boolean, nullable=False, default=False)
     mutation_executed = Column(Boolean, nullable=False, default=False)
 

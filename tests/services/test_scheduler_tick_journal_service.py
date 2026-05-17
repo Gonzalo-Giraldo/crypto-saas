@@ -84,3 +84,54 @@ def test_load_recent_scheduler_tick_journal_orders_newest_first_and_limits():
 
     assert len(rows) == 2
     assert rows[0].started_at >= rows[1].started_at
+
+
+
+def test_record_scheduler_tick_journal_persists_autopick_observation_projection():
+    import json
+
+    db = _db()
+    started_at = datetime.now(timezone.utc)
+    finished_at = started_at + timedelta(milliseconds=50)
+
+    row = record_scheduler_tick_journal(
+        db,
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        started_at=started_at,
+        finished_at=finished_at,
+        status="OK",
+        dry_run=True,
+        trading_enabled=False,
+        candidate_symbol="BTCUSDT",
+        candidate_score="0.91",
+        execution_mode="dry_run",
+        decision_status="SELECTED",
+        selected_rank=1,
+        ranked_count=7,
+        top_n=10,
+        observation_payload={
+            "decision_status": "SELECTED",
+            "selected_symbol": "BTCUSDT",
+            "production_priority": True,
+        },
+        analytics_exported=False,
+        mutation_attempted=False,
+        mutation_executed=False,
+    )
+    db.commit()
+
+    loaded = load_recent_scheduler_tick_journal(
+        db,
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        limit=1,
+    )[0]
+
+    assert row.tick_id
+    assert loaded.decision_status == "SELECTED"
+    assert loaded.selected_rank == 1
+    assert loaded.ranked_count == 7
+    assert loaded.top_n == 10
+    assert loaded.analytics_exported is False
+    payload = json.loads(loaded.observation_payload_json)
+    assert payload["selected_symbol"] == "BTCUSDT"
+    assert payload["production_priority"] is True

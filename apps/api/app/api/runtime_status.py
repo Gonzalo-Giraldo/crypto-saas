@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -17,6 +18,11 @@ from apps.api.app.services.scheduler_tick_journal_service import load_recent_sch
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
     get_scheduler_runtime_state,
+)
+from apps.api.app.services.scheduler_runtime_loop import (
+    get_effective_scheduler_lifecycle_state,
+    get_scheduler_lifecycle_state,
+    is_scheduler_thread_alive,
 )
 
 
@@ -116,6 +122,11 @@ def get_runtime_status(
             "scheduler_interval_minutes": scheduler_interval_minutes,
             "scheduler_dry_run": bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
         },
+        "scheduler_lifecycle": {
+            "desired_state": get_scheduler_lifecycle_state().value,
+            "effective_state": get_effective_scheduler_lifecycle_state().value,
+            "thread_alive": bool(is_scheduler_thread_alive()),
+        },
         "protections": {
             "active_protected_positions": int(active_protected_positions),
             "unknown_positions": int(unknown_positions),
@@ -151,6 +162,19 @@ def get_runtime_status(
                 "candidate_symbol": row.candidate_symbol,
                 "candidate_score": row.candidate_score,
                 "execution_mode": row.execution_mode,
+
+                "decision_status": row.decision_status,
+                "selected_rank": row.selected_rank,
+                "ranked_count": row.ranked_count,
+                "top_n": row.top_n,
+                "analytics_exported": bool(row.analytics_exported),
+
+                "observation_payload": (
+                    json.loads(row.observation_payload_json)
+                    if row.observation_payload_json
+                    else None
+                ),
+
                 "mutation_attempted": bool(row.mutation_attempted),
                 "mutation_executed": bool(row.mutation_executed),
                 "error": row.error,

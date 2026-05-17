@@ -37,9 +37,7 @@ import apps.api.app.models.learning_decision
 import apps.api.app.models.learning_outcome
 import apps.api.app.models.learning_rollup_hourly
 
-import threading
 import os
-import time
 from datetime import datetime, timezone
 
 from apps.api.app.api.users import router as users_router
@@ -49,8 +47,13 @@ from apps.api.app.api.runtime_status import router as runtime_status_router
 
 from apps.api.app.db.session import engine, Base, SessionLocal
 from sqlalchemy import inspect, text
+from apps.api.app.services.scheduler_runtime_loop import (
+    start_auto_pick_scheduler,
+    stop_auto_pick_scheduler,
+)
 from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
+from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_auto_pick_observation
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -64,11 +67,11 @@ from apps.api.app.services.trading_controls import get_trading_enabled
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _safe_startup_schema_ensures()
-    _start_auto_pick_scheduler()
+    start_auto_pick_scheduler(_auto_pick_tick_once)
     try:
         yield
     finally:
-        _stop_auto_pick_scheduler()
+        stop_auto_pick_scheduler()
 
 
 app = FastAPI(title="crypto-saas API", lifespan=lifespan)
@@ -219,10 +222,6 @@ def root():
 
 app.include_router(auth_router)
 
-_scheduler_stop_event = threading.Event()
-_scheduler_thread: threading.Thread | None = None
-_AUTO_PICK_LOCK_KEY = 887731
-
 
 def _legacy_exit_tick_disabled(**_kwargs):
     return {
@@ -330,6 +329,11 @@ def _auto_pick_tick_once() -> None:
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
+        observation_report = run_binance_auto_pick_observation(
+            top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
+        )
+        observation_payload = observation_report.to_dict()
+
         shadow_out = _global_shadow_tick_once(db=db)
         tick_details = {
                 "monitor_inserted": monitor.get("inserted", 0),
@@ -353,8 +357,12 @@ def _auto_pick_tick_once() -> None:
         duration_ms = int((time.monotonic() - started_at) * 1000)
         trading_enabled = bool(get_trading_enabled(db))
         execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
-        candidate_symbol = (shadow_out or {}).get("symbol")
-        candidate_score = str((shadow_out or {}).get("score")) if (shadow_out or {}).get("score") is not None else None
+        candidate_symbol = observation_report.selected_symbol
+        candidate_score = (
+            str(observation_report.selected.final_score)
+            if observation_report.selected and observation_report.selected.final_score is not None
+            else None
+        )
 
         record_scheduler_tick_ok(
             db,
@@ -378,6 +386,12 @@ def _auto_pick_tick_once() -> None:
             candidate_symbol=candidate_symbol,
             candidate_score=candidate_score,
             execution_mode=execution_mode,
+            decision_status=observation_report.decision_status,
+            selected_rank=observation_report.selected_rank,
+            ranked_count=observation_report.ranked_count,
+            top_n=observation_report.top_n,
+            observation_payload=observation_payload,
+            analytics_exported=False,
             mutation_attempted=False,
             mutation_executed=False,
         )
@@ -418,79 +432,3 @@ def _auto_pick_tick_once() -> None:
         print(f"[auto-pick-scheduler] tick error: {exc}", flush=True)
     finally:
         db.close()
-
-
-def _auto_pick_tick_once_with_lock() -> None:
-    if settings.DATABASE_URL.startswith("sqlite"):
-        _auto_pick_tick_once()
-        return
-    with engine.begin() as conn:
-        got_lock = bool(
-            conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _AUTO_PICK_LOCK_KEY}).scalar()
-        )
-    if not got_lock:
-        db = SessionLocal()
-        started_at_wall = datetime.now(timezone.utc)
-        try:
-            trading_enabled = bool(get_trading_enabled(db))
-            execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
-            record_scheduler_overlap_blocked(
-                db,
-                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
-                trading_enabled=trading_enabled,
-                last_execution_mode=execution_mode,
-            )
-            record_scheduler_tick_journal(
-                db,
-                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-                started_at=started_at_wall,
-                finished_at=datetime.now(timezone.utc),
-                duration_ms=0,
-                status="OVERLAP_BLOCKED",
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
-                trading_enabled=trading_enabled,
-                overlap_blocked=True,
-                runtime_locked=True,
-                execution_mode=execution_mode,
-                mutation_attempted=False,
-                mutation_executed=False,
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
-        finally:
-            db.close()
-        return
-    try:
-        _auto_pick_tick_once()
-    finally:
-        with engine.begin() as conn:
-            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _AUTO_PICK_LOCK_KEY})
-
-
-def _scheduler_loop() -> None:
-    interval_minutes = max(1, int(settings.AUTO_PICK_INTERNAL_SCHEDULER_INTERVAL_MINUTES))
-    interval_seconds = interval_minutes * 60
-    while not _scheduler_stop_event.is_set():
-        now = time.time()
-        wait_seconds = interval_seconds - (now % interval_seconds)
-        if _scheduler_stop_event.wait(timeout=wait_seconds):
-            break
-        _auto_pick_tick_once_with_lock()
-
-
-def _start_auto_pick_scheduler() -> None:
-    global _scheduler_thread
-    if not settings.AUTO_PICK_INTERNAL_SCHEDULER_ENABLED:
-        return
-    if _scheduler_thread and _scheduler_thread.is_alive():
-        return
-    _scheduler_stop_event.clear()
-    _scheduler_thread = threading.Thread(target=_scheduler_loop, name="auto-pick-scheduler", daemon=True)
-    _scheduler_thread.start()
-    print("[auto-pick-scheduler] started", flush=True)
-
-
-def _stop_auto_pick_scheduler() -> None:
-    _scheduler_stop_event.set()

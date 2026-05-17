@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import apps.api.app.services.intent_persistence as persistence_module
 
 from apps.api.app.services.auto_pick.contracts import AutoPickDecision
@@ -52,6 +54,7 @@ def test_auto_pick_to_risk_to_intent_flow(monkeypatch):
         draft=draft,
         db="fake-db",
         user_id="user-1",
+        current_user=SimpleNamespace(id="user-1"),
         account_id="acc-1",
     )
 
