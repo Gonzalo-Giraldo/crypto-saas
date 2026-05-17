@@ -82,3 +82,42 @@ class AutopickObservationCandidate(DataBase):
         Index("ix_data_autopick_candidate_selected", "selected"),
         Index("ix_data_autopick_candidate_created_at", "created_at"),
     )
+
+
+
+class AutopickObservationExport(DataBase):
+    """
+    Append-only Auto-pick export lifecycle record.
+
+    Data-plane only:
+    - tracks AWS DATA DB to local disk DATA DB export batches
+    - gates purge by verification status
+    - no runtime authority
+    """
+
+    __tablename__ = "autopick_observation_exports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    export_id = Column(String(64), unique=True, nullable=False)
+
+    from_created_at = Column(DateTime(timezone=True), nullable=False)
+    to_created_at = Column(DateTime(timezone=True), nullable=False)
+
+    snapshot_count = Column(Integer, nullable=False)
+    candidate_count = Column(Integer, nullable=False)
+
+    destination_kind = Column(String(32), nullable=False)
+    destination_path_or_uri = Column(String(512), nullable=False)
+    checksum = Column(String(128), nullable=False)
+    status = Column(String(32), nullable=False)
+
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    purged_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_data_autopick_export_id", "export_id"),
+        Index("ix_data_autopick_export_status", "status"),
+        Index("ix_data_autopick_export_window", "from_created_at", "to_created_at"),
+    )
