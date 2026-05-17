@@ -224,7 +224,7 @@ def run_binance_auto_pick_observation(
         )
 
 
-def run_binance_auto_pick() -> AutoPickResult:
+def run_binance_auto_pick(*, payload: dict[str, Any] | None = None) -> AutoPickResult:
     report = run_binance_auto_pick_observation(top_n=10)
 
     if report.decision_status != "SELECTED":
