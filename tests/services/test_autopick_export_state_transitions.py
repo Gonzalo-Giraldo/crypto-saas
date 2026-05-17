@@ -186,3 +186,47 @@ def test_purged_transition_requires_purged_at():
         return
 
     raise AssertionError("PURGED transition must require purged_at")
+
+
+def test_purged_transition_is_terminal():
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "PURGED"
+        purged_at = object()
+
+    try:
+        apply_export_transition(Row(), "FAILED")
+    except ValueError as exc:
+        assert "invalid_export_transition" in str(exc)
+        return
+
+    raise AssertionError("PURGED state must be terminal")
+
+
+def test_purged_transition_requires_temporal_ordering():
+    from datetime import datetime, timezone
+
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "VERIFIED"
+        checksum = "abc123"
+        destination_path_or_uri = "/tmp/export"
+        snapshot_count = 1
+        candidate_count = 1
+
+        finished_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        purged_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    try:
+        apply_export_transition(Row(), "PURGED")
+    except ValueError as exc:
+        assert "purged_export_requires_temporal_ordering" in str(exc)
+        return
+
+    raise AssertionError("PURGED transition must enforce temporal ordering")

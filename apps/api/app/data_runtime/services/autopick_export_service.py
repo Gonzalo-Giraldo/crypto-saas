@@ -100,5 +100,16 @@ def apply_export_transition(row, next_status: str):
     if nxt == "PURGED" and getattr(row, "purged_at", None) is None:
         raise ValueError("purged_export_requires_timestamp")
 
+    finished_at = getattr(row, "finished_at", None)
+    purged_at = getattr(row, "purged_at", None)
+
+    if (
+        nxt == "PURGED"
+        and finished_at is not None
+        and purged_at is not None
+        and purged_at < finished_at
+    ):
+        raise ValueError("purged_export_requires_temporal_ordering")
+
     row.status = nxt
     return row
