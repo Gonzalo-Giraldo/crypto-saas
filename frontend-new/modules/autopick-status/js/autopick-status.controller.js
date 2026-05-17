@@ -1,56 +1,75 @@
 (function () {
+  const POLL_INTERVAL_MS = 10000;
+
   let unsubscribeRefresh = null;
+  let pollingHandle = null;
 
   async function refreshAutopickStatus() {
-    if (!window.ControlCenterStore || !window.AutopickStatusService) {
+    if (!window.AutopickStatusService) {
+      return {
+        payload: null,
+        error: 'Auto-pick status service unavailable.',
+      };
+    }
+
+    return window.AutopickStatusService.fetchAutopickStatus();
+  }
+
+  async function loadStatus(render) {
+    if (typeof render !== 'function') {
       return;
     }
 
-    window.ControlCenterStore.setAutopickStatus({
+    render({
       loading: true,
-      error: null
+      payload: null,
+      error: null,
     });
 
-    try {
-      const result = await window.AutopickStatusService.fetchAutopickStatus();
+    const status = await refreshAutopickStatus();
 
-      if (!result.ok) {
-        window.ControlCenterStore.setAutopickStatus({
-          loading: false,
-          error: result.rawBody || `Autopick status failed: ${result.status}`,
-          payload: result.payload,
-          updatedAt: new Date().toISOString()
-        });
-        return;
-      }
+    render({
+      loading: false,
+      payload: status.payload || null,
+      error: status.error || null,
+    });
+  }
 
-      window.ControlCenterStore.setAutopickStatus({
-        loading: false,
-        error: null,
-        payload: result.payload,
-        updatedAt: new Date().toISOString()
-      });
-    } catch (error) {
-      window.ControlCenterStore.setAutopickStatus({
-        loading: false,
-        error: error && error.message ? error.message : 'Unknown autopick status error.',
-        updatedAt: new Date().toISOString()
-      });
+  function stopPolling() {
+    if (pollingHandle) {
+      window.clearInterval(pollingHandle);
+      pollingHandle = null;
     }
   }
 
-  function start() {
-    if (!window.ControlCenterEventBus || typeof unsubscribeRefresh === 'function') {
-      return;
-    }
+  function startPolling(render) {
+    stopPolling();
 
-    unsubscribeRefresh = window.ControlCenterEventBus.subscribe(
-      'autopick-status:refresh-requested',
-      refreshAutopickStatus
-    );
+    pollingHandle = window.setInterval(() => {
+      loadStatus(render);
+    }, POLL_INTERVAL_MS);
   }
 
-  function stop() {
+  function mount(render) {
+    loadStatus(render);
+    startPolling(render);
+
+    if (
+      window.ControlCenterEventBus &&
+      typeof window.ControlCenterEventBus.subscribe === 'function'
+    ) {
+      unsubscribeRefresh = window.ControlCenterEventBus.subscribe(
+        'runtime:refresh',
+        () => {
+          loadStatus(render);
+        }
+      );
+    }
+  }
+
+  function unmount() {
+    stopPolling();
+
     if (typeof unsubscribeRefresh === 'function') {
       unsubscribeRefresh();
       unsubscribeRefresh = null;
@@ -58,8 +77,7 @@
   }
 
   window.AutopickStatusController = {
-    start,
-    stop,
-    refreshAutopickStatus
+    mount,
+    unmount,
   };
 })();

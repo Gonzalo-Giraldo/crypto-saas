@@ -1,82 +1,75 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Control Center</title>
-  <!-- Responsibility: Shell visual mínimo del módulo principal y contenedor del módulo activo -->
+
   <link rel="stylesheet" href="../css/control-center.css">
   <link rel="stylesheet" href="../../modules/runtime-status/css/runtime-status.css">
   <link rel="stylesheet" href="../../modules/autopick-status/css/autopick-status.css">
   <link rel="stylesheet" href="../../modules/testing-center/css/testing-center.css">
   <link rel="stylesheet" href="../../modules/broker-connectivity/css/broker-connectivity.css">
+  <link rel="stylesheet" href="../../modules/session-gateway/css/session-gateway.css">
+  <link rel="stylesheet" href="../../modules/admin-tracking/css/admin-tracking.css">
+  <link rel="stylesheet" href="../../modules/broker-placeholder/css/broker-placeholder.css">
 </head>
+
 <body>
   <div class="app-shell">
-    <header class="topbar">
-      <div class="brand-block">
+    <aside class="sidebar">
+      <section class="brand">
         <div class="brand-mark">CC</div>
-        <div class="brand-copy">
-          <h1>Control Center</h1>
-          <p>Operational frontend shell</p>
-        </div>
-      </div>
+        <h1>Control Center</h1>
+        <p>Operational frontend shell</p>
+      </section>
 
-      <div class="session-card" aria-label="Mock session information">
-        <span class="session-status"></span>
-        <div class="session-copy">
-          <strong>Mock Session</strong>
-          <span>operator.local</span>
-        </div>
-      </div>
-    </header>
+      <section>
+        <p class="nav-title">Modules</p>
+        <nav class="module-nav" aria-label="Control center modules"></nav>
+      </section>
 
-    <div class="workspace">
-      <aside class="sidebar" aria-label="Module navigation">
-        <div class="sidebar-header">
-          <span class="sidebar-label">Modules</span>
-        </div>
+      <section class="operator-card">
+        <h2>Mock Session</h2>
+        <p>operator.local</p>
+      </section>
+    </aside>
 
-        <nav class="module-nav">
-          <button
-            type="button"
-            class="nav-item is-active"
-            data-module="testing-center"
-            aria-current="page">
-            Testing Center
-          </button>
-        </nav>
-      </aside>
+    <main class="main-panel">
+      <header class="module-header">
+        <span>Active Module</span>
+        <h2 id="active-module-title">Runtime Access</h2>
+      </header>
 
-      <main class="content-area" aria-label="Active module content">
-        <section class="content-panel">
-          <div class="content-panel-header">
-            <span class="eyebrow">Active Module</span>
-            <h2 id="active-module-title">Testing Center</h2>
-          </div>
-
-          <div id="active-module-root" class="module-root"></div>
-        </section>
-      </main>
-    </div>
+      <section id="active-module-root" class="module-root"></section>
+    </main>
   </div>
 
   <script src="../../shared/js/config.js"></script>
   <script src="../../shared/js/event-bus.js"></script>
   <script src="../../shared/js/runtime-store.js"></script>
+  <script src="../../shared/js/session-store.js"></script>
   <script src="../../shared/js/api-client.js"></script>
   <script src="../../shared/js/request-runner.js"></script>
+
   <script src="../../modules/runtime-status/js/runtime-status.service.js"></script>
   <script src="../../modules/runtime-status/js/runtime-status.presenter.js"></script>
   <script src="../../modules/runtime-status/js/runtime-status.controller.js"></script>
   <script src="../../modules/runtime-status/js/runtime-status.module.js"></script>
+
   <script src="../../modules/autopick-status/js/autopick-status.service.js"></script>
   <script src="../../modules/autopick-status/js/autopick-status.presenter.js"></script>
   <script src="../../modules/autopick-status/js/autopick-status.controller.js"></script>
   <script src="../../modules/autopick-status/js/autopick-status.module.js"></script>
+
   <script src="../js/control-center.orchestrator.js"></script>
+
+  <script src="../../modules/session-gateway/js/session-gateway.module.js"></script>
+  <script src="../../modules/admin-tracking/js/admin-tracking.module.js"></script>
+  <script src="../../modules/broker-placeholder/js/broker-placeholder.module.js"></script>
   <script src="../../modules/testing-center/js/testing-center.js"></script>
-  <script src="../js/control-center.js"></script>
   <script src="../../modules/broker-connectivity/js/broker-connectivity.js"></script>
+
+  <script src="../js/control-center.js"></script>
 </body>
 </html>

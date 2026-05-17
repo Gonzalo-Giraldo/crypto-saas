@@ -1,1 +1,139 @@
-/* Responsibility: Base styles for control center layout */
+:root {
+  --blue: #005be8;
+  --blue-soft: #eef5ff;
+  --line: #d8e6fb;
+  --text: #071a3d;
+  --muted: #516586;
+  --green: #058a43;
+  --bg: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+
+.cc-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 178px 1fr;
+}
+
+.cc-sidebar {
+  padding: 14px 10px;
+  border-right: 1px solid var(--line);
+  background: #fff;
+}
+
+.cc-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.cc-logo {
+  color: var(--blue);
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.cc-logo-row strong {
+  font-size: 1rem;
+}
+
+.cc-section-label {
+  margin: 0 0 10px;
+  color: var(--blue);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.cc-section-spaced { margin-top: 24px; }
+
+.cc-access,
+.cc-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.cc-access button,
+.cc-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 7px;
+  padding: 9px 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+}
+
+.cc-access button span,
+.cc-nav button span {
+  width: 18px;
+  color: var(--blue);
+  text-align: center;
+}
+
+.cc-access button.is-active,
+.cc-nav button.is-active {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.cc-session-card {
+  margin-top: 68px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 13px;
+  background: linear-gradient(180deg, #fff 0%, #f4f8ff 100%);
+}
+
+.cc-session-card strong {
+  display: block;
+  color: var(--blue);
+  margin-bottom: 7px;
+}
+
+.cc-session-card span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.cc-session-card p {
+  margin: 0 0 11px;
+  color: var(--green);
+  font-size: 0.72rem;
+}
+
+.cc-session-card button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--blue);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
+
+.cc-main {
+  padding: 14px 18px;
+}
+
+.cc-content {
+  min-height: calc(100vh - 28px);
+}

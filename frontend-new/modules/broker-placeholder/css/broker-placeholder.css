@@ -1,0 +1,17 @@
+.broker-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.broker-placeholder-card {
+  border: 1px solid #2f3542;
+  border-radius: 12px;
+  background: #161b22;
+  padding: 20px;
+}
+
+.broker-placeholder-card strong {
+  display: block;
+  margin-bottom: 8px;
+}

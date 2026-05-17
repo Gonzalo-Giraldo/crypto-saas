@@ -5,7 +5,7 @@
   const activeModuleTitle = document.getElementById('active-module-title');
   const activeModuleRoot = document.getElementById('active-module-root');
 
-  let activeModuleId = 'runtime-status';
+  let activeModuleId = 'session-gateway';
 
   function registerAvailableModules() {
     if (!window.ControlCenterOrchestrator) {
@@ -13,6 +13,9 @@
     }
 
     [
+      window.SessionGatewayModule,
+      window.AdminTrackingModule,
+      window.BrokerPlaceholderModule,
       window.RuntimeStatusModule,
       window.AutopickStatusModule,
       window.TestingCenterModule,
@@ -22,12 +25,50 @@
     });
   }
 
+  function getSession() {
+    if (!window.SessionStore || typeof window.SessionStore.getSession !== 'function') {
+      return {
+        sessionActive: false,
+        role: null,
+        broker: null,
+      };
+    }
+
+    return window.SessionStore.getSession();
+  }
+
+  function isModuleVisibleForSession(moduleEntry, session) {
+    if (!session || !session.sessionActive) {
+      return moduleEntry.id === 'session-gateway';
+    }
+
+    if (session.role === 'ADMIN') {
+      return [
+        'session-gateway',
+        'admin-tracking',
+      ].includes(moduleEntry.id);
+    }
+
+    if (session.broker === 'BINANCE' || session.broker === 'IBKR') {
+      return [
+        'session-gateway',
+        'broker-placeholder',
+      ].includes(moduleEntry.id);
+    }
+
+    return moduleEntry.id === 'session-gateway';
+  }
+
   function getModuleEntries() {
     if (!window.ControlCenterOrchestrator) {
       return [];
     }
 
-    return window.ControlCenterOrchestrator.getModules();
+    const session = getSession();
+
+    return window.ControlCenterOrchestrator
+      .getModules()
+      .filter((moduleEntry) => isModuleVisibleForSession(moduleEntry, session));
   }
 
   function setActiveMenuState() {
@@ -64,6 +105,37 @@
 
     activeModuleId = moduleId;
     mountActiveModule();
+  }
+
+  function moduleForSession(session) {
+    if (!session || !session.sessionActive) {
+      return 'session-gateway';
+    }
+
+    if (session.role === 'ADMIN') {
+      return 'admin-tracking';
+    }
+
+    if (session.broker === 'BINANCE') {
+      return 'broker-placeholder';
+    }
+
+    if (session.broker === 'IBKR') {
+      return 'broker-placeholder';
+    }
+
+    return 'session-gateway';
+  }
+
+  function bindSessionRouting() {
+    if (!window.ControlCenterEventBus) {
+      return;
+    }
+
+    window.ControlCenterEventBus.subscribe('session:changed', (session) => {
+      renderMenu();
+      setActiveModule(moduleForSession(session));
+    });
   }
 
   function createMenuButton(moduleEntry) {
@@ -103,6 +175,7 @@
 
     registerAvailableModules();
     renderMenu();
+    bindSessionRouting();
     setActiveModule(activeModuleId);
   }
 
