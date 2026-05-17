@@ -4,6 +4,7 @@ from pydantic import ConfigDict
 
 class Settings(BaseSettings):
     DATABASE_URL: str
+    DATA_DATABASE_URL: str = ""
     SECRET_KEY: str
     ENCRYPTION_KEY: str
     ENCRYPTION_KEY_VERSION: str = "v1"
