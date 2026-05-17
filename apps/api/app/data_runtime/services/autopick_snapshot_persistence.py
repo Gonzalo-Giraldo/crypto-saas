@@ -37,8 +37,13 @@ def persist_autopick_observation_snapshot(
         broker=snapshot.broker,
         market=snapshot.market,
         decision_status=report.decision_status,
+        model_version=report.model_version,
+
         selected_symbol=report.selected_symbol,
+        selected_side=report.selected.side if report.selected else None,
         selected_rank=report.selected_rank,
+        selected_score=report.selected.final_score if report.selected else None,
+        selected_reason=report.selected.reason if report.selected else None,
         ranked_count=int(report.ranked_count),
         partial_failure_count=int(snapshot.partial_failure_count),
         rejected_candidates_json=json.dumps(

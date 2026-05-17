@@ -105,7 +105,11 @@ def test_persist_autopick_observation_snapshot_append_only():
     assert row.broker == "BINANCE"
     assert row.market == "FUTURES"
     assert row.decision_status == report.decision_status
+    assert row.model_version == report.model_version
     assert row.selected_symbol == report.selected_symbol
+    assert row.selected_side == (report.selected.side if report.selected else None)
+    assert row.selected_score == (report.selected.final_score if report.selected else None)
+    assert row.selected_reason == (report.selected.reason if report.selected else None)
     assert row.partial_failure_count == snapshot.partial_failure_count
 
     rejected = json.loads(row.rejected_candidates_json)

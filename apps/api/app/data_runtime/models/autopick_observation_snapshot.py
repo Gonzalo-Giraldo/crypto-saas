@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, func
 
 from apps.api.app.data_runtime.session import DataBase
 
@@ -24,8 +24,13 @@ class AutopickObservationSnapshot(DataBase):
     market = Column(String(16), nullable=False)
 
     decision_status = Column(String(32), nullable=False)
+    model_version = Column(String(64), nullable=False)
+
     selected_symbol = Column(String(32), nullable=True)
+    selected_side = Column(String(16), nullable=True)
     selected_rank = Column(Integer, nullable=True)
+    selected_score = Column(Float, nullable=True)
+    selected_reason = Column(String(128), nullable=True)
     ranked_count = Column(Integer, nullable=False)
     partial_failure_count = Column(Integer, nullable=False)
 
