@@ -34,3 +34,21 @@ def test_invalid_export_transition_raises_fail_closed():
         return
 
     raise AssertionError("invalid transition must fail closed")
+
+
+def test_failed_transition_requires_error_message():
+    from apps.api.app.data_runtime.services.autopick_export_service import (
+        apply_export_transition,
+    )
+
+    class Row:
+        status = "EXPORTING"
+        error_message = None
+
+    try:
+        apply_export_transition(Row(), "FAILED")
+    except ValueError as exc:
+        assert "export_failure_requires_error_message" in str(exc)
+        return
+
+    raise AssertionError("FAILED transition must require error_message")

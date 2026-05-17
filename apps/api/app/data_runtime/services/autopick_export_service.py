@@ -77,5 +77,8 @@ def apply_export_transition(row, next_status: str):
     if not validate_export_transition(current, nxt):
         raise ValueError(f"invalid_export_transition:{current}->{nxt}")
 
+    if nxt == "FAILED" and not str(getattr(row, "error_message", "") or "").strip():
+        raise ValueError("export_failure_requires_error_message")
+
     row.status = nxt
     return row
