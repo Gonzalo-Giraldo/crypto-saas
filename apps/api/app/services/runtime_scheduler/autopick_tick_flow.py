@@ -9,9 +9,16 @@ def execute_with_runner(
     *,
     runner,
     fn,
+    observer=None,
 ):
-    return runner.run_with_db_transaction(
-        lambda: execute_autopick_tick_flow(fn)
+    tick_fn = lambda: execute_autopick_tick_flow(fn)
+
+    if observer is None:
+        return runner.run_with_db_transaction(tick_fn)
+
+    return runner.run(
+        tick_fn,
+        observer=observer,
     )
 
 from apps.api.app.services.runtime_scheduler.autopick_tick_dependencies import (
