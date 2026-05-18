@@ -64,8 +64,11 @@ from apps.api.app.services.runtime_scheduler.context_builder import (
     utc_now,
 )
 from apps.api.app.services.runtime_scheduler.observability import (
-    build_common_journal_payload,
     build_tick_details,
+)
+from apps.api.app.services.runtime_scheduler.observability_runtime import (
+    record_scheduler_tick_error_runtime,
+    record_scheduler_tick_success_runtime,
 )
 from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
     build_scheduler_runtime_state,
@@ -373,38 +376,16 @@ def _auto_pick_tick_once() -> None:
         execution_mode = runtime_state.execution_mode
         candidate_symbol, candidate_score = extract_candidate_metadata(observation_report)
 
-        record_scheduler_tick_ok(
-            db,
+        record_scheduler_tick_success_runtime(
+            db=db,
             scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+            runtime_state=runtime_state,
             duration_ms=duration_ms,
-            dry_run=scheduler_dry_run,
-            trading_enabled=trading_enabled,
-            last_candidate_symbol=candidate_symbol,
-            last_candidate_score=candidate_score,
-            last_execution_mode=execution_mode,
-        )
-        common_journal_payload = build_common_journal_payload(
             started_at=started_at_wall,
-            duration_ms=duration_ms,
-            dry_run=scheduler_dry_run,
-            trading_enabled=trading_enabled,
-            execution_mode=execution_mode,
-        )
-
-        record_scheduler_tick_journal(
-            db,
-            scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-            status="OK",
-            **common_journal_payload,
             candidate_symbol=candidate_symbol,
             candidate_score=candidate_score,
-            execution_mode=execution_mode,
-            decision_status=observation_report.decision_status,
-            selected_rank=observation_report.selected_rank,
-            ranked_count=observation_report.ranked_count,
-            top_n=observation_report.top_n,
+            observation_report=observation_report,
             observation_payload=observation_payload,
-            analytics_exported=False,
         )
         db.commit()
 
@@ -420,28 +401,12 @@ def _auto_pick_tick_once() -> None:
 
             trading_enabled = runtime_state.trading_enabled
             execution_mode = runtime_state.execution_mode
-            record_scheduler_tick_error(
-                db,
+            record_scheduler_tick_error_runtime(
+                db=db,
                 scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+                runtime_state=runtime_state,
                 duration_ms=duration_ms,
-                dry_run=scheduler_dry_run,
-                trading_enabled=trading_enabled,
-                last_error=str(exc),
-                last_execution_mode=execution_mode,
-            )
-            common_journal_payload = build_common_journal_payload(
                 started_at=started_at_wall,
-                duration_ms=duration_ms,
-                dry_run=scheduler_dry_run,
-                trading_enabled=trading_enabled,
-                execution_mode=execution_mode,
-            )
-
-            record_scheduler_tick_journal(
-                db,
-                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-                status="ERROR",
-                **common_journal_payload,
                 error=str(exc),
             )
             db.commit()
