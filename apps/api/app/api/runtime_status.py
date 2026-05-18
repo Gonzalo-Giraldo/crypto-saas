@@ -36,6 +36,10 @@ from apps.api.app.services.runtime_scheduler.runtime_session_authority import (
 )
 from apps.api.app.services.runtime_scheduler.runtime_session_identity import (
     get_runtime_session_identity,
+    get_runtime_session_local_state,
+)
+from apps.api.app.services.runtime_scheduler.runtime_session_reconciliation import (
+    evaluate_runtime_generation_reconciliation,
 )
 
 
@@ -144,7 +148,18 @@ def get_runtime_status(
         == local_runtime_identity.runtime_instance_id
     )
 
-    generation_matches = False
+    local_runtime_state = get_runtime_session_local_state(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+    )
+    generation_reconciliation = evaluate_runtime_generation_reconciliation(
+        local_runtime_generation=local_runtime_state.runtime_generation,
+        durable_runtime_generation=(
+            scheduler_state.runtime_generation
+            if scheduler_state
+            else None
+        ),
+    )
+    generation_matches = generation_reconciliation.matches
 
     advisory_session = evaluate_runtime_advisory_session(
         acquired=False,
@@ -214,7 +229,10 @@ def get_runtime_status(
             "local_runtime_owner_id": local_runtime_identity.runtime_owner_id,
             "local_runtime_instance_id": local_runtime_identity.runtime_instance_id,
             "local_identity_matches": local_identity_matches,
+            "local_runtime_generation": local_runtime_state.runtime_generation,
+            "durable_runtime_generation": scheduler_state.runtime_generation if scheduler_state else None,
             "generation_matches": generation_matches,
+            "generation_reconciliation_reason": generation_reconciliation.reason,
             "advisory_session_valid": advisory_session.valid,
             "advisory_session_reason": advisory_session.reason,
 

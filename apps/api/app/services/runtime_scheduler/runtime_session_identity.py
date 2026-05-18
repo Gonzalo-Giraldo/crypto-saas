@@ -15,7 +15,14 @@ class RuntimeSessionIdentity:
     runtime_instance_id: str
 
 
+@dataclass
+class RuntimeSessionLocalState:
+    identity: RuntimeSessionIdentity
+    runtime_generation: int | None = None
+
+
 _runtime_session_identities: dict[str, RuntimeSessionIdentity] = {}
+_runtime_session_local_states: dict[str, RuntimeSessionLocalState] = {}
 
 
 def get_runtime_session_identity(
@@ -45,3 +52,56 @@ def get_runtime_session_identity(
     _runtime_session_identities[scheduler_value] = identity
 
     return identity
+
+
+
+def get_runtime_session_local_state(
+    *,
+    scheduler_name: str,
+) -> RuntimeSessionLocalState:
+    identity = get_runtime_session_identity(
+        scheduler_name=scheduler_name,
+    )
+
+    existing = _runtime_session_local_states.get(identity.scheduler_name)
+
+    if existing is not None:
+        return existing
+
+    state = RuntimeSessionLocalState(
+        identity=identity,
+    )
+
+    _runtime_session_local_states[identity.scheduler_name] = state
+
+    return state
+
+
+def bind_runtime_session_generation(
+    *,
+    scheduler_name: str,
+    runtime_generation: int,
+) -> RuntimeSessionLocalState:
+    if runtime_generation <= 0:
+        raise ValueError("runtime_generation_must_be_positive")
+
+    state = get_runtime_session_local_state(
+        scheduler_name=scheduler_name,
+    )
+
+    state.runtime_generation = runtime_generation
+
+    return state
+
+
+def clear_runtime_session_generation(
+    *,
+    scheduler_name: str,
+) -> RuntimeSessionLocalState:
+    state = get_runtime_session_local_state(
+        scheduler_name=scheduler_name,
+    )
+
+    state.runtime_generation = None
+
+    return state

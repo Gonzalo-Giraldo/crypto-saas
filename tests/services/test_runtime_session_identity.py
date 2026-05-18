@@ -43,3 +43,49 @@ def test_runtime_session_identity_requires_scheduler_name():
         assert str(exc) == "scheduler_name_required"
     else:
         raise AssertionError("Expected scheduler_name_required")
+
+
+def test_runtime_session_local_state_is_stable_per_scheduler_name():
+    state_a = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+    state_b = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert state_a is state_b
+    assert state_a.identity.scheduler_name == "auto_pick_internal"
+
+
+def test_bind_runtime_session_generation_sets_local_generation():
+    state = runtime_session_identity.bind_runtime_session_generation(
+        scheduler_name="auto_pick_internal",
+        runtime_generation=4,
+    )
+
+    assert state.runtime_generation == 4
+
+
+def test_bind_runtime_session_generation_requires_positive_generation():
+    try:
+        runtime_session_identity.bind_runtime_session_generation(
+            scheduler_name="auto_pick_internal",
+            runtime_generation=0,
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_generation_must_be_positive"
+    else:
+        raise AssertionError("Expected runtime_generation_must_be_positive")
+
+
+def test_clear_runtime_session_generation_fails_closed_to_missing_generation():
+    runtime_session_identity.bind_runtime_session_generation(
+        scheduler_name="auto_pick_internal",
+        runtime_generation=5,
+    )
+
+    state = runtime_session_identity.clear_runtime_session_generation(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert state.runtime_generation is None
