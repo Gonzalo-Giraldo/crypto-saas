@@ -54,17 +54,10 @@ from apps.api.app.services.scheduler_runtime_loop import (
 )
 from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
-from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_auto_pick_observation
 from apps.api.app.services.runtime_scheduler.context_builder import (
     build_scheduler_tick_context,
     elapsed_ms_since,
-    extract_candidate_metadata,
-    resolve_execution_mode,
-    resolve_trading_enabled,
     utc_now,
-)
-from apps.api.app.services.runtime_scheduler.observability import (
-    build_tick_details,
 )
 from apps.api.app.services.runtime_scheduler.observability_runtime import (
     record_scheduler_tick_error_runtime,
@@ -76,12 +69,10 @@ from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
 from apps.api.app.services.runtime_scheduler.runtime_flow import (
     execute_scheduler_runtime_flow,
 )
-from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
     record_scheduler_overlap_blocked,
     record_scheduler_tick_error,
-    record_scheduler_tick_ok,
 )
 from apps.api.app.services.trading_controls import get_trading_enabled
 
