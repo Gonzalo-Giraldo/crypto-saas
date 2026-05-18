@@ -141,6 +141,8 @@ def get_runtime_status(
         == local_runtime_identity.runtime_instance_id
     )
 
+    generation_matches = False
+
     session_authority = evaluate_runtime_session_authority(
         evidence=RuntimeSessionAuthorityEvidence(
             ownership_row_present=bool(
@@ -149,7 +151,7 @@ def get_runtime_status(
             ),
             advisory_session_valid=False,
             local_identity_matches=local_identity_matches,
-            generation_matches=False,
+            generation_matches=generation_matches,
             heartbeat_fresh=bool(
                 ownership_lifecycle
                 and not ownership_lifecycle.stale
@@ -203,6 +205,7 @@ def get_runtime_status(
             "local_runtime_owner_id": local_runtime_identity.runtime_owner_id,
             "local_runtime_instance_id": local_runtime_identity.runtime_instance_id,
             "local_identity_matches": local_identity_matches,
+            "generation_matches": generation_matches,
 
             "session_authority_valid": session_authority.valid,
             "session_authority_reason": session_authority.reason,
