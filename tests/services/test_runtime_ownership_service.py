@@ -166,3 +166,52 @@ def test_acquire_runtime_ownership_uses_next_monotonic_generation_after_clear():
     assert second.acquired is True
     assert second.runtime_generation == 2
     assert row.last_runtime_generation == 2
+
+
+def test_acquire_runtime_ownership_binds_local_runtime_generation_after_success():
+    from apps.api.app.services.runtime_scheduler import runtime_session_identity
+
+    runtime_session_identity._runtime_session_identities.clear()
+    runtime_session_identity._runtime_session_local_states.clear()
+
+    db = _build_db()
+    row = _seed_state(db)
+
+    result = acquire_runtime_ownership(
+        db,
+        runtime_state=row,
+        now=datetime.now(timezone.utc),
+    )
+
+    local_state = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert result.acquired is True
+    assert result.runtime_generation == 1
+    assert local_state.runtime_generation == 1
+
+
+def test_failed_acquire_runtime_ownership_does_not_bind_local_generation():
+    from apps.api.app.services.runtime_scheduler import runtime_session_identity
+
+    runtime_session_identity._runtime_session_identities.clear()
+    runtime_session_identity._runtime_session_local_states.clear()
+
+    db = _build_db()
+    row = _seed_state(db)
+    row.runtime_owner_id = "partial-owner"
+    db.flush()
+
+    result = acquire_runtime_ownership(
+        db,
+        runtime_state=row,
+        now=datetime.now(timezone.utc),
+    )
+
+    local_state = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert result.acquired is False
+    assert local_state.runtime_generation is None

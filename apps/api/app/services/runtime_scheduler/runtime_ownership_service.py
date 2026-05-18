@@ -21,6 +21,9 @@ from apps.api.app.services.runtime_scheduler.runtime_ownership_atomic_acquisitio
 from apps.api.app.services.runtime_scheduler.runtime_ownership_validator import (
     validate_runtime_ownership_state,
 )
+from apps.api.app.services.runtime_scheduler.runtime_session_identity import (
+    bind_runtime_session_generation,
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,11 @@ def acquire_runtime_ownership(
             runtime_generation=None,
             reason="atomic_acquisition_failed",
         )
+
+    bind_runtime_session_generation(
+        scheduler_name=runtime_state.scheduler_name,
+        runtime_generation=runtime_generation,
+    )
 
     return RuntimeOwnershipAcquireResult(
         acquired=True,
