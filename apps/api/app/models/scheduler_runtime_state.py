@@ -26,6 +26,7 @@ class SchedulerRuntimeState(Base):
     runtime_owner_id = Column(String, nullable=True)
     runtime_instance_id = Column(String, nullable=True)
     runtime_generation = Column(Integer, nullable=True)
+    last_runtime_generation = Column(Integer, nullable=False, default=0, server_default="0")
 
     runtime_started_at = Column(DateTime(timezone=True), nullable=True)
     runtime_heartbeat_at = Column(DateTime(timezone=True), nullable=True)

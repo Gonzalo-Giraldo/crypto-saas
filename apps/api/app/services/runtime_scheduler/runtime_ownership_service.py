@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 from apps.api.app.models.scheduler_runtime_state import (
     SchedulerRuntimeState,
 )
+from apps.api.app.services.runtime_scheduler.runtime_generation_allocator import (
+    allocate_next_runtime_generation,
+)
 from apps.api.app.services.runtime_scheduler.runtime_identity import (
     build_runtime_instance_id,
     build_runtime_owner_id,
@@ -75,7 +78,10 @@ def acquire_runtime_ownership(
         scheduler_name=runtime_state.scheduler_name,
     )
 
-    runtime_generation = 1
+    runtime_generation = allocate_next_runtime_generation(
+        db,
+        scheduler_name=runtime_state.scheduler_name,
+    )
 
     acquired = atomic_acquire_runtime_ownership(
         db,

@@ -129,3 +129,40 @@ def test_acquire_runtime_ownership_fails_closed_when_atomic_update_loses_race():
 
     assert result.acquired is False
     assert result.reason == "atomic_acquisition_failed"
+
+
+def test_acquire_runtime_ownership_uses_next_monotonic_generation_after_clear():
+    from apps.api.app.services.scheduler_runtime_state_service import (
+        clear_scheduler_runtime_ownership,
+    )
+
+    db = _build_db()
+    row = _seed_state(db)
+
+    first = acquire_runtime_ownership(
+        db,
+        runtime_state=row,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert first.acquired is True
+    assert first.runtime_generation == 1
+
+    clear_scheduler_runtime_ownership(
+        db,
+        scheduler_name="auto_pick_internal",
+    )
+    db.refresh(row)
+
+    assert row.runtime_generation is None
+    assert row.last_runtime_generation == 1
+
+    second = acquire_runtime_ownership(
+        db,
+        runtime_state=row,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert second.acquired is True
+    assert second.runtime_generation == 2
+    assert row.last_runtime_generation == 2
