@@ -299,6 +299,7 @@ def _auto_pick_tick_once() -> None:
     started_at_wall = tick_context.started_at_wall
     db = SessionLocal()
     try:
+        scheduler_dry_run = bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
         exit_out = {
             "scanned_positions": 0,
             "exit_candidates": 0,
@@ -327,7 +328,7 @@ def _auto_pick_tick_once() -> None:
             monitor["legacy_enabled"] = True
         out = {
             "executed_count": 0,
-            "dry_run": bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            "dry_run": scheduler_dry_run,
             "top_n": int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
             "legacy_enabled": False,
         }
