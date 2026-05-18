@@ -56,13 +56,15 @@ from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
 from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_auto_pick_observation
 from apps.api.app.services.runtime_scheduler.context_builder import (
-    build_common_journal_payload,
     build_scheduler_tick_context,
     elapsed_ms_since,
     extract_candidate_metadata,
     resolve_execution_mode,
     resolve_trading_enabled,
     utc_now,
+)
+from apps.api.app.services.runtime_scheduler.observability import (
+    build_common_journal_payload,
 )
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
