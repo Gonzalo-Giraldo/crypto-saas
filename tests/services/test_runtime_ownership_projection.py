@@ -123,3 +123,23 @@ def test_projection_is_frozen():
         raise AssertionError(
             "Projection should be immutable"
         )
+
+
+def test_runtime_locked_does_not_imply_runtime_ownership():
+    row = _build_runtime_state()
+
+    row.runtime_locked = True
+
+    projection = build_runtime_ownership_projection(
+        runtime_state=row,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert projection.runtime_locked is True
+
+    assert projection.ownership_present is False
+    assert projection.runtime_owner_id is None
+    assert projection.runtime_instance_id is None
+    assert projection.runtime_generation is None
+
+    assert projection.heartbeat_stale is True
