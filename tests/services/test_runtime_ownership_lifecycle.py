@@ -107,3 +107,26 @@ def test_lifecycle_projection_fails_closed_on_invalid_generation():
     assert projection.stale is True
     assert projection.operator_attention_required is True
     assert projection.reason == "invalid_runtime_generation"
+
+
+def test_active_lifecycle_projection_is_not_durable_runtime_authority():
+    row = _build_runtime_state()
+    row.runtime_owner_id = "owner"
+    row.runtime_instance_id = "instance"
+    row.runtime_generation = 1
+    row.runtime_heartbeat_at = datetime.now(timezone.utc)
+
+    projection = build_runtime_ownership_lifecycle_projection(
+        runtime_state=row,
+        stale_after_seconds=60,
+    )
+
+    assert projection.state == RuntimeOwnershipLifecycleState.ACTIVE
+
+    # ACTIVE here is an observability projection only.
+    # It does not prove durable advisory/session lock authority.
+    # It does not prove local runtime process authority.
+    # It does not prove ownership-to-lock reconciliation.
+    # It must not be used as execution authority or broker mutation authority.
+    assert projection.valid_ownership is True
+    assert projection.operator_attention_required is False
