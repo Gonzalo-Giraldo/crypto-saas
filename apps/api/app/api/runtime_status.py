@@ -27,9 +27,6 @@ from apps.api.app.services.scheduler_runtime_loop import (
 from apps.api.app.services.runtime_scheduler.runtime_ownership_lifecycle import (
     build_runtime_ownership_lifecycle_projection,
 )
-from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
-    evaluate_runtime_advisory_session,
-)
 from apps.api.app.services.runtime_scheduler.runtime_session_authority import (
     RuntimeSessionAuthorityEvidence,
     evaluate_runtime_session_authority,
@@ -161,11 +158,7 @@ def get_runtime_status(
     )
     generation_matches = generation_reconciliation.matches
 
-    advisory_session = evaluate_runtime_advisory_session(
-        acquired=False,
-        connection_alive=False,
-        lock_still_held=False,
-    )
+    advisory_session = local_runtime_state.advisory_session_state
 
     session_authority = evaluate_runtime_session_authority(
         evidence=RuntimeSessionAuthorityEvidence(

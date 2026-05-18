@@ -89,3 +89,45 @@ def test_clear_runtime_session_generation_fails_closed_to_missing_generation():
     )
 
     assert state.runtime_generation is None
+
+
+def test_bind_runtime_advisory_session_state_sets_local_state():
+    from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
+        evaluate_runtime_advisory_session,
+    )
+
+    advisory_state = evaluate_runtime_advisory_session(
+        acquired=True,
+        connection_alive=True,
+        lock_still_held=True,
+    )
+
+    state = runtime_session_identity.bind_runtime_advisory_session_state(
+        scheduler_name="auto_pick_internal",
+        advisory_session_state=advisory_state,
+    )
+
+    assert state.advisory_session_state.valid is True
+    assert state.advisory_session_state.reason is None
+
+
+def test_clear_runtime_advisory_session_state_fails_closed():
+    from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
+        evaluate_runtime_advisory_session,
+    )
+
+    runtime_session_identity.bind_runtime_advisory_session_state(
+        scheduler_name="auto_pick_internal",
+        advisory_session_state=evaluate_runtime_advisory_session(
+            acquired=True,
+            connection_alive=True,
+            lock_still_held=True,
+        ),
+    )
+
+    state = runtime_session_identity.clear_runtime_advisory_session_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert state.advisory_session_state.valid is False
+    assert state.advisory_session_state.reason == "advisory_session_not_acquired"

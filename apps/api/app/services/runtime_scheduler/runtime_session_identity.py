@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
+    RuntimeAdvisorySessionState,
+    evaluate_runtime_advisory_session,
+)
 from apps.api.app.services.runtime_scheduler.runtime_identity import (
     build_runtime_instance_id,
     build_runtime_owner_id,
@@ -19,6 +23,11 @@ class RuntimeSessionIdentity:
 class RuntimeSessionLocalState:
     identity: RuntimeSessionIdentity
     runtime_generation: int | None = None
+    advisory_session_state: RuntimeAdvisorySessionState = evaluate_runtime_advisory_session(
+        acquired=False,
+        connection_alive=False,
+        lock_still_held=False,
+    )
 
 
 _runtime_session_identities: dict[str, RuntimeSessionIdentity] = {}
@@ -103,5 +112,37 @@ def clear_runtime_session_generation(
     )
 
     state.runtime_generation = None
+
+    return state
+
+
+
+def bind_runtime_advisory_session_state(
+    *,
+    scheduler_name: str,
+    advisory_session_state: RuntimeAdvisorySessionState,
+) -> RuntimeSessionLocalState:
+    state = get_runtime_session_local_state(
+        scheduler_name=scheduler_name,
+    )
+
+    state.advisory_session_state = advisory_session_state
+
+    return state
+
+
+def clear_runtime_advisory_session_state(
+    *,
+    scheduler_name: str,
+) -> RuntimeSessionLocalState:
+    state = get_runtime_session_local_state(
+        scheduler_name=scheduler_name,
+    )
+
+    state.advisory_session_state = evaluate_runtime_advisory_session(
+        acquired=False,
+        connection_alive=False,
+        lock_still_held=False,
+    )
 
     return state
