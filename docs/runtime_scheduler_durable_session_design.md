@@ -306,3 +306,62 @@ Therefore:
 - runtime status must remain observational
 - scheduler loop integration must wait
 - execution authority must remain blocked by design
+
+## Current implementation progress
+
+The current code now includes observability-only runtime session foundations:
+
+- stable local runtime session identity
+- local identity reconciliation projection
+- generation reconciliation projection
+- fail-closed runtime session authority evaluation
+- fail-closed advisory session evaluation
+- runtime advisory session state holder
+- separate advisory lock keys for tick overlap and future runtime session authority
+
+These pieces do not implement durable runtime authority yet.
+
+## Current advisory lock separation
+
+The scheduler tick overlap lock remains separate from future durable runtime session authority.
+
+Current known lock keys:
+
+- scheduler tick overlap lock: 887731
+- future runtime session advisory lock: 887732
+
+The tick overlap lock must not be used as proof of durable runtime authority.
+
+The runtime session advisory lock key is reserved for future durable session work and is not yet integrated into the scheduler loop.
+
+## Current runtime status truth
+
+Runtime status may expose:
+
+- local runtime owner identity
+- local runtime instance identity
+- local identity reconciliation
+- generation reconciliation projection
+- advisory session projection
+- session authority projection
+
+These projections are observability-only.
+
+They must not be used as broker mutation authority.
+
+Until durable advisory/session authority, generation fencing, heartbeat CAS, and reconciliation are fully implemented, runtime session authority must remain fail-closed.
+
+## Current remaining blocking gaps
+
+The following remain blocking before scheduler authority enforcement:
+
+1. durable advisory/session lock acquisition
+2. durable advisory/session lock validation
+3. durable advisory/session lock release
+4. owner-only heartbeat CAS
+5. generation/fencing reconciliation
+6. LOST_LOCK runtime projection
+7. graceful shutdown release semantics
+8. explicit recovery-disabled behavior
+9. scheduler loop integration
+10. execution authority gating
