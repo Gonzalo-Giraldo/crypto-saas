@@ -130,3 +130,78 @@ def test_release_runtime_advisory_session_without_lock_clears_local_state():
     assert state.valid is False
     assert state.reason == "advisory_session_not_acquired"
     assert local_state.advisory_session_state.valid is False
+
+
+def test_refresh_runtime_advisory_session_state_keeps_valid_lock_bound():
+    from apps.api.app.services.runtime_scheduler.runtime_advisory_session_service import (
+        refresh_runtime_advisory_session_state,
+    )
+
+    connection = _FakeConnection(acquire_result=True)
+
+    acquired = acquire_runtime_advisory_session(
+        engine=_FakeEngine(connection),
+        scheduler_name="auto_pick_internal",
+    )
+
+    state = refresh_runtime_advisory_session_state(
+        scheduler_name="auto_pick_internal",
+        lock=acquired.lock,
+    )
+
+    local_state = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert state.valid is True
+    assert local_state.advisory_session_state.valid is True
+
+
+def test_refresh_runtime_advisory_session_state_clears_local_state_on_connection_loss():
+    from apps.api.app.services.runtime_scheduler.runtime_advisory_session_service import (
+        refresh_runtime_advisory_session_state,
+    )
+
+    connection = _FakeConnection(acquire_result=True)
+
+    acquired = acquire_runtime_advisory_session(
+        engine=_FakeEngine(connection),
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert acquired.lock is not None
+
+    connection.fail_on_execute = True
+
+    state = refresh_runtime_advisory_session_state(
+        scheduler_name="auto_pick_internal",
+        lock=acquired.lock,
+    )
+
+    local_state = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert state.valid is False
+    assert state.reason == "advisory_session_connection_lost"
+    assert local_state.advisory_session_state.valid is False
+    assert local_state.advisory_session_state.reason == "advisory_session_not_acquired"
+
+
+def test_refresh_runtime_advisory_session_state_without_lock_fails_closed():
+    from apps.api.app.services.runtime_scheduler.runtime_advisory_session_service import (
+        refresh_runtime_advisory_session_state,
+    )
+
+    state = refresh_runtime_advisory_session_state(
+        scheduler_name="auto_pick_internal",
+        lock=None,
+    )
+
+    local_state = runtime_session_identity.get_runtime_session_local_state(
+        scheduler_name="auto_pick_internal",
+    )
+
+    assert state.valid is False
+    assert state.reason == "advisory_session_not_acquired"
+    assert local_state.advisory_session_state.valid is False

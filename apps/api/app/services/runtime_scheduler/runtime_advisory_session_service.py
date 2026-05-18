@@ -77,3 +77,35 @@ def release_runtime_advisory_session(
         scheduler_name=scheduler_name_value,
     )
     return state
+
+
+
+def refresh_runtime_advisory_session_state(
+    *,
+    scheduler_name: str,
+    lock: RuntimeAdvisorySessionLock | None,
+) -> RuntimeAdvisorySessionState:
+    scheduler_name_value = str(scheduler_name or "").strip()
+
+    if not scheduler_name_value:
+        raise ValueError("scheduler_name_required")
+
+    if lock is None:
+        return clear_runtime_advisory_session_state(
+            scheduler_name=scheduler_name_value,
+        ).advisory_session_state
+
+    state = lock.current_state()
+
+    if not state.valid:
+        clear_runtime_advisory_session_state(
+            scheduler_name=scheduler_name_value,
+        )
+        return state
+
+    bind_runtime_advisory_session_state(
+        scheduler_name=scheduler_name_value,
+        advisory_session_state=state,
+    )
+
+    return state
