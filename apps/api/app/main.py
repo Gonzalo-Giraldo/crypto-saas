@@ -56,6 +56,7 @@ from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
 from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_auto_pick_observation
 from apps.api.app.services.runtime_scheduler.context_builder import (
+    build_common_journal_payload,
     build_scheduler_tick_context,
     elapsed_ms_since,
     extract_candidate_metadata,
@@ -383,15 +384,19 @@ def _auto_pick_tick_once() -> None:
             last_candidate_score=candidate_score,
             last_execution_mode=execution_mode,
         )
+        common_journal_payload = build_common_journal_payload(
+            started_at=started_at_wall,
+            duration_ms=duration_ms,
+            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            trading_enabled=trading_enabled,
+            execution_mode=execution_mode,
+        )
+
         record_scheduler_tick_journal(
             db,
             scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-            started_at=started_at_wall,
-            finished_at=utc_now(),
-            duration_ms=duration_ms,
             status="OK",
-            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
-            trading_enabled=trading_enabled,
+            **common_journal_payload,
             candidate_symbol=candidate_symbol,
             candidate_score=candidate_score,
             execution_mode=execution_mode,
@@ -401,8 +406,6 @@ def _auto_pick_tick_once() -> None:
             top_n=observation_report.top_n,
             observation_payload=observation_payload,
             analytics_exported=False,
-            mutation_attempted=False,
-            mutation_executed=False,
         )
         db.commit()
 
