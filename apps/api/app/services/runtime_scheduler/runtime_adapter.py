@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from apps.api.app.services.runtime_scheduler.observability_runtime import (
+    record_scheduler_tick_error_runtime,
     record_scheduler_tick_success_runtime,
 )
 from apps.api.app.services.runtime_scheduler.runtime_dependencies_builder import (
@@ -61,3 +62,28 @@ def execute_scheduler_runtime_adapter(
     )
 
     return flow_result
+
+
+def execute_scheduler_runtime_error_adapter(
+    *,
+    db,
+    scheduler_name: str,
+    scheduler_dry_run: bool,
+    trading_enabled,
+    started_at_wall,
+    duration_ms: int,
+    error: str,
+):
+    runtime_state = build_scheduler_runtime_state(
+        scheduler_dry_run=scheduler_dry_run,
+        trading_enabled=trading_enabled,
+    )
+
+    record_scheduler_tick_error_runtime(
+        db=db,
+        scheduler_name=scheduler_name,
+        runtime_state=runtime_state,
+        duration_ms=duration_ms,
+        started_at=started_at_wall,
+        error=error,
+    )

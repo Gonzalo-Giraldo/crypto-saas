@@ -59,14 +59,9 @@ from apps.api.app.services.runtime_scheduler.context_builder import (
     elapsed_ms_since,
     utc_now,
 )
-from apps.api.app.services.runtime_scheduler.observability_runtime import (
-    record_scheduler_tick_error_runtime,
-)
-from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
-    build_scheduler_runtime_state,
-)
 from apps.api.app.services.runtime_scheduler.runtime_adapter import (
     execute_scheduler_runtime_adapter,
+    execute_scheduler_runtime_error_adapter,
 )
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -320,19 +315,13 @@ def _auto_pick_tick_once() -> None:
         try:
             duration_ms = elapsed_ms_since(started_at)
 
-            runtime_state = build_scheduler_runtime_state(
-                scheduler_dry_run=scheduler_dry_run,
-                trading_enabled=get_trading_enabled(db),
-            )
-
-            trading_enabled = runtime_state.trading_enabled
-            execution_mode = runtime_state.execution_mode
-            record_scheduler_tick_error_runtime(
+            execute_scheduler_runtime_error_adapter(
                 db=db,
                 scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-                runtime_state=runtime_state,
+                scheduler_dry_run=scheduler_dry_run,
+                trading_enabled=get_trading_enabled(db),
                 duration_ms=duration_ms,
-                started_at=started_at_wall,
+                started_at_wall=started_at_wall,
                 error=str(exc),
             )
             db.commit()
