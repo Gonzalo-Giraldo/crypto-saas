@@ -18,12 +18,12 @@ class SchedulerTickRunner:
         self.on_success = on_success
         self.on_failure = on_failure
 
-    def run(self, fn):
+    def run(self, fn, *, observer=None):
         started_monotonic = time.monotonic()
         started_at_wall = datetime.now(timezone.utc)
 
         try:
-            result = fn()
+            result = observer(fn) if observer is not None else fn()
 
             duration_ms = int((time.monotonic() - started_monotonic) * 1000)
 
