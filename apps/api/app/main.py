@@ -55,7 +55,10 @@ from apps.api.app.services.scheduler_runtime_loop import (
 from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
 from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_auto_pick_observation
-from apps.api.app.services.runtime_scheduler.context_builder import build_scheduler_tick_context
+from apps.api.app.services.runtime_scheduler.context_builder import (
+    build_scheduler_tick_context,
+    elapsed_ms_since,
+)
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -359,7 +362,7 @@ def _auto_pick_tick_once() -> None:
                 "shadow_executed": (shadow_out or {}).get("executed"),
             }
 
-        duration_ms = int((time.monotonic() - started_at) * 1000)
+        duration_ms = elapsed_ms_since(started_at)
         trading_enabled = bool(get_trading_enabled(db))
         execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
         candidate_symbol = observation_report.selected_symbol
@@ -405,7 +408,7 @@ def _auto_pick_tick_once() -> None:
         print("[auto-pick-scheduler] tick ok", tick_details, flush=True)
     except Exception as exc:
         try:
-            duration_ms = int((time.monotonic() - started_at) * 1000)
+            duration_ms = elapsed_ms_since(started_at)
             trading_enabled = bool(get_trading_enabled(db))
             execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
             record_scheduler_tick_error(

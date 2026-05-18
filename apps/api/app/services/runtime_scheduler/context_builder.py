@@ -8,6 +8,10 @@ from apps.api.app.services.runtime_scheduler.contracts import (
 )
 
 
+def elapsed_ms_since(started_monotonic: float) -> int:
+    return int((time.monotonic() - started_monotonic) * 1000)
+
+
 def build_scheduler_tick_context(
     *,
     scheduler_name: str,
