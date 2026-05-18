@@ -73,6 +73,9 @@ from apps.api.app.services.runtime_scheduler.observability_runtime import (
 from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
     build_scheduler_runtime_state,
 )
+from apps.api.app.services.runtime_scheduler.runtime_flow import (
+    execute_scheduler_runtime_flow,
+)
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -306,90 +309,37 @@ def _auto_pick_tick_once() -> None:
     db = SessionLocal()
     try:
         scheduler_dry_run = bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
-        exit_out = {
-            "scanned_positions": 0,
-            "exit_candidates": 0,
-            "closed_positions": 0,
-            "skipped_no_price": 0,
-            "skipped_by_policy": 0,
-            "errors": 0,
-            "paused": False,
-            "dry_run": True,
-        }
-        if bool(settings.AUTO_EXIT_INTERNAL_ENABLED):
-            exit_out = _legacy_exit_tick_disabled(
-                db=db,
-                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-                dry_run=bool(settings.AUTO_EXIT_INTERNAL_DRY_RUN),
-                real_only=bool(settings.AUTO_EXIT_INTERNAL_REAL_ONLY),
-                include_service_users=bool(settings.AUTO_EXIT_INTERNAL_INCLUDE_SERVICE_USERS),
-                max_positions=int(settings.AUTO_EXIT_INTERNAL_MAX_POSITIONS or 500),
-            )
-        monitor = {"inserted": 0, "legacy_enabled": False}
-        if bool(settings.AUTO_PICK_LEGACY_MARKET_MONITOR_ENABLED):
-            monitor = _legacy_market_monitor_tick_disabled(
-                db=db,
-                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-            )
-            monitor["legacy_enabled"] = True
-        out = {
-            "executed_count": 0,
-            "dry_run": scheduler_dry_run,
-            "top_n": int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
-            "legacy_enabled": False,
-        }
-        if bool(settings.AUTO_PICK_LEGACY_TICK_ENABLED):
-            out = _legacy_auto_pick_tick_disabled(
-                db=db,
-                tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-                dry_run=scheduler_dry_run,
-                top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
-                real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
-                include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
-            )
-            out["legacy_enabled"] = True
-        _legacy_learning_tick_disabled(
+
+        flow_result, observation_report = execute_scheduler_runtime_flow(
             db=db,
-            tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
+            started_at=started_at,
+            scheduler_dry_run=scheduler_dry_run,
+            legacy_exit_tick=_legacy_exit_tick_disabled,
+            legacy_market_monitor_tick=_legacy_market_monitor_tick_disabled,
+            legacy_auto_pick_tick=_legacy_auto_pick_tick_disabled,
+            legacy_learning_tick=_legacy_learning_tick_disabled,
+            global_shadow_tick=_global_shadow_tick_once,
         )
-        observation_report = run_binance_auto_pick_observation(
-            top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
-        )
-        observation_payload = observation_report.to_dict()
-
-        shadow_out = _global_shadow_tick_once(db=db)
-        tick_details = build_tick_details(
-            monitor=monitor,
-            out=out,
-            exit_out=exit_out,
-            shadow_out=shadow_out,
-        )
-
-        duration_ms = elapsed_ms_since(started_at)
 
         runtime_state = build_scheduler_runtime_state(
             scheduler_dry_run=scheduler_dry_run,
             trading_enabled=get_trading_enabled(db),
         )
 
-        trading_enabled = runtime_state.trading_enabled
-        execution_mode = runtime_state.execution_mode
-        candidate_symbol, candidate_score = extract_candidate_metadata(observation_report)
-
         record_scheduler_tick_success_runtime(
             db=db,
             scheduler_name=AUTO_PICK_SCHEDULER_NAME,
             runtime_state=runtime_state,
-            duration_ms=duration_ms,
+            duration_ms=flow_result.duration_ms,
             started_at=started_at_wall,
-            candidate_symbol=candidate_symbol,
-            candidate_score=candidate_score,
+            candidate_symbol=flow_result.candidate_symbol,
+            candidate_score=flow_result.candidate_score,
             observation_report=observation_report,
-            observation_payload=observation_payload,
+            observation_payload=flow_result.observation_payload,
         )
         db.commit()
 
-        print("[auto-pick-scheduler] tick ok", tick_details, flush=True)
+        print("[auto-pick-scheduler] tick ok", flow_result.tick_details, flush=True)
     except Exception as exc:
         try:
             duration_ms = elapsed_ms_since(started_at)
