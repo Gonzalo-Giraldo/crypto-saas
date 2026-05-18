@@ -63,6 +63,10 @@ from apps.api.app.services.runtime_scheduler.runtime_adapter import (
     execute_scheduler_runtime_adapter,
     execute_scheduler_runtime_error_adapter,
 )
+from apps.api.app.services.runtime_scheduler.runtime_tick_once_service import (
+    RuntimeTickOnceDependencies,
+    run_runtime_tick_once,
+)
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
     record_scheduler_overlap_blocked,
@@ -286,47 +290,20 @@ def _global_shadow_tick_once(*, db) -> dict | None:
 
 
 def _auto_pick_tick_once() -> None:
-    tick_context = build_scheduler_tick_context(
+    run_runtime_tick_once(
         scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-    )
-    started_at = tick_context.started_monotonic
-    started_at_wall = tick_context.started_at_wall
-    db = SessionLocal()
-    try:
-        scheduler_dry_run = bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
-
-        flow_result = execute_scheduler_runtime_adapter(
-            db=db,
-            scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-            started_at=started_at,
-            started_at_wall=started_at_wall,
-            scheduler_dry_run=scheduler_dry_run,
-            trading_enabled=get_trading_enabled(db),
+        deps=RuntimeTickOnceDependencies(
+            db_factory=SessionLocal,
+            settings=settings,
+            build_tick_context=build_scheduler_tick_context,
+            elapsed_ms_since=elapsed_ms_since,
+            get_trading_enabled=get_trading_enabled,
+            execute_runtime_adapter=execute_scheduler_runtime_adapter,
+            execute_runtime_error_adapter=execute_scheduler_runtime_error_adapter,
             legacy_exit_tick=_legacy_exit_tick_disabled,
             legacy_market_monitor_tick=_legacy_market_monitor_tick_disabled,
             legacy_auto_pick_tick=_legacy_auto_pick_tick_disabled,
             legacy_learning_tick=_legacy_learning_tick_disabled,
             global_shadow_tick=_global_shadow_tick_once,
-        )
-        db.commit()
-
-        print("[auto-pick-scheduler] tick ok", flow_result.tick_details, flush=True)
-    except Exception as exc:
-        try:
-            duration_ms = elapsed_ms_since(started_at)
-
-            execute_scheduler_runtime_error_adapter(
-                db=db,
-                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-                scheduler_dry_run=scheduler_dry_run,
-                trading_enabled=get_trading_enabled(db),
-                duration_ms=duration_ms,
-                started_at_wall=started_at_wall,
-                error=str(exc),
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
-        print(f"[auto-pick-scheduler] tick error: {exc}", flush=True)
-    finally:
-        db.close()
+        ),
+    )
