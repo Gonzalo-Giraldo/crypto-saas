@@ -201,3 +201,24 @@ def clear_scheduler_runtime_ownership(
     db.flush()
 
     return row
+
+
+def touch_scheduler_runtime_heartbeat(
+    db: Session,
+    *,
+    scheduler_name: str,
+    runtime_heartbeat_at: datetime,
+) -> SchedulerRuntimeState:
+    row = get_scheduler_runtime_state(
+        db,
+        scheduler_name=scheduler_name,
+    )
+
+    if row is None:
+        raise ValueError("scheduler_runtime_state_not_found")
+
+    row.runtime_heartbeat_at = runtime_heartbeat_at
+
+    db.flush()
+
+    return row

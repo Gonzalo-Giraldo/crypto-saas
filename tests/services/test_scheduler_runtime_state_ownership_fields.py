@@ -184,3 +184,45 @@ def test_clear_scheduler_runtime_ownership_requires_existing_state():
         assert str(exc) == "scheduler_runtime_state_not_found"
     else:
         raise AssertionError("Expected scheduler_runtime_state_not_found")
+
+
+from apps.api.app.services.scheduler_runtime_state_service import (
+    touch_scheduler_runtime_heartbeat,
+)
+
+
+def test_touch_scheduler_runtime_heartbeat():
+    db = _build_db()
+
+    upsert_scheduler_runtime_state(
+        db,
+        scheduler_name="test_scheduler",
+        last_tick_status="OK",
+        dry_run=True,
+        trading_enabled=False,
+    )
+
+    heartbeat_at = datetime.now(timezone.utc)
+
+    row = touch_scheduler_runtime_heartbeat(
+        db,
+        scheduler_name="test_scheduler",
+        runtime_heartbeat_at=heartbeat_at,
+    )
+
+    assert row.runtime_heartbeat_at == heartbeat_at
+
+
+def test_touch_scheduler_runtime_heartbeat_requires_existing_state():
+    db = _build_db()
+
+    try:
+        touch_scheduler_runtime_heartbeat(
+            db,
+            scheduler_name="missing_scheduler",
+            runtime_heartbeat_at=datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        assert str(exc) == "scheduler_runtime_state_not_found"
+    else:
+        raise AssertionError("Expected scheduler_runtime_state_not_found")
