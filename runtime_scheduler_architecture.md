@@ -40,3 +40,26 @@ Future extraction must preserve:
 `apps/api/app/services/runtime_scheduler/scheduler_worker.py` are reusable scaffolding only.
 They are not active runtime authority until the existing scheduler semantics are migrated safely.
 
+
+## P3 scheduler supervision audit
+
+Scheduler supervision must build on the existing runtime authority model instead of introducing a parallel owner.
+
+Existing primitives:
+
+- `scheduler_runtime_loop.py` owns active scheduler lifecycle.
+- `scheduler_runtime_state` stores the operational snapshot.
+- `scheduler_tick_journal` stores tick history.
+- `runtime_status.py` derives scheduler staleness from tick recency.
+- transition-claim services already provide a proven pattern for owner/stale/recovery governance.
+
+Current gap:
+
+- scheduler runtime state has `runtime_locked`, `last_tick_at`, and lifecycle projection.
+- it does not yet have durable scheduler ownership fields such as owner id, instance id, heartbeat timestamp, start timestamp, or generation.
+
+Any durable scheduler ownership implementation requires a runtime Alembic migration.
+No manual DDL is allowed.
+
+P3 must first define ownership semantics before changing schema.
+
