@@ -126,3 +126,67 @@ def test_tick_runner_observer_exception_uses_failure_lifecycle():
         raise AssertionError("Expected observer_failed")
 
     assert calls[0][0] == "failure"
+
+
+def test_tick_runner_commits_after_success_with_observer():
+    class DB:
+        committed = False
+        rolled_back = False
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+    db = DB()
+
+    runner = SchedulerTickRunner(
+        scheduler_name="AUTO_PICK",
+        db=db,
+        on_success=lambda **_: None,
+        on_failure=lambda **_: None,
+    )
+
+    result = runner.run_with_db_transaction(
+        lambda: {"ok": True},
+        observer=lambda fn: fn(),
+    )
+
+    assert result == {"ok": True}
+    assert db.committed is True
+    assert db.rolled_back is False
+
+
+def test_tick_runner_rolls_back_after_observer_failure():
+    class DB:
+        committed = False
+        rolled_back = False
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+    db = DB()
+
+    runner = SchedulerTickRunner(
+        scheduler_name="AUTO_PICK",
+        db=db,
+        on_success=lambda **_: None,
+        on_failure=lambda **_: None,
+    )
+
+    try:
+        runner.run_with_db_transaction(
+            lambda: {"ok": True},
+            observer=lambda fn: (_ for _ in ()).throw(RuntimeError("observer_failed")),
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "observer_failed"
+    else:
+        raise AssertionError("Expected observer_failed")
+
+    assert db.committed is False
+    assert db.rolled_back is True

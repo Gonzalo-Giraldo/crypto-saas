@@ -53,9 +53,9 @@ class SchedulerTickRunner:
             raise
 
 
-    def run_with_db_transaction(self, fn):
+    def run_with_db_transaction(self, fn, *, observer=None):
         try:
-            result = self.run(fn)
+            result = self.run(fn, observer=observer)
             self.db.commit()
             return result
         except Exception:

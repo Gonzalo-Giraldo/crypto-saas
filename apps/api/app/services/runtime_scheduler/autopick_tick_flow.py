@@ -13,10 +13,7 @@ def execute_with_runner(
 ):
     tick_fn = lambda: execute_autopick_tick_flow(fn)
 
-    if observer is None:
-        return runner.run_with_db_transaction(tick_fn)
-
-    return runner.run(
+    return runner.run_with_db_transaction(
         tick_fn,
         observer=observer,
     )
