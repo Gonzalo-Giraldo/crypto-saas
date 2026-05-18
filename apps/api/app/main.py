@@ -426,18 +426,19 @@ def _auto_pick_tick_once() -> None:
                 last_error=str(exc),
                 last_execution_mode=execution_mode,
             )
-            record_scheduler_tick_journal(
-                db,
-                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+            common_journal_payload = build_common_journal_payload(
                 started_at=started_at_wall,
-                finished_at=utc_now(),
                 duration_ms=duration_ms,
-                status="ERROR",
                 dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
                 trading_enabled=trading_enabled,
                 execution_mode=execution_mode,
-                mutation_attempted=False,
-                mutation_executed=False,
+            )
+
+            record_scheduler_tick_journal(
+                db,
+                scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+                status="ERROR",
+                **common_journal_payload,
                 error=str(exc),
             )
             db.commit()
