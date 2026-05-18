@@ -21,3 +21,22 @@ Descripción del sistema, sus módulos y flujo de datos.
 7. Persiste observabilidad y estado runtime
 8. Maneja errores y excepciones
 ...
+
+## P2 scheduler authority audit
+
+The runtime scheduler authority remains `apps/api/app/services/scheduler_runtime_loop.py`.
+
+P2 must not introduce a second scheduler runner or duplicate lifecycle ownership.
+Future extraction must preserve:
+
+- advisory lock governance
+- overlap blocked journal semantics
+- scheduler lifecycle desired/effective state
+- thread alive projection
+- backend runtime authority
+- frontend observational-only projection
+
+`apps/api/app/services/runtime_scheduler/worker_control.py` and
+`apps/api/app/services/runtime_scheduler/scheduler_worker.py` are reusable scaffolding only.
+They are not active runtime authority until the existing scheduler semantics are migrated safely.
+
