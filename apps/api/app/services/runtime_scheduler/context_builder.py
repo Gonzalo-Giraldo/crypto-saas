@@ -30,6 +30,26 @@ def extract_candidate_metadata(observation_report) -> tuple[str | None, str | No
     return candidate_symbol, candidate_score
 
 
+def build_common_journal_payload(
+    *,
+    started_at: datetime,
+    duration_ms: int,
+    dry_run: bool,
+    trading_enabled: bool,
+    execution_mode: str,
+) -> dict:
+    return {
+        'started_at': started_at,
+        'finished_at': utc_now(),
+        'duration_ms': duration_ms,
+        'dry_run': dry_run,
+        'trading_enabled': trading_enabled,
+        'execution_mode': execution_mode,
+        'mutation_attempted': False,
+        'mutation_executed': False,
+    }
+
+
 def utc_now():
     return datetime.now(timezone.utc)
 
