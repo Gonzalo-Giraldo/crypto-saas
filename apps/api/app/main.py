@@ -69,6 +69,9 @@ from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
 from apps.api.app.services.runtime_scheduler.runtime_flow import (
     execute_scheduler_runtime_flow,
 )
+from apps.api.app.services.runtime_scheduler.runtime_dependencies_builder import (
+    build_scheduler_runtime_dependencies,
+)
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
     record_scheduler_overlap_blocked,
@@ -301,15 +304,19 @@ def _auto_pick_tick_once() -> None:
     try:
         scheduler_dry_run = bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
 
-        flow_result, observation_report = execute_scheduler_runtime_flow(
-            db=db,
-            started_at=started_at,
-            scheduler_dry_run=scheduler_dry_run,
+        runtime_dependencies = build_scheduler_runtime_dependencies(
             legacy_exit_tick=_legacy_exit_tick_disabled,
             legacy_market_monitor_tick=_legacy_market_monitor_tick_disabled,
             legacy_auto_pick_tick=_legacy_auto_pick_tick_disabled,
             legacy_learning_tick=_legacy_learning_tick_disabled,
             global_shadow_tick=_global_shadow_tick_once,
+        )
+
+        flow_result, observation_report = execute_scheduler_runtime_flow(
+            db=db,
+            started_at=started_at,
+            scheduler_dry_run=scheduler_dry_run,
+            dependencies=runtime_dependencies,
         )
 
         runtime_state = build_scheduler_runtime_state(

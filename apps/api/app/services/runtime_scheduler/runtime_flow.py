@@ -14,6 +14,9 @@ from apps.api.app.services.runtime_scheduler.observability import (
 from apps.api.app.services.runtime_scheduler.runtime_flow_result_builder import (
     build_scheduler_runtime_flow_result,
 )
+from apps.api.app.services.runtime_scheduler.runtime_dependencies import (
+    SchedulerRuntimeDependencies,
+)
 
 
 def execute_scheduler_runtime_flow(
@@ -21,11 +24,7 @@ def execute_scheduler_runtime_flow(
     db,
     started_at,
     scheduler_dry_run: bool,
-    legacy_exit_tick,
-    legacy_market_monitor_tick,
-    legacy_auto_pick_tick,
-    legacy_learning_tick,
-    global_shadow_tick,
+    dependencies: SchedulerRuntimeDependencies,
 ):
     exit_out = {
         "scanned_positions": 0,
@@ -39,7 +38,7 @@ def execute_scheduler_runtime_flow(
     }
 
     if bool(settings.AUTO_EXIT_INTERNAL_ENABLED):
-        exit_out = legacy_exit_tick(
+        exit_out = dependencies.legacy_exit_tick(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
             dry_run=bool(settings.AUTO_EXIT_INTERNAL_DRY_RUN),
@@ -55,7 +54,7 @@ def execute_scheduler_runtime_flow(
     monitor = {"inserted": 0, "legacy_enabled": False}
 
     if bool(settings.AUTO_PICK_LEGACY_MARKET_MONITOR_ENABLED):
-        monitor = legacy_market_monitor_tick(
+        monitor = dependencies.legacy_market_monitor_tick(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
         )
@@ -69,7 +68,7 @@ def execute_scheduler_runtime_flow(
     }
 
     if bool(settings.AUTO_PICK_LEGACY_TICK_ENABLED):
-        out = legacy_auto_pick_tick(
+        out = dependencies.legacy_auto_pick_tick(
             db=db,
             tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
             dry_run=scheduler_dry_run,
@@ -81,7 +80,7 @@ def execute_scheduler_runtime_flow(
         )
         out["legacy_enabled"] = True
 
-    legacy_learning_tick(
+    dependencies.legacy_learning_tick(
         db=db,
         tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
     )
@@ -92,7 +91,7 @@ def execute_scheduler_runtime_flow(
 
     observation_payload = observation_report.to_dict()
 
-    shadow_out = global_shadow_tick(db=db)
+    shadow_out = dependencies.global_shadow_tick(db=db)
 
     tick_details = build_tick_details(
         monitor=monitor,
