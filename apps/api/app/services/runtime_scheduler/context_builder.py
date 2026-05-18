@@ -12,6 +12,10 @@ def elapsed_ms_since(started_monotonic: float) -> int:
     return int((time.monotonic() - started_monotonic) * 1000)
 
 
+def resolve_execution_mode(*, dry_run: bool) -> str:
+    return "dry_run" if bool(dry_run) else "live"
+
+
 def extract_candidate_metadata(observation_report) -> tuple[str | None, str | None]:
     candidate_symbol = observation_report.selected_symbol
     candidate_score = (
