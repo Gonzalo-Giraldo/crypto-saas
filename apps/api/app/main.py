@@ -61,16 +61,12 @@ from apps.api.app.services.runtime_scheduler.context_builder import (
 )
 from apps.api.app.services.runtime_scheduler.observability_runtime import (
     record_scheduler_tick_error_runtime,
-    record_scheduler_tick_success_runtime,
 )
 from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
     build_scheduler_runtime_state,
 )
-from apps.api.app.services.runtime_scheduler.runtime_flow import (
-    execute_scheduler_runtime_flow,
-)
-from apps.api.app.services.runtime_scheduler.runtime_dependencies_builder import (
-    build_scheduler_runtime_dependencies,
+from apps.api.app.services.runtime_scheduler.runtime_adapter import (
+    execute_scheduler_runtime_adapter,
 )
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -304,36 +300,18 @@ def _auto_pick_tick_once() -> None:
     try:
         scheduler_dry_run = bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
 
-        runtime_dependencies = build_scheduler_runtime_dependencies(
+        flow_result = execute_scheduler_runtime_adapter(
+            db=db,
+            scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+            started_at=started_at,
+            started_at_wall=started_at_wall,
+            scheduler_dry_run=scheduler_dry_run,
+            trading_enabled=get_trading_enabled(db),
             legacy_exit_tick=_legacy_exit_tick_disabled,
             legacy_market_monitor_tick=_legacy_market_monitor_tick_disabled,
             legacy_auto_pick_tick=_legacy_auto_pick_tick_disabled,
             legacy_learning_tick=_legacy_learning_tick_disabled,
             global_shadow_tick=_global_shadow_tick_once,
-        )
-
-        flow_result, observation_report = execute_scheduler_runtime_flow(
-            db=db,
-            started_at=started_at,
-            scheduler_dry_run=scheduler_dry_run,
-            dependencies=runtime_dependencies,
-        )
-
-        runtime_state = build_scheduler_runtime_state(
-            scheduler_dry_run=scheduler_dry_run,
-            trading_enabled=get_trading_enabled(db),
-        )
-
-        record_scheduler_tick_success_runtime(
-            db=db,
-            scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-            runtime_state=runtime_state,
-            duration_ms=flow_result.duration_ms,
-            started_at=started_at_wall,
-            candidate_symbol=flow_result.candidate_symbol,
-            candidate_score=flow_result.candidate_score,
-            observation_report=observation_report,
-            observation_payload=flow_result.observation_payload,
         )
         db.commit()
 
