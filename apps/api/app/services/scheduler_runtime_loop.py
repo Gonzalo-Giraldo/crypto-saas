@@ -20,7 +20,7 @@ from apps.api.app.services.scheduler_lifecycle_state import (
 from apps.api.app.services.trading_controls import get_trading_enabled
 
 
-_AUTO_PICK_LOCK_KEY = 887731
+_AUTO_PICK_TICK_LOCK_KEY = 887731
 _scheduler_stop_event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
 _scheduler_tick_once: Callable[[], None] | None = None
@@ -72,7 +72,7 @@ def _run_tick_once_with_lock() -> None:
 
     with engine.begin() as conn:
         got_lock = bool(
-            conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _AUTO_PICK_LOCK_KEY}).scalar()
+            conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _AUTO_PICK_TICK_LOCK_KEY}).scalar()
         )
 
     if not got_lock:
@@ -83,7 +83,7 @@ def _run_tick_once_with_lock() -> None:
         _scheduler_tick_once()
     finally:
         with engine.begin() as conn:
-            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _AUTO_PICK_LOCK_KEY})
+            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _AUTO_PICK_TICK_LOCK_KEY})
 
 
 def _scheduler_loop() -> None:
