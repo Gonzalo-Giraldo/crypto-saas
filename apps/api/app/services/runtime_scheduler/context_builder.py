@@ -30,6 +30,10 @@ def extract_candidate_metadata(observation_report) -> tuple[str | None, str | No
     return candidate_symbol, candidate_score
 
 
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
 def build_scheduler_tick_context(
     *,
     scheduler_name: str,

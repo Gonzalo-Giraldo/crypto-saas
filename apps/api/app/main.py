@@ -61,6 +61,7 @@ from apps.api.app.services.runtime_scheduler.context_builder import (
     extract_candidate_metadata,
     resolve_execution_mode,
     resolve_trading_enabled,
+    utc_now,
 )
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
@@ -386,7 +387,7 @@ def _auto_pick_tick_once() -> None:
             db,
             scheduler_name=AUTO_PICK_SCHEDULER_NAME,
             started_at=started_at_wall,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=utc_now(),
             duration_ms=duration_ms,
             status="OK",
             dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
@@ -426,7 +427,7 @@ def _auto_pick_tick_once() -> None:
                 db,
                 scheduler_name=AUTO_PICK_SCHEDULER_NAME,
                 started_at=started_at_wall,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=utc_now(),
                 duration_ms=duration_ms,
                 status="ERROR",
                 dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
