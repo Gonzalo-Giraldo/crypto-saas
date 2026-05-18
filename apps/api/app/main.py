@@ -67,6 +67,9 @@ from apps.api.app.services.runtime_scheduler.observability import (
     build_common_journal_payload,
     build_tick_details,
 )
+from apps.api.app.services.runtime_scheduler.runtime_state_builder import (
+    build_scheduler_runtime_state,
+)
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -360,10 +363,14 @@ def _auto_pick_tick_once() -> None:
         )
 
         duration_ms = elapsed_ms_since(started_at)
-        trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
-        execution_mode = resolve_execution_mode(
-            dry_run=scheduler_dry_run
+
+        runtime_state = build_scheduler_runtime_state(
+            scheduler_dry_run=scheduler_dry_run,
+            trading_enabled=get_trading_enabled(db),
         )
+
+        trading_enabled = runtime_state.trading_enabled
+        execution_mode = runtime_state.execution_mode
         candidate_symbol, candidate_score = extract_candidate_metadata(observation_report)
 
         record_scheduler_tick_ok(
@@ -405,10 +412,14 @@ def _auto_pick_tick_once() -> None:
     except Exception as exc:
         try:
             duration_ms = elapsed_ms_since(started_at)
-            trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
-            execution_mode = resolve_execution_mode(
-                dry_run=scheduler_dry_run
+
+            runtime_state = build_scheduler_runtime_state(
+                scheduler_dry_run=scheduler_dry_run,
+                trading_enabled=get_trading_enabled(db),
             )
+
+            trading_enabled = runtime_state.trading_enabled
+            execution_mode = runtime_state.execution_mode
             record_scheduler_tick_error(
                 db,
                 scheduler_name=AUTO_PICK_SCHEDULER_NAME,
