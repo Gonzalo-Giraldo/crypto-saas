@@ -64,7 +64,7 @@ def test_runtime_ownership_fields_can_be_persisted():
     assert row.runtime_instance_id == "instance-a"
     assert row.runtime_generation == 1
     assert row.runtime_started_at == started_at
-    assert row.runtime_heartbeat_at == heartbeat_at
+    assert row.runtime_heartbeat_at.replace(tzinfo=timezone.utc) == heartbeat_at
 
 
 def test_runtime_locked_semantics_remain_unchanged():
@@ -226,3 +226,125 @@ def test_touch_scheduler_runtime_heartbeat_requires_existing_state():
         assert str(exc) == "scheduler_runtime_state_not_found"
     else:
         raise AssertionError("Expected scheduler_runtime_state_not_found")
+
+
+from apps.api.app.services.scheduler_runtime_state_service import (
+    touch_scheduler_runtime_heartbeat_owned,
+)
+
+
+def test_touch_scheduler_runtime_heartbeat_owned_requires_matching_owner_identity_and_generation():
+    db = _build_db()
+
+    started_at = datetime.now(timezone.utc)
+    initial_heartbeat_at = datetime.now(timezone.utc)
+
+    upsert_scheduler_runtime_state(
+        db,
+        scheduler_name="test_scheduler",
+        last_tick_status="OK",
+        dry_run=True,
+        trading_enabled=False,
+        runtime_owner_id="owner-d",
+        runtime_instance_id="instance-d",
+        runtime_generation=4,
+        runtime_started_at=started_at,
+        runtime_heartbeat_at=initial_heartbeat_at,
+    )
+
+    heartbeat_at = datetime.now(timezone.utc)
+
+    row = touch_scheduler_runtime_heartbeat_owned(
+        db,
+        scheduler_name="test_scheduler",
+        runtime_owner_id="owner-d",
+        runtime_instance_id="instance-d",
+        runtime_generation=4,
+        runtime_heartbeat_at=heartbeat_at,
+    )
+
+    assert row.runtime_heartbeat_at.replace(tzinfo=timezone.utc) == heartbeat_at
+
+
+def test_touch_scheduler_runtime_heartbeat_owned_fails_closed_on_owner_mismatch():
+    db = _build_db()
+
+    initial_heartbeat_at = datetime.now(timezone.utc)
+
+    upsert_scheduler_runtime_state(
+        db,
+        scheduler_name="test_scheduler",
+        last_tick_status="OK",
+        dry_run=True,
+        trading_enabled=False,
+        runtime_owner_id="owner-e",
+        runtime_instance_id="instance-e",
+        runtime_generation=5,
+        runtime_started_at=initial_heartbeat_at,
+        runtime_heartbeat_at=initial_heartbeat_at,
+    )
+
+    try:
+        touch_scheduler_runtime_heartbeat_owned(
+            db,
+            scheduler_name="test_scheduler",
+            runtime_owner_id="wrong-owner",
+            runtime_instance_id="instance-e",
+            runtime_generation=5,
+            runtime_heartbeat_at=datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_heartbeat_owner_mismatch"
+    else:
+        raise AssertionError("Expected runtime_heartbeat_owner_mismatch")
+
+
+def test_touch_scheduler_runtime_heartbeat_owned_fails_closed_on_generation_mismatch():
+    db = _build_db()
+
+    initial_heartbeat_at = datetime.now(timezone.utc)
+
+    upsert_scheduler_runtime_state(
+        db,
+        scheduler_name="test_scheduler",
+        last_tick_status="OK",
+        dry_run=True,
+        trading_enabled=False,
+        runtime_owner_id="owner-f",
+        runtime_instance_id="instance-f",
+        runtime_generation=6,
+        runtime_started_at=initial_heartbeat_at,
+        runtime_heartbeat_at=initial_heartbeat_at,
+    )
+
+    try:
+        touch_scheduler_runtime_heartbeat_owned(
+            db,
+            scheduler_name="test_scheduler",
+            runtime_owner_id="owner-f",
+            runtime_instance_id="instance-f",
+            runtime_generation=7,
+            runtime_heartbeat_at=datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_heartbeat_owner_mismatch"
+    else:
+        raise AssertionError("Expected runtime_heartbeat_owner_mismatch")
+
+
+def test_touch_scheduler_runtime_heartbeat_owned_requires_timezone_aware_heartbeat():
+    db = _build_db()
+
+    try:
+        touch_scheduler_runtime_heartbeat_owned(
+            db,
+            scheduler_name="test_scheduler",
+            runtime_owner_id="owner-g",
+            runtime_instance_id="instance-g",
+            runtime_generation=1,
+            runtime_heartbeat_at=datetime.utcnow(),
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_heartbeat_at_must_be_timezone_aware"
+    else:
+        raise AssertionError("Expected runtime_heartbeat_at_must_be_timezone_aware")
