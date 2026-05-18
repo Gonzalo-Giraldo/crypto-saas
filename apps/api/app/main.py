@@ -336,7 +336,7 @@ def _auto_pick_tick_once() -> None:
             out = _legacy_auto_pick_tick_disabled(
                 db=db,
                 tenant_id=settings.AUTO_PICK_INTERNAL_TENANT_ID or "default",
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                dry_run=scheduler_dry_run,
                 top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
                 real_only=bool(settings.AUTO_PICK_INTERNAL_REAL_ONLY),
                 include_service_users=bool(settings.AUTO_PICK_INTERNAL_INCLUDE_SERVICE_USERS),
@@ -362,7 +362,7 @@ def _auto_pick_tick_once() -> None:
         duration_ms = elapsed_ms_since(started_at)
         trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
         execution_mode = resolve_execution_mode(
-            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
+            dry_run=scheduler_dry_run
         )
         candidate_symbol, candidate_score = extract_candidate_metadata(observation_report)
 
@@ -370,7 +370,7 @@ def _auto_pick_tick_once() -> None:
             db,
             scheduler_name=AUTO_PICK_SCHEDULER_NAME,
             duration_ms=duration_ms,
-            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            dry_run=scheduler_dry_run,
             trading_enabled=trading_enabled,
             last_candidate_symbol=candidate_symbol,
             last_candidate_score=candidate_score,
@@ -379,7 +379,7 @@ def _auto_pick_tick_once() -> None:
         common_journal_payload = build_common_journal_payload(
             started_at=started_at_wall,
             duration_ms=duration_ms,
-            dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            dry_run=scheduler_dry_run,
             trading_enabled=trading_enabled,
             execution_mode=execution_mode,
         )
@@ -407,13 +407,13 @@ def _auto_pick_tick_once() -> None:
             duration_ms = elapsed_ms_since(started_at)
             trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
             execution_mode = resolve_execution_mode(
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
+                dry_run=scheduler_dry_run
             )
             record_scheduler_tick_error(
                 db,
                 scheduler_name=AUTO_PICK_SCHEDULER_NAME,
                 duration_ms=duration_ms,
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                dry_run=scheduler_dry_run,
                 trading_enabled=trading_enabled,
                 last_error=str(exc),
                 last_execution_mode=execution_mode,
@@ -421,7 +421,7 @@ def _auto_pick_tick_once() -> None:
             common_journal_payload = build_common_journal_payload(
                 started_at=started_at_wall,
                 duration_ms=duration_ms,
-                dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+                dry_run=scheduler_dry_run,
                 trading_enabled=trading_enabled,
                 execution_mode=execution_mode,
             )
