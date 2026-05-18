@@ -31,6 +31,9 @@ from apps.api.app.services.runtime_scheduler.runtime_authority_coordinator impor
     RuntimeAuthorityCoordinatorInput,
     evaluate_runtime_authority,
 )
+from apps.api.app.services.runtime_scheduler.runtime_authority_state import (
+    project_runtime_authority_state,
+)
 from apps.api.app.services.runtime_scheduler.runtime_session_identity import (
     get_runtime_session_identity,
     get_runtime_session_local_state,
@@ -178,6 +181,11 @@ def get_runtime_status(
             ),
         ),
     )
+    runtime_authority_state = project_runtime_authority_state(
+        authority_valid=runtime_authority.valid,
+        authority_reason=runtime_authority.reason,
+        advisory_session_reason=runtime_authority.advisory_session_reason,
+    )
 
     return {
         "runtime": {
@@ -231,6 +239,8 @@ def get_runtime_status(
 
             "session_authority_valid": runtime_authority.valid,
             "session_authority_reason": runtime_authority.reason,
+            "runtime_authority_state": runtime_authority_state.state.value,
+            "runtime_authority_operator_attention_required": runtime_authority_state.operator_attention_required,
 
             **scheduler_staleness,
         },
