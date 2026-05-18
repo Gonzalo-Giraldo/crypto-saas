@@ -374,3 +374,92 @@ System must never tolerate:
 
 Fail-closed behavior is mandatory.
 
+
+## Execution authority semantics (P5 draft)
+
+### Execution authority prerequisites
+
+Broker/runtime mutation authority requiere simultáneamente:
+
+- trading_enabled == True
+- ACTIVE ownership state
+- advisory lock válido
+- reconciliation state válido
+- runtime health válido
+- no LOST_LOCK state
+- no FAILED state
+- no ZOMBIE_SUSPECTED state
+
+Trading enablement por sí solo nunca autoriza broker mutation.
+
+### Execution authority denial
+
+Broker/runtime mutation debe bloquearse inmediatamente si:
+
+- trading_enabled == False
+- ownership ambiguity existe
+- advisory lock inconsistente
+- reconciliation incompleta
+- runtime stale unresolved
+- runtime health desconocida
+- duplicate ownership suspected
+
+### Dry-run semantics
+
+Dry-run puede:
+- observar
+- evaluar
+- calcular
+- generar candidates
+- generar intents
+- persistir observabilidad
+- generar analytics/runtime projections
+
+Dry-run nunca puede:
+- mutar broker
+- adquirir broker authority
+- bypass ownership semantics
+
+### Live execution semantics
+
+Live execution requiere:
+- execution authority válida
+- ownership ACTIVE válida
+- advisory lock válido
+- runtime reconciliation válida
+
+### Ownership supremacy over trading_enabled
+
+Ownership validity tiene prioridad sobre trading_enabled.
+
+Ejemplo:
+- trading_enabled == True
+- ownership == LOST_LOCK
+
+Resultado:
+- broker mutation prohibida
+
+### Runtime mutation doctrine
+
+Toda broker mutation debe ser:
+- explícitamente autorizada
+- ownership-valid
+- reconciliation-valid
+- observable
+- auditada
+- explainable post-mortem
+
+### AWS execution semantics
+
+AWS runtime workers nunca deben:
+- asumir execution authority automáticamente
+- ejecutar mutation sin ownership ACTIVE
+- ejecutar mutation sólo por trading_enabled=True
+
+### Fail-closed execution semantics
+
+Ante cualquier ambigüedad:
+- detener execution authority
+- bloquear broker mutation
+- elevar operator attention required
+
