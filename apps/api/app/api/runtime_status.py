@@ -27,6 +27,9 @@ from apps.api.app.services.scheduler_runtime_loop import (
 from apps.api.app.services.runtime_scheduler.runtime_ownership_lifecycle import (
     build_runtime_ownership_lifecycle_projection,
 )
+from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
+    evaluate_runtime_advisory_session,
+)
 from apps.api.app.services.runtime_scheduler.runtime_session_authority import (
     RuntimeSessionAuthorityEvidence,
     evaluate_runtime_session_authority,
@@ -143,13 +146,19 @@ def get_runtime_status(
 
     generation_matches = False
 
+    advisory_session = evaluate_runtime_advisory_session(
+        acquired=False,
+        connection_alive=False,
+        lock_still_held=False,
+    )
+
     session_authority = evaluate_runtime_session_authority(
         evidence=RuntimeSessionAuthorityEvidence(
             ownership_row_present=bool(
                 scheduler_state
                 and scheduler_state.runtime_owner_id
             ),
-            advisory_session_valid=False,
+            advisory_session_valid=advisory_session.valid,
             local_identity_matches=local_identity_matches,
             generation_matches=generation_matches,
             heartbeat_fresh=bool(
@@ -206,6 +215,8 @@ def get_runtime_status(
             "local_runtime_instance_id": local_runtime_identity.runtime_instance_id,
             "local_identity_matches": local_identity_matches,
             "generation_matches": generation_matches,
+            "advisory_session_valid": advisory_session.valid,
+            "advisory_session_reason": advisory_session.reason,
 
             "session_authority_valid": session_authority.valid,
             "session_authority_reason": session_authority.reason,

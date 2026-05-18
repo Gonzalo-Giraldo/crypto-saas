@@ -141,6 +141,8 @@ def test_runtime_status_projection_counts_protection_states(monkeypatch):
     assert payload["autopick"]["local_runtime_instance_id"].startswith("auto_pick_internal:")
     assert payload["autopick"]["local_identity_matches"] is False
     assert payload["autopick"]["generation_matches"] is False
+    assert payload["autopick"]["advisory_session_valid"] is False
+    assert payload["autopick"]["advisory_session_reason"] == "advisory_session_not_acquired"
     assert payload["autopick"]["session_authority_valid"] is False
     assert payload["autopick"]["session_authority_reason"] == "ownership_row_not_present"
     assert isinstance(payload["autopick"]["stale_duration_seconds"], int)
