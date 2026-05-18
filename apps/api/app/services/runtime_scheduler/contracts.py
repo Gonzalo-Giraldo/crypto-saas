@@ -11,9 +11,9 @@ class SchedulerTickContext:
     started_monotonic: float
     started_at_wall: datetime
 
-    dry_run: bool
-    trading_enabled: bool
-    execution_mode: str
+    dry_run: bool | None = None
+    trading_enabled: bool | None = None
+    execution_mode: str | None = None
 
     tick_id: str | None = None
     runtime_instance_id: str | None = None

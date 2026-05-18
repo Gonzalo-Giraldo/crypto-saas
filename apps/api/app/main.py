@@ -38,6 +38,7 @@ import apps.api.app.models.learning_outcome
 import apps.api.app.models.learning_rollup_hourly
 
 import os
+import time
 from datetime import datetime, timezone
 
 from apps.api.app.api.users import router as users_router
