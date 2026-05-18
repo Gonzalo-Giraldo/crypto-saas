@@ -60,6 +60,7 @@ from apps.api.app.services.runtime_scheduler.context_builder import (
     elapsed_ms_since,
     extract_candidate_metadata,
     resolve_execution_mode,
+    resolve_trading_enabled,
 )
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
@@ -365,7 +366,7 @@ def _auto_pick_tick_once() -> None:
             }
 
         duration_ms = elapsed_ms_since(started_at)
-        trading_enabled = bool(get_trading_enabled(db))
+        trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
         execution_mode = resolve_execution_mode(
             dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
         )
@@ -408,7 +409,7 @@ def _auto_pick_tick_once() -> None:
     except Exception as exc:
         try:
             duration_ms = elapsed_ms_since(started_at)
-            trading_enabled = bool(get_trading_enabled(db))
+            trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
             execution_mode = resolve_execution_mode(
                 dry_run=bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
             )
