@@ -65,6 +65,7 @@ from apps.api.app.services.runtime_scheduler.context_builder import (
 )
 from apps.api.app.services.runtime_scheduler.observability import (
     build_common_journal_payload,
+    build_tick_details,
 )
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
@@ -350,24 +351,12 @@ def _auto_pick_tick_once() -> None:
         observation_payload = observation_report.to_dict()
 
         shadow_out = _global_shadow_tick_once(db=db)
-        tick_details = {
-                "monitor_inserted": monitor.get("inserted", 0),
-                "executed_count": out.get("executed_count", 0),
-                "dry_run": out.get("dry_run", True),
-                "top_n": out.get("top_n", 10),
-                "exit_scanned_positions": exit_out.get("scanned_positions", 0),
-                "exit_candidates": exit_out.get("exit_candidates", 0),
-                "exit_closed_positions": exit_out.get("closed_positions", 0),
-                "exit_skipped_no_price": exit_out.get("skipped_no_price", 0),
-                "exit_skipped_by_policy": exit_out.get("skipped_by_policy", 0),
-                "exit_errors": exit_out.get("errors", 0),
-                "exit_paused": exit_out.get("paused", False),
-                "exit_dry_run": exit_out.get("dry_run", True),
-                "shadow_status": (shadow_out or {}).get("status"),
-                "shadow_symbol": (shadow_out or {}).get("symbol"),
-                "shadow_persisted": (shadow_out or {}).get("persisted"),
-                "shadow_executed": (shadow_out or {}).get("executed"),
-            }
+        tick_details = build_tick_details(
+            monitor=monitor,
+            out=out,
+            exit_out=exit_out,
+            shadow_out=shadow_out,
+        )
 
         duration_ms = elapsed_ms_since(started_at)
         trading_enabled = resolve_trading_enabled(get_trading_enabled(db))
