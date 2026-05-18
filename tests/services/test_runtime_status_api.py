@@ -203,3 +203,108 @@ def test_runtime_status_marks_scheduler_stale_when_no_tick_exists(monkeypatch):
     assert payload["autopick"]["stale_duration_seconds"] is None
     assert payload["autopick"]["operator_attention_required"] is True
     assert payload["autopick"]["stale_reason"] == "no_tick_recorded"
+
+
+def test_runtime_status_projects_lost_lock_when_advisory_session_is_lost(monkeypatch):
+    from datetime import datetime, timezone
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from apps.api.app.main import app
+    from apps.api.app.db.session import Base, get_db
+    from apps.api.app.services.scheduler_runtime_state_service import (
+        AUTO_PICK_SCHEDULER_NAME,
+        upsert_scheduler_runtime_state,
+    )
+    from apps.api.app.services.runtime_scheduler import runtime_session_identity
+    from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
+        evaluate_runtime_advisory_session,
+    )
+
+    runtime_session_identity._runtime_session_identities.clear()
+    runtime_session_identity._runtime_session_local_states.clear()
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    db = TestingSessionLocal()
+
+    identity = runtime_session_identity.get_runtime_session_identity(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    upsert_scheduler_runtime_state(
+        db,
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        last_tick_status="OK",
+        last_tick_duration_ms=1,
+        dry_run=True,
+        trading_enabled=False,
+        runtime_owner_id=identity.runtime_owner_id,
+        runtime_instance_id=identity.runtime_instance_id,
+        runtime_generation=1,
+        runtime_started_at=now,
+        runtime_heartbeat_at=now,
+    )
+
+    runtime_session_identity.bind_runtime_session_generation(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        runtime_generation=1,
+    )
+    runtime_session_identity.bind_runtime_advisory_session_state(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        advisory_session_state=evaluate_runtime_advisory_session(
+            acquired=True,
+            connection_alive=False,
+            lock_still_held=False,
+        ),
+    )
+
+    db.commit()
+    db.close()
+
+    def override_get_db():
+        test_db = TestingSessionLocal()
+        try:
+            yield test_db
+        finally:
+            test_db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    from apps.api.app.api import runtime_status as module
+
+    monkeypatch.setattr(module, "get_trading_enabled", lambda db: False)
+    monkeypatch.setattr(module, "is_scheduler_thread_alive", lambda: True)
+
+    client = TestClient(app)
+    response = client.get("/api/runtime/status")
+
+    app.dependency_overrides.clear()
+    runtime_session_identity._runtime_session_identities.clear()
+    runtime_session_identity._runtime_session_local_states.clear()
+
+    assert response.status_code in {200, 401, 403}
+    if response.status_code != 200:
+        return
+
+    payload = response.json()
+
+    assert payload["autopick"]["local_identity_matches"] is True
+    assert payload["autopick"]["generation_matches"] is True
+    assert payload["autopick"]["advisory_session_valid"] is False
+    assert payload["autopick"]["advisory_session_reason"] == "advisory_session_connection_lost"
+    assert payload["autopick"]["session_authority_valid"] is False
+    assert payload["autopick"]["session_authority_reason"] == "advisory_session_not_valid"
+    assert payload["autopick"]["runtime_authority_state"] == "LOST_LOCK"
+    assert payload["autopick"]["runtime_authority_operator_attention_required"] is True
