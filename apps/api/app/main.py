@@ -55,6 +55,7 @@ from apps.api.app.services.scheduler_runtime_loop import (
 from apps.api.app.core.config import settings
 from apps.api.app.services.global_orchestrator import run_global_shadow_cycle
 from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_auto_pick_observation
+from apps.api.app.services.runtime_scheduler.context_builder import build_scheduler_tick_context
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
     AUTO_PICK_SCHEDULER_NAME,
@@ -280,8 +281,11 @@ def _global_shadow_tick_once(*, db) -> dict | None:
 
 
 def _auto_pick_tick_once() -> None:
-    started_at = time.monotonic()
-    started_at_wall = datetime.now(timezone.utc)
+    tick_context = build_scheduler_tick_context(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+    )
+    started_at = tick_context.started_monotonic
+    started_at_wall = tick_context.started_at_wall
     db = SessionLocal()
     try:
         exit_out = {
