@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+AUTO_PICK_RUNTIME_SESSION_LOCK_KEY = 887732
+
+
 @dataclass(frozen=True)
 class RuntimeAdvisorySessionState:
     acquired: bool

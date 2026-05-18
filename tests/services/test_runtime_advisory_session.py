@@ -1,4 +1,5 @@
 from apps.api.app.services.runtime_scheduler.runtime_advisory_session import (
+    AUTO_PICK_RUNTIME_SESSION_LOCK_KEY,
     evaluate_runtime_advisory_session,
 )
 
@@ -46,3 +47,8 @@ def test_advisory_session_fails_closed_when_lock_lost():
 
     assert state.valid is False
     assert state.reason == "advisory_session_lock_lost"
+
+
+def test_runtime_session_lock_key_is_separate_from_tick_lock_key():
+    assert AUTO_PICK_RUNTIME_SESSION_LOCK_KEY == 887732
+    assert AUTO_PICK_RUNTIME_SESSION_LOCK_KEY != 887731
