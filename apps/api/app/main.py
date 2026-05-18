@@ -58,6 +58,7 @@ from apps.api.app.services.auto_pick.binance.orchestrator import run_binance_aut
 from apps.api.app.services.runtime_scheduler.context_builder import (
     build_scheduler_tick_context,
     elapsed_ms_since,
+    extract_candidate_metadata,
 )
 from apps.api.app.services.scheduler_tick_journal_service import record_scheduler_tick_journal
 from apps.api.app.services.scheduler_runtime_state_service import (
@@ -365,12 +366,7 @@ def _auto_pick_tick_once() -> None:
         duration_ms = elapsed_ms_since(started_at)
         trading_enabled = bool(get_trading_enabled(db))
         execution_mode = "dry_run" if bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN) else "live"
-        candidate_symbol = observation_report.selected_symbol
-        candidate_score = (
-            str(observation_report.selected.final_score)
-            if observation_report.selected and observation_report.selected.final_score is not None
-            else None
-        )
+        candidate_symbol, candidate_score = extract_candidate_metadata(observation_report)
 
         record_scheduler_tick_ok(
             db,
