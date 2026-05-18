@@ -31,6 +31,9 @@ from apps.api.app.services.runtime_scheduler.runtime_session_authority import (
     RuntimeSessionAuthorityEvidence,
     evaluate_runtime_session_authority,
 )
+from apps.api.app.services.runtime_scheduler.runtime_session_identity import (
+    get_runtime_session_identity,
+)
 
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime"])
@@ -126,6 +129,10 @@ def get_runtime_status(
         limit=10,
     )
 
+    local_runtime_identity = get_runtime_session_identity(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+    )
+
     session_authority = evaluate_runtime_session_authority(
         evidence=RuntimeSessionAuthorityEvidence(
             ownership_row_present=bool(
@@ -184,6 +191,9 @@ def get_runtime_status(
             "ownership_stale": ownership_lifecycle.stale if ownership_lifecycle else True,
             "ownership_operator_attention_required": ownership_lifecycle.operator_attention_required if ownership_lifecycle else True,
             "ownership_reason": ownership_lifecycle.reason if ownership_lifecycle else "scheduler_runtime_state_missing",
+
+            "local_runtime_owner_id": local_runtime_identity.runtime_owner_id,
+            "local_runtime_instance_id": local_runtime_identity.runtime_instance_id,
 
             "session_authority_valid": session_authority.valid,
             "session_authority_reason": session_authority.reason,
