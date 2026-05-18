@@ -23,4 +23,11 @@ class SchedulerRuntimeState(Base):
     last_candidate_score = Column(String, nullable=True)
     last_execution_mode = Column(String, nullable=True)
 
+    runtime_owner_id = Column(String, nullable=True)
+    runtime_instance_id = Column(String, nullable=True)
+    runtime_generation = Column(Integer, nullable=True)
+
+    runtime_started_at = Column(DateTime(timezone=True), nullable=True)
+    runtime_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

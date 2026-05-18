@@ -24,6 +24,11 @@ def upsert_scheduler_runtime_state(
     last_candidate_symbol: str | None = None,
     last_candidate_score: str | None = None,
     last_execution_mode: str | None = None,
+    runtime_owner_id: str | None = None,
+    runtime_instance_id: str | None = None,
+    runtime_generation: int | None = None,
+    runtime_started_at: datetime | None = None,
+    runtime_heartbeat_at: datetime | None = None,
 ) -> SchedulerRuntimeState:
     scheduler_name_value = str(scheduler_name or "").strip()
     if not scheduler_name_value:
@@ -50,6 +55,12 @@ def upsert_scheduler_runtime_state(
     row.last_candidate_symbol = last_candidate_symbol
     row.last_candidate_score = last_candidate_score
     row.last_execution_mode = last_execution_mode
+
+    row.runtime_owner_id = runtime_owner_id
+    row.runtime_instance_id = runtime_instance_id
+    row.runtime_generation = runtime_generation
+    row.runtime_started_at = runtime_started_at
+    row.runtime_heartbeat_at = runtime_heartbeat_at
 
     db.flush()
     return row
@@ -137,3 +148,56 @@ def record_scheduler_overlap_blocked(
         runtime_locked=True,
         last_execution_mode=last_execution_mode,
     )
+
+
+def update_scheduler_runtime_ownership(
+    db: Session,
+    *,
+    scheduler_name: str,
+    runtime_owner_id: str | None,
+    runtime_instance_id: str | None,
+    runtime_generation: int | None,
+    runtime_started_at: datetime | None,
+    runtime_heartbeat_at: datetime | None,
+) -> SchedulerRuntimeState:
+    row = get_scheduler_runtime_state(
+        db,
+        scheduler_name=scheduler_name,
+    )
+
+    if row is None:
+        raise ValueError("scheduler_runtime_state_not_found")
+
+    row.runtime_owner_id = runtime_owner_id
+    row.runtime_instance_id = runtime_instance_id
+    row.runtime_generation = runtime_generation
+    row.runtime_started_at = runtime_started_at
+    row.runtime_heartbeat_at = runtime_heartbeat_at
+
+    db.flush()
+
+    return row
+
+
+def clear_scheduler_runtime_ownership(
+    db: Session,
+    *,
+    scheduler_name: str,
+) -> SchedulerRuntimeState:
+    row = get_scheduler_runtime_state(
+        db,
+        scheduler_name=scheduler_name,
+    )
+
+    if row is None:
+        raise ValueError("scheduler_runtime_state_not_found")
+
+    row.runtime_owner_id = None
+    row.runtime_instance_id = None
+    row.runtime_generation = None
+    row.runtime_started_at = None
+    row.runtime_heartbeat_at = None
+
+    db.flush()
+
+    return row
