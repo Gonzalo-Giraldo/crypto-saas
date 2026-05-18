@@ -133,6 +133,14 @@ def get_runtime_status(
         scheduler_name=AUTO_PICK_SCHEDULER_NAME,
     )
 
+    local_identity_matches = bool(
+        scheduler_state
+        and scheduler_state.runtime_owner_id
+        == local_runtime_identity.runtime_owner_id
+        and scheduler_state.runtime_instance_id
+        == local_runtime_identity.runtime_instance_id
+    )
+
     session_authority = evaluate_runtime_session_authority(
         evidence=RuntimeSessionAuthorityEvidence(
             ownership_row_present=bool(
@@ -140,7 +148,7 @@ def get_runtime_status(
                 and scheduler_state.runtime_owner_id
             ),
             advisory_session_valid=False,
-            local_identity_matches=False,
+            local_identity_matches=local_identity_matches,
             generation_matches=False,
             heartbeat_fresh=bool(
                 ownership_lifecycle
@@ -194,6 +202,7 @@ def get_runtime_status(
 
             "local_runtime_owner_id": local_runtime_identity.runtime_owner_id,
             "local_runtime_instance_id": local_runtime_identity.runtime_instance_id,
+            "local_identity_matches": local_identity_matches,
 
             "session_authority_valid": session_authority.valid,
             "session_authority_reason": session_authority.reason,
