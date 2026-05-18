@@ -27,6 +27,10 @@ from apps.api.app.services.scheduler_runtime_loop import (
 from apps.api.app.services.runtime_scheduler.runtime_ownership_lifecycle import (
     build_runtime_ownership_lifecycle_projection,
 )
+from apps.api.app.services.runtime_scheduler.runtime_session_authority import (
+    RuntimeSessionAuthorityEvidence,
+    evaluate_runtime_session_authority,
+)
 
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime"])
@@ -122,6 +126,25 @@ def get_runtime_status(
         limit=10,
     )
 
+    session_authority = evaluate_runtime_session_authority(
+        evidence=RuntimeSessionAuthorityEvidence(
+            ownership_row_present=bool(
+                scheduler_state
+                and scheduler_state.runtime_owner_id
+            ),
+            advisory_session_valid=False,
+            local_identity_matches=False,
+            generation_matches=False,
+            heartbeat_fresh=bool(
+                ownership_lifecycle
+                and not ownership_lifecycle.stale
+            ),
+            runtime_health_valid=bool(
+                is_scheduler_thread_alive()
+            ),
+        ),
+    )
+
     return {
         "runtime": {
             "service": "api",
@@ -161,6 +184,10 @@ def get_runtime_status(
             "ownership_stale": ownership_lifecycle.stale if ownership_lifecycle else True,
             "ownership_operator_attention_required": ownership_lifecycle.operator_attention_required if ownership_lifecycle else True,
             "ownership_reason": ownership_lifecycle.reason if ownership_lifecycle else "scheduler_runtime_state_missing",
+
+            "session_authority_valid": session_authority.valid,
+            "session_authority_reason": session_authority.reason,
+
             **scheduler_staleness,
         },
         "scheduler_tick_journal": [

@@ -136,6 +136,8 @@ def test_runtime_status_projection_counts_protection_states(monkeypatch):
     assert payload["autopick"]["ownership_stale"] is False
     assert payload["autopick"]["ownership_operator_attention_required"] is False
     assert payload["autopick"]["ownership_reason"] == "ownership_not_present"
+    assert payload["autopick"]["session_authority_valid"] is False
+    assert payload["autopick"]["session_authority_reason"] == "ownership_row_not_present"
     assert isinstance(payload["autopick"]["stale_duration_seconds"], int)
     assert len(payload["scheduler_tick_journal"]) == 1
     assert payload["scheduler_tick_journal"][0]["status"] == "OK"
