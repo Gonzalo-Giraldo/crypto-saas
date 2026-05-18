@@ -24,6 +24,9 @@ from apps.api.app.services.scheduler_runtime_loop import (
     get_scheduler_lifecycle_state,
     is_scheduler_thread_alive,
 )
+from apps.api.app.services.runtime_scheduler.runtime_ownership_lifecycle import (
+    build_runtime_ownership_lifecycle_projection,
+)
 
 
 router = APIRouter(prefix="/api/runtime", tags=["runtime"])
@@ -105,6 +108,14 @@ def get_runtime_status(
         last_tick_at=scheduler_state.last_tick_at if scheduler_state else None,
         interval_minutes=scheduler_interval_minutes,
     )
+    ownership_lifecycle = (
+        build_runtime_ownership_lifecycle_projection(
+            runtime_state=scheduler_state,
+            stale_after_seconds=scheduler_interval_minutes * 60 * 2,
+        )
+        if scheduler_state
+        else None
+    )
     recent_ticks = load_recent_scheduler_tick_journal(
         db,
         scheduler_name=AUTO_PICK_SCHEDULER_NAME,
@@ -145,6 +156,11 @@ def get_runtime_status(
             "last_candidate_score": scheduler_state.last_candidate_score if scheduler_state else None,
             "last_execution_mode": scheduler_state.last_execution_mode if scheduler_state else None,
             "source": "scheduler_runtime_state" if scheduler_state else "not_yet_instrumented",
+            "ownership_lifecycle_state": ownership_lifecycle.state.value if ownership_lifecycle else None,
+            "ownership_valid": ownership_lifecycle.valid_ownership if ownership_lifecycle else False,
+            "ownership_stale": ownership_lifecycle.stale if ownership_lifecycle else True,
+            "ownership_operator_attention_required": ownership_lifecycle.operator_attention_required if ownership_lifecycle else True,
+            "ownership_reason": ownership_lifecycle.reason if ownership_lifecycle else "scheduler_runtime_state_missing",
             **scheduler_staleness,
         },
         "scheduler_tick_journal": [
