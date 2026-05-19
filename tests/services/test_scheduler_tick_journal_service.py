@@ -113,6 +113,18 @@ def test_record_scheduler_tick_journal_persists_autopick_observation_projection(
             "decision_status": "SELECTED",
             "selected_symbol": "BTCUSDT",
             "production_priority": True,
+            "shadow": {
+                "status": "shadow_ok",
+                "comparison": {
+                    "diverged": True,
+                    "fields": {
+                        "selected_symbol": {
+                            "legacy": "BTCUSDT",
+                            "shadow": "ETHUSDT",
+                        }
+                    },
+                },
+            },
         },
         analytics_exported=False,
         mutation_attempted=False,
@@ -135,3 +147,8 @@ def test_record_scheduler_tick_journal_persists_autopick_observation_projection(
     payload = json.loads(loaded.observation_payload_json)
     assert payload["selected_symbol"] == "BTCUSDT"
     assert payload["production_priority"] is True
+    assert payload["shadow"]["comparison"]["diverged"] is True
+    assert (
+        payload["shadow"]["comparison"]["fields"]["selected_symbol"]["shadow"]
+        == "ETHUSDT"
+    )
