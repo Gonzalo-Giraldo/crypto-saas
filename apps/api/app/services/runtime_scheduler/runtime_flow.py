@@ -93,6 +93,9 @@ def execute_scheduler_runtime_flow(
 
     shadow_out = dependencies.global_shadow_tick(db=db)
 
+    if shadow_out is not None:
+        observation_payload["shadow"] = shadow_out
+
     tick_details = build_tick_details(
         monitor=monitor,
         out=out,
