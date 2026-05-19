@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     GITHUB_ACTIONS_REPO: str = "crypto-saas"
     GITHUB_ACTIONS_DEFAULT_BRANCH: str = "main"
     GITHUB_ACTIONS_READ_TOKEN: str = ""
+    AWS_REGION: str = ""
+    AUTO_PICK_EXPORT_S3_BUCKET: str = ""
+    AUTO_PICK_EXPORT_S3_PREFIX: str = "autopick/exports"
+    AUTO_PICK_EXPORT_S3_ENCRYPTION: str = "AES256"
 
     model_config = ConfigDict(
         env_file=".env",

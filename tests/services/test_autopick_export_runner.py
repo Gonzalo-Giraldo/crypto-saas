@@ -491,18 +491,48 @@ def test_get_autopick_export_storage_returns_disk_storage(tmp_path):
     assert path.read_text(encoding="utf-8") == "hello\n"
 
 
-def test_get_autopick_export_storage_rejects_s3_until_adapter_exists(tmp_path):
+class FakeS3Client:
+    def __init__(self):
+        self.objects = {}
+
+    def put_object(self, **kwargs):
+        self.objects[(kwargs["Bucket"], kwargs["Key"])] = kwargs
+        return {}
+
+    def head_object(self, **kwargs):
+        obj = self.objects[(kwargs["Bucket"], kwargs["Key"])]
+        return {
+            "ContentLength": len(obj["Body"]),
+            "Metadata": obj["Metadata"],
+        }
+
+
+def test_get_autopick_export_storage_returns_s3_storage_with_valid_config(monkeypatch, tmp_path):
+    from apps.api.app.core.config import settings
     from apps.api.app.data_runtime.services.autopick_export_runner import (
         get_autopick_export_storage,
     )
 
-    try:
-        get_autopick_export_storage(
-            destination_kind="s3",
-            export_root=tmp_path,
-        )
-    except ValueError as exc:
-        assert "s3_export_storage_not_implemented" in str(exc)
-        return
+    monkeypatch.setattr(settings, "AWS_REGION", "sa-east-1")
+    monkeypatch.setattr(settings, "AUTO_PICK_EXPORT_S3_BUCKET", "crypto-saas-data-ap")
+    monkeypatch.setattr(settings, "AUTO_PICK_EXPORT_S3_PREFIX", "autopick/exports")
+    monkeypatch.setattr(settings, "AUTO_PICK_EXPORT_S3_ENCRYPTION", "AES256")
 
-    raise AssertionError("s3 storage must fail closed until implemented")
+    fake = FakeS3Client()
+
+    storage = get_autopick_export_storage(
+        destination_kind="s3",
+        export_root=tmp_path,
+        client=fake,
+    )
+
+    result = storage.write_text_artifact(
+        export_id="export-1",
+        suffix=".jsonl",
+        content="hello\n",
+    )
+
+    assert result["path"] == "s3://crypto-saas-data-ap/autopick/exports/export-1.jsonl"
+    assert result["bucket"] == "crypto-saas-data-ap"
+    assert result["key"] == "autopick/exports/export-1.jsonl"
+    assert result["bytes"] == 6

@@ -424,16 +424,6 @@ def validate_autopick_export_destination(
     destination_kind: str,
     destination_path_or_uri: str,
 ) -> dict:
-    """
-    Validate Auto-pick DATA export destination contract.
-
-    Contract only:
-    - no AWS SDK
-    - no filesystem write
-    - no runtime DB access
-    - no broker access
-    """
-
     kind = str(destination_kind or "").strip().lower()
     uri = str(destination_path_or_uri or "").strip()
 
@@ -505,11 +495,88 @@ class DiskAutopickExportStorage:
             "path": str(final_path),
         }
 
+class S3AutopickExportStorage:
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        region: str,
+        encryption: str = "AES256",
+        client=None,
+    ):
+        if not bucket:
+            raise ValueError("s3_export_bucket_required")
+        if not region:
+            raise ValueError("s3_export_region_required")
+        if encryption != "AES256":
+            raise ValueError("unsupported_s3_export_encryption")
+
+        self.bucket = bucket
+        self.prefix = prefix.strip("/")
+        self.region = region
+        self.encryption = encryption
+        self.client = client
+
+        if self.client is None:
+            import boto3
+            self.client = boto3.client("s3", region_name=region)
+
+    def _key(self, *, export_id: str, suffix: str) -> str:
+        safe_export_id = str(export_id).strip()
+        safe_suffix = str(suffix).strip()
+
+        if not safe_export_id:
+            raise ValueError("export_id_required")
+        if "/" in safe_export_id or "\\" in safe_export_id:
+            raise ValueError("export_id_must_be_filename_safe")
+        if not safe_suffix.startswith("."):
+            raise ValueError("artifact_suffix_must_start_with_dot")
+
+        return f"{self.prefix}/{safe_export_id}{safe_suffix}"
+
+    def write_text_artifact(self, *, export_id: str, suffix: str, content: str) -> dict:
+        body = str(content).encode("utf-8")
+        checksum = hashlib.sha256(body).hexdigest()
+        key = self._key(export_id=export_id, suffix=suffix)
+
+        metadata = {
+            "sha256": checksum,
+            "export-id": str(export_id),
+            "content-bytes": str(len(body)),
+        }
+
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=body,
+            ServerSideEncryption=self.encryption,
+            Metadata=metadata,
+        )
+
+        head = self.client.head_object(Bucket=self.bucket, Key=key)
+        remote_size = int(head.get("ContentLength", -1))
+        remote_metadata = head.get("Metadata") or {}
+
+        if remote_size != len(body):
+            raise ValueError("s3_export_remote_size_mismatch")
+
+        if remote_metadata.get("sha256") != checksum:
+            raise ValueError("s3_export_remote_checksum_mismatch")
+
+        return {
+            "path": f"s3://{self.bucket}/{key}",
+            "bucket": self.bucket,
+            "key": key,
+            "checksum": checksum,
+            "bytes": len(body),
+        }
 
 def get_autopick_export_storage(
     *,
     destination_kind: str,
     export_root,
+    client=None,
 ):
     kind = str(destination_kind or "").strip().lower()
 
@@ -517,6 +584,15 @@ def get_autopick_export_storage(
         return DiskAutopickExportStorage(export_root=export_root)
 
     if kind == "s3":
-        raise ValueError("s3_export_storage_not_implemented")
+        from apps.api.app.core.config import settings
+
+        return S3AutopickExportStorage(
+            bucket=settings.AUTO_PICK_EXPORT_S3_BUCKET,
+            prefix=settings.AUTO_PICK_EXPORT_S3_PREFIX,
+            region=settings.AWS_REGION,
+            encryption=settings.AUTO_PICK_EXPORT_S3_ENCRYPTION,
+            client=client,
+        )
 
     raise ValueError("unsupported_export_destination_kind")
+
