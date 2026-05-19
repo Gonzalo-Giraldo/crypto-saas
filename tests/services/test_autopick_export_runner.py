@@ -394,3 +394,38 @@ def test_build_autopick_export_manifest_is_deterministic():
         "snapshot_count": 1,
         "status": "VERIFIED",
     }
+
+def test_write_autopick_export_manifest_artifact_writes_json(tmp_path):
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        build_autopick_export_manifest,
+        write_autopick_export_manifest_artifact,
+    )
+
+    manifest = build_autopick_export_manifest(
+        export_id="export-1",
+        status="VERIFIED",
+        artifact_path=str(tmp_path / "export-1.jsonl"),
+        checksum="a" * 64,
+        line_count=2,
+        snapshot_count=1,
+        candidate_count=1,
+    )
+
+    result = write_autopick_export_manifest_artifact(
+        export_root=tmp_path,
+        export_id="export-1",
+        manifest=manifest,
+    )
+
+    path = Path(result["path"])
+
+    assert path.exists()
+    assert path.name == "export-1.manifest.json"
+    assert path.read_text(encoding="utf-8") == (
+        '{"artifact_path":"'
+        + str(tmp_path / "export-1.jsonl")
+        + '","candidate_count":1,"checksum":"'
+        + ("a" * 64)
+        + '","export_id":"export-1","line_count":2,"snapshot_count":1,"status":"VERIFIED"}\n'
+    )
+    assert result["manifest_path"] == str(path)

@@ -368,3 +368,53 @@ def build_autopick_export_manifest(
         "snapshot_count": int(snapshot_count),
         "status": str(status),
     }
+
+def write_autopick_export_manifest_artifact(
+    *,
+    export_root,
+    export_id: str,
+    manifest: dict,
+) -> dict:
+    """
+    Write deterministic Auto-pick DATA export manifest artifact atomically.
+
+    DATA-plane contract only:
+    - no runtime DB access
+    - no broker access
+    - no lifecycle mutation
+    """
+
+    safe_export_id = str(export_id).strip()
+
+    if not safe_export_id:
+        raise ValueError("export_id_required")
+
+    if "/" in safe_export_id or "\\" in safe_export_id:
+        raise ValueError("export_id_must_be_filename_safe")
+
+    root = Path(export_root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    final_path = root / f"{safe_export_id}.manifest.json"
+    tmp_path = root / f"{safe_export_id}.manifest.json.tmp"
+
+    payload = json.dumps(
+        dict(manifest),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        fh.write(payload)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+    os.replace(tmp_path, final_path)
+
+    return {
+        "manifest_path": str(final_path),
+        "path": str(final_path),
+    }
