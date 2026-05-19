@@ -14,6 +14,9 @@ from apps.api.app.services.runtime_scheduler.observability import (
 from apps.api.app.services.runtime_scheduler.runtime_flow_result_builder import (
     build_scheduler_runtime_flow_result,
 )
+from apps.api.app.services.runtime_scheduler.autopick_shadow_comparison import (
+    compare_autopick_shadow_reports,
+)
 from apps.api.app.services.runtime_scheduler.runtime_dependencies import (
     SchedulerRuntimeDependencies,
 )
@@ -23,9 +26,19 @@ def _attach_shadow_payload(
     *,
     observation_payload: dict,
     shadow_out,
+    legacy_report=None,
 ) -> dict:
     if shadow_out is None:
         return observation_payload
+
+    if isinstance(shadow_out, dict) and legacy_report is not None:
+        shadow_report = shadow_out.get("report")
+        if shadow_report is not None:
+            shadow_out = dict(shadow_out)
+            shadow_out["comparison"] = compare_autopick_shadow_reports(
+                legacy_report=legacy_report,
+                shadow_report=shadow_report,
+            )
 
     observation_payload["shadow"] = shadow_out
     return observation_payload
@@ -108,6 +121,7 @@ def execute_scheduler_runtime_flow(
     observation_payload = _attach_shadow_payload(
         observation_payload=observation_payload,
         shadow_out=shadow_out,
+        legacy_report=observation_report,
     )
 
     tick_details = build_tick_details(
