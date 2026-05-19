@@ -207,6 +207,8 @@ def run_autopick_export_batch(
     export_id: str,
     from_created_at: datetime,
     to_created_at: datetime,
+    destination_kind: str = "disk",
+    storage_client=None,
 ) -> dict:
     """
     Execute minimal Auto-pick DATA export batch.
@@ -237,11 +239,23 @@ def run_autopick_export_batch(
     if snapshot_count <= 0 and candidate_count <= 0:
         raise ValueError("export_batch_requires_rows")
 
-    artifact = write_autopick_export_artifact(
+    export_lines = [str(line) for line in lines]
+    artifact_content = "".join(f"{line}\n" for line in export_lines)
+    checksum = compute_autopick_export_checksum(export_lines)
+
+    storage = get_autopick_export_storage(
+        destination_kind=destination_kind,
         export_root=export_root,
-        export_id=export_id,
-        lines=lines,
+        client=storage_client,
     )
+
+    artifact = storage.write_text_artifact(
+        export_id=export_id,
+        suffix=".jsonl",
+        content=artifact_content,
+    )
+    artifact["checksum"] = checksum
+    artifact["line_count"] = len(export_lines)
 
     row = create_autopick_export_batch(
         db=db,
@@ -250,7 +264,7 @@ def run_autopick_export_batch(
         to_created_at=to_created_at,
         snapshot_count=snapshot_count,
         candidate_count=candidate_count,
-        destination_kind="disk",
+        destination_kind=str(destination_kind or "").strip().lower(),
         destination_path_or_uri=artifact["path"],
         checksum=artifact["checksum"],
     )
@@ -258,6 +272,28 @@ def run_autopick_export_batch(
     apply_export_transition(row, "EXPORTING")
     row.finished_at = datetime.now(timezone.utc)
     apply_export_transition(row, "EXPORTED")
+
+    manifest = build_autopick_export_manifest(
+        export_id=export_id,
+        status=row.status,
+        artifact_path=artifact["path"],
+        checksum=artifact["checksum"],
+        line_count=artifact["line_count"],
+        snapshot_count=snapshot_count,
+        candidate_count=candidate_count,
+    )
+
+    manifest_artifact = storage.write_text_artifact(
+        export_id=export_id,
+        suffix=".manifest.json",
+        content=json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        ) + "\n",
+    )
 
     db.flush()
 
@@ -269,6 +305,7 @@ def run_autopick_export_batch(
         "line_count": artifact["line_count"],
         "snapshot_count": snapshot_count,
         "candidate_count": candidate_count,
+        "manifest_path": manifest_artifact["path"],
     }
 
 def _fail_export_verification(row, reason: str) -> None:
