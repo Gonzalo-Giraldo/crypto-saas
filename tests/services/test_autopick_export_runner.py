@@ -429,3 +429,41 @@ def test_write_autopick_export_manifest_artifact_writes_json(tmp_path):
         + '","export_id":"export-1","line_count":2,"snapshot_count":1,"status":"VERIFIED"}\n'
     )
     assert result["manifest_path"] == str(path)
+
+def test_validate_autopick_export_destination_accepts_disk_and_s3():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_autopick_export_destination,
+    )
+
+    assert validate_autopick_export_destination(
+        destination_kind="disk",
+        destination_path_or_uri="/data/autopick/export-1.jsonl",
+    ) == {
+        "destination_kind": "disk",
+        "destination_path_or_uri": "/data/autopick/export-1.jsonl",
+    }
+
+    assert validate_autopick_export_destination(
+        destination_kind="s3",
+        destination_path_or_uri="s3://crypto-saas-data/autopick/export-1.jsonl",
+    ) == {
+        "destination_kind": "s3",
+        "destination_path_or_uri": "s3://crypto-saas-data/autopick/export-1.jsonl",
+    }
+
+
+def test_validate_autopick_export_destination_rejects_unknown_kind():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_autopick_export_destination,
+    )
+
+    try:
+        validate_autopick_export_destination(
+            destination_kind="http",
+            destination_path_or_uri="https://example.com/export-1.jsonl",
+        )
+    except ValueError as exc:
+        assert "unsupported_export_destination_kind" in str(exc)
+        return
+
+    raise AssertionError("unknown destination kind must fail closed")

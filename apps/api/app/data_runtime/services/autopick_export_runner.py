@@ -418,3 +418,38 @@ def write_autopick_export_manifest_artifact(
         "manifest_path": str(final_path),
         "path": str(final_path),
     }
+
+def validate_autopick_export_destination(
+    *,
+    destination_kind: str,
+    destination_path_or_uri: str,
+) -> dict:
+    """
+    Validate Auto-pick DATA export destination contract.
+
+    Contract only:
+    - no AWS SDK
+    - no filesystem write
+    - no runtime DB access
+    - no broker access
+    """
+
+    kind = str(destination_kind or "").strip().lower()
+    uri = str(destination_path_or_uri or "").strip()
+
+    if kind not in {"disk", "s3"}:
+        raise ValueError("unsupported_export_destination_kind")
+
+    if not uri:
+        raise ValueError("export_destination_required")
+
+    if kind == "s3" and not uri.startswith("s3://"):
+        raise ValueError("s3_export_destination_requires_s3_uri")
+
+    if kind == "disk" and uri.startswith("s3://"):
+        raise ValueError("disk_export_destination_must_not_be_s3_uri")
+
+    return {
+        "destination_kind": kind,
+        "destination_path_or_uri": uri,
+    }
