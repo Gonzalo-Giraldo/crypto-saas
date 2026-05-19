@@ -190,3 +190,182 @@ def test_run_autopick_export_batch_creates_exporting_then_exported_record(tmp_pa
     assert row.checksum == result["checksum"]
     assert row.finished_at is not None
     assert row.purged_at is None
+
+def test_verify_autopick_export_artifact_marks_export_verified(tmp_path):
+    from apps.api.app.data_runtime.models.autopick_observation_snapshot import (
+        AutopickObservationExport,
+    )
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        run_autopick_export_batch,
+        verify_autopick_export_artifact,
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(bind=engine)
+
+    DataBase.metadata.create_all(bind=engine)
+
+    created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with TestingSessionLocal() as db:
+        db.add(
+            AutopickObservationSnapshot(
+                snapshot_id="snapshot-1",
+                snapshot_hash="hash-1",
+                broker="BINANCE",
+                market="FUTURES",
+                decision_status="SELECTED",
+                model_version="autopick-v1",
+                selected_symbol="BTCUSDT",
+                selected_side="BUY",
+                selected_rank=1,
+                selected_score=0.9,
+                selected_reason="ok",
+                ranked_count=1,
+                partial_failure_count=0,
+                rejected_candidates_json="[]",
+                created_at=created_at,
+            )
+        )
+        db.add(
+            AutopickObservationCandidate(
+                snapshot_id="snapshot-1",
+                rank=1,
+                symbol="BTCUSDT",
+                side="BUY",
+                valid=True,
+                reason="ok",
+                final_score=0.9,
+                selected=True,
+                entry_price_reference=100.0,
+                features_json='{"momentum":0.5}',
+                created_at=created_at,
+            )
+        )
+        db.commit()
+
+        exported = run_autopick_export_batch(
+            db=db,
+            export_root=tmp_path,
+            export_id="export-verify-1",
+            from_created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            to_created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        )
+        db.commit()
+
+        row = db.query(AutopickObservationExport).filter_by(
+            export_id="export-verify-1"
+        ).one()
+
+        result = verify_autopick_export_artifact(
+            row=row,
+            expected_line_count=exported["line_count"],
+        )
+        db.commit()
+
+    assert result["status"] == "VERIFIED"
+    assert result["checksum"] == exported["checksum"]
+    assert result["line_count"] == 2
+
+    with TestingSessionLocal() as db:
+        row = db.query(AutopickObservationExport).filter_by(
+            export_id="export-verify-1"
+        ).one()
+
+    assert row.status == "VERIFIED"
+    assert row.purged_at is None
+
+def test_verify_autopick_export_artifact_marks_failed_on_checksum_mismatch(tmp_path):
+    from apps.api.app.data_runtime.models.autopick_observation_snapshot import (
+        AutopickObservationExport,
+    )
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        run_autopick_export_batch,
+        verify_autopick_export_artifact,
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(bind=engine)
+
+    DataBase.metadata.create_all(bind=engine)
+
+    created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with TestingSessionLocal() as db:
+        db.add(
+            AutopickObservationSnapshot(
+                snapshot_id="snapshot-1",
+                snapshot_hash="hash-1",
+                broker="BINANCE",
+                market="FUTURES",
+                decision_status="SELECTED",
+                model_version="autopick-v1",
+                selected_symbol="BTCUSDT",
+                selected_side="BUY",
+                selected_rank=1,
+                selected_score=0.9,
+                selected_reason="ok",
+                ranked_count=1,
+                partial_failure_count=0,
+                rejected_candidates_json="[]",
+                created_at=created_at,
+            )
+        )
+        db.add(
+            AutopickObservationCandidate(
+                snapshot_id="snapshot-1",
+                rank=1,
+                symbol="BTCUSDT",
+                side="BUY",
+                valid=True,
+                reason="ok",
+                final_score=0.9,
+                selected=True,
+                entry_price_reference=100.0,
+                features_json='{"momentum":0.5}',
+                created_at=created_at,
+            )
+        )
+        db.commit()
+
+        exported = run_autopick_export_batch(
+            db=db,
+            export_root=tmp_path,
+            export_id="export-corrupt-1",
+            from_created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            to_created_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+        )
+        db.commit()
+
+        path = Path(exported["path"])
+        path.write_text("corrupted\n", encoding="utf-8")
+
+        row = db.query(AutopickObservationExport).filter_by(
+            export_id="export-corrupt-1"
+        ).one()
+
+        try:
+            verify_autopick_export_artifact(
+                row=row,
+                expected_line_count=exported["line_count"],
+            )
+        except ValueError as exc:
+            db.commit()
+            assert (
+                "export_artifact_checksum_mismatch" in str(exc)
+                or "export_artifact_line_count_mismatch" in str(exc)
+            )
+        else:
+            raise AssertionError("checksum mismatch must fail closed")
+
+    with TestingSessionLocal() as db:
+        row = db.query(AutopickObservationExport).filter_by(
+            export_id="export-corrupt-1"
+        ).one()
+
+    assert row.status == "FAILED"
+    assert (
+        "export_artifact_checksum_mismatch" in row.error_message
+        or "export_artifact_line_count_mismatch" in row.error_message
+    )
+    assert row.purged_at is None

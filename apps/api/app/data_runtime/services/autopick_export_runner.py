@@ -270,3 +270,71 @@ def run_autopick_export_batch(
         "snapshot_count": snapshot_count,
         "candidate_count": candidate_count,
     }
+
+def _fail_export_verification(row, reason: str) -> None:
+    row.error_message = str(reason)
+    apply_export_transition(row, "FAILED")
+
+def verify_autopick_export_artifact(
+    *,
+    row,
+    expected_line_count: int,
+) -> dict:
+    """
+    Verify local Auto-pick DATA export artifact integrity.
+
+    DATA-plane only:
+    - no runtime DB access
+    - no broker access
+    - no purge
+    """
+
+    path_value = str(getattr(row, "destination_path_or_uri", "") or "").strip()
+
+    if not path_value:
+        reason = "export_verification_requires_destination"
+        _fail_export_verification(row, reason)
+        raise ValueError(reason)
+
+    path = Path(path_value)
+
+    if not path.exists() or not path.is_file():
+        reason = "export_artifact_not_found"
+        _fail_export_verification(row, reason)
+        raise ValueError(reason)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    line_count = len(lines)
+
+    if line_count != int(expected_line_count):
+        reason = "export_artifact_line_count_mismatch"
+        _fail_export_verification(row, reason)
+        raise ValueError(reason)
+
+    checksum = compute_autopick_export_checksum(lines)
+    expected_checksum = str(getattr(row, "checksum", "") or "").strip()
+
+    if not expected_checksum:
+        reason = "export_verification_requires_checksum"
+        _fail_export_verification(row, reason)
+        raise ValueError(reason)
+
+    if checksum != expected_checksum:
+        reason = "export_artifact_checksum_mismatch"
+        _fail_export_verification(row, reason)
+        raise ValueError(reason)
+
+    if getattr(row, "finished_at", None) is None:
+        reason = "export_verification_requires_finished_at"
+        _fail_export_verification(row, reason)
+        raise ValueError(reason)
+
+    apply_export_transition(row, "VERIFIED")
+
+    return {
+        "export_id": getattr(row, "export_id", None),
+        "status": row.status,
+        "path": str(path),
+        "checksum": checksum,
+        "line_count": line_count,
+    }
