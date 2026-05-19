@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 from datetime import datetime
 from typing import Iterable
 
@@ -12,6 +15,12 @@ from apps.api.app.data_runtime.models.autopick_observation_snapshot import (
     AutopickObservationCandidate,
     AutopickObservationSnapshot,
 )
+
+from apps.api.app.data_runtime.services.autopick_export_service import (
+    apply_export_transition,
+    create_autopick_export_batch,
+)
+
 from datetime import datetime, timezone
 
 def _iso(value) -> str | None:
@@ -142,3 +151,123 @@ def compute_autopick_export_checksum(lines: Iterable[str]) -> str:
         digest.update(b"\n")
 
     return digest.hexdigest()
+
+def write_autopick_export_artifact(
+    *,
+    export_root,
+    export_id: str,
+    lines: Iterable[str],
+) -> dict:
+    """
+    Write deterministic Auto-pick DATA export JSONL artifact atomically.
+
+    DATA-plane only:
+    - no runtime DB access
+    - no broker access
+    - no purge
+    - no lifecycle mutation
+    """
+
+    safe_export_id = str(export_id).strip()
+
+    if not safe_export_id:
+        raise ValueError("export_id_required")
+
+    if "/" in safe_export_id or "\\" in safe_export_id:
+        raise ValueError("export_id_must_be_filename_safe")
+
+    export_lines = [str(line) for line in lines]
+    checksum = compute_autopick_export_checksum(export_lines)
+
+    root = Path(export_root)
+    root.mkdir(parents=True, exist_ok=True)
+
+    final_path = root / f"{safe_export_id}.jsonl"
+    tmp_path = root / f"{safe_export_id}.jsonl.tmp"
+
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        for line in export_lines:
+            fh.write(line)
+            fh.write("\n")
+
+        fh.flush()
+        os.fsync(fh.fileno())
+
+    os.replace(tmp_path, final_path)
+
+    return {
+        "path": str(final_path),
+        "checksum": checksum,
+        "line_count": len(export_lines),
+    }
+
+def run_autopick_export_batch(
+    *,
+    db: Session,
+    export_root,
+    export_id: str,
+    from_created_at: datetime,
+    to_created_at: datetime,
+) -> dict:
+    """
+    Execute minimal Auto-pick DATA export batch.
+
+    DATA-plane only:
+    - creates export lifecycle row
+    - writes local JSONL artifact
+    - marks EXPORTED
+    - no runtime DB access
+    - no broker access
+    - no verification
+    - no purge
+    """
+
+    lines = build_autopick_export_lines(
+        db=db,
+        from_created_at=from_created_at,
+        to_created_at=to_created_at,
+    )
+
+    snapshot_count = sum(
+        1 for line in lines if '"record_type":"snapshot"' in line
+    )
+    candidate_count = sum(
+        1 for line in lines if '"record_type":"candidate"' in line
+    )
+
+    if snapshot_count <= 0 and candidate_count <= 0:
+        raise ValueError("export_batch_requires_rows")
+
+    artifact = write_autopick_export_artifact(
+        export_root=export_root,
+        export_id=export_id,
+        lines=lines,
+    )
+
+    row = create_autopick_export_batch(
+        db=db,
+        export_id=export_id,
+        from_created_at=from_created_at,
+        to_created_at=to_created_at,
+        snapshot_count=snapshot_count,
+        candidate_count=candidate_count,
+        destination_kind="disk",
+        destination_path_or_uri=artifact["path"],
+        checksum=artifact["checksum"],
+    )
+
+    apply_export_transition(row, "EXPORTING")
+    row.finished_at = datetime.now(timezone.utc)
+    apply_export_transition(row, "EXPORTED")
+
+    db.flush()
+
+    return {
+        "export_id": export_id,
+        "status": row.status,
+        "path": artifact["path"],
+        "checksum": artifact["checksum"],
+        "line_count": artifact["line_count"],
+        "snapshot_count": snapshot_count,
+        "candidate_count": candidate_count,
+    }
