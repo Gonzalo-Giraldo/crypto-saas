@@ -118,3 +118,77 @@ def test_run_runtime_tick_once_rolls_back_if_error_adapter_fails():
     assert db.committed is False
     assert db.rolled_back is True
     assert db.closed is True
+
+def test_runtime_tick_once_optional_authority_observer_wraps_tick_without_blocking():
+    calls = []
+
+    class Observed:
+        def __init__(self, result):
+            self.result = result
+
+    def authority_observer(*, fn):
+        calls.append("observer")
+        return Observed(fn())
+
+    db = _DB()
+
+    def adapter(**_kwargs):
+        return _FlowResult()
+
+    deps = _base_deps(
+        db=db,
+        adapter=adapter,
+    )
+    deps = RuntimeTickOnceDependencies(
+        **{
+            **deps.__dict__,
+            "authority_observer": authority_observer,
+        }
+    )
+
+    run_runtime_tick_once(
+        scheduler_name="auto_pick_internal",
+        deps=deps,
+    )
+
+    assert calls == ["observer"]
+    assert db.committed is True
+
+
+def test_runtime_tick_once_observer_does_not_swallow_tick_exception():
+    calls = []
+
+    class ExplodingAdapter:
+        def __call__(self, **_kwargs):
+            calls.append("tick")
+            raise RuntimeError("tick exploded")
+
+    class Observed:
+        def __init__(self, result):
+            self.result = result
+
+    def authority_observer(*, fn):
+        calls.append("observer")
+        return Observed(fn())
+
+    db = _DB()
+
+    deps = _base_deps(
+        db=db,
+        adapter=ExplodingAdapter(),
+    )
+    deps = RuntimeTickOnceDependencies(
+        **{
+            **deps.__dict__,
+            "authority_observer": authority_observer,
+        }
+    )
+
+    run_runtime_tick_once(
+        scheduler_name="auto_pick_internal",
+        deps=deps,
+    )
+
+    assert calls == ["observer", "tick"]
+    assert db.rolled_back is False
+    assert db.committed is True
