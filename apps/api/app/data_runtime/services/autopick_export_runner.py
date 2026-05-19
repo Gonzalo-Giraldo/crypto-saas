@@ -338,3 +338,33 @@ def verify_autopick_export_artifact(
         "checksum": checksum,
         "line_count": line_count,
     }
+
+def build_autopick_export_manifest(
+    *,
+    export_id: str,
+    status: str,
+    artifact_path: str,
+    checksum: str,
+    line_count: int,
+    snapshot_count: int,
+    candidate_count: int,
+) -> dict:
+    """
+    Build deterministic Auto-pick DATA export manifest.
+
+    DATA-plane contract only:
+    - no runtime DB access
+    - no broker access
+    - no filesystem write
+    - no lifecycle mutation
+    """
+
+    return {
+        "artifact_path": str(artifact_path),
+        "candidate_count": int(candidate_count),
+        "checksum": str(checksum),
+        "export_id": str(export_id),
+        "line_count": int(line_count),
+        "snapshot_count": int(snapshot_count),
+        "status": str(status),
+    }

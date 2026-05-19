@@ -369,3 +369,28 @@ def test_verify_autopick_export_artifact_marks_failed_on_checksum_mismatch(tmp_p
         or "export_artifact_line_count_mismatch" in row.error_message
     )
     assert row.purged_at is None
+
+def test_build_autopick_export_manifest_is_deterministic():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        build_autopick_export_manifest,
+    )
+
+    manifest = build_autopick_export_manifest(
+        export_id="export-1",
+        status="VERIFIED",
+        artifact_path="/data/autopick/export-1.jsonl",
+        checksum="a" * 64,
+        line_count=2,
+        snapshot_count=1,
+        candidate_count=1,
+    )
+
+    assert manifest == {
+        "artifact_path": "/data/autopick/export-1.jsonl",
+        "candidate_count": 1,
+        "checksum": "a" * 64,
+        "export_id": "export-1",
+        "line_count": 2,
+        "snapshot_count": 1,
+        "status": "VERIFIED",
+    }
