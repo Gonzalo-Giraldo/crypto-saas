@@ -24,22 +24,8 @@ from apps.api.app.services.scheduler_runtime_loop import (
     get_scheduler_lifecycle_state,
     is_scheduler_thread_alive,
 )
-from apps.api.app.services.runtime_scheduler.runtime_ownership_lifecycle import (
-    build_runtime_ownership_lifecycle_projection,
-)
-from apps.api.app.services.runtime_scheduler.runtime_authority_coordinator import (
-    RuntimeAuthorityCoordinatorInput,
-    evaluate_runtime_authority,
-)
-from apps.api.app.services.runtime_scheduler.runtime_authority_state import (
-    project_runtime_authority_state,
-)
-from apps.api.app.services.runtime_scheduler.runtime_session_identity import (
-    get_runtime_session_identity,
-    get_runtime_session_local_state,
-)
-from apps.api.app.services.runtime_scheduler.runtime_session_reconciliation import (
-    evaluate_runtime_generation_reconciliation,
+from apps.api.app.services.runtime_scheduler.runtime_authority_runtime_snapshot_service import (
+    build_runtime_authority_runtime_snapshot,
 )
 
 
@@ -122,69 +108,17 @@ def get_runtime_status(
         last_tick_at=scheduler_state.last_tick_at if scheduler_state else None,
         interval_minutes=scheduler_interval_minutes,
     )
-    ownership_lifecycle = (
-        build_runtime_ownership_lifecycle_projection(
-            runtime_state=scheduler_state,
-            stale_after_seconds=scheduler_interval_minutes * 60 * 2,
-        )
-        if scheduler_state
-        else None
+    runtime_authority_snapshot = build_runtime_authority_runtime_snapshot(
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        scheduler_state=scheduler_state,
+        scheduler_interval_minutes=scheduler_interval_minutes,
+        runtime_health_valid=bool(is_scheduler_thread_alive()),
     )
+    ownership_lifecycle = runtime_authority_snapshot.ownership_lifecycle
     recent_ticks = load_recent_scheduler_tick_journal(
         db,
         scheduler_name=AUTO_PICK_SCHEDULER_NAME,
         limit=10,
-    )
-
-    local_runtime_identity = get_runtime_session_identity(
-        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-    )
-
-    local_identity_matches = bool(
-        scheduler_state
-        and scheduler_state.runtime_owner_id
-        == local_runtime_identity.runtime_owner_id
-        and scheduler_state.runtime_instance_id
-        == local_runtime_identity.runtime_instance_id
-    )
-
-    local_runtime_state = get_runtime_session_local_state(
-        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
-    )
-    generation_reconciliation = evaluate_runtime_generation_reconciliation(
-        local_runtime_generation=local_runtime_state.runtime_generation,
-        durable_runtime_generation=(
-            scheduler_state.runtime_generation
-            if scheduler_state
-            else None
-        ),
-    )
-    generation_matches = generation_reconciliation.matches
-
-    advisory_session = local_runtime_state.advisory_session_state
-
-    runtime_authority = evaluate_runtime_authority(
-        authority_input=RuntimeAuthorityCoordinatorInput(
-            ownership_row_present=bool(
-                scheduler_state
-                and scheduler_state.runtime_owner_id
-            ),
-            advisory_session_state=advisory_session,
-            local_identity_matches=local_identity_matches,
-            generation_matches=generation_matches,
-            heartbeat_fresh=bool(
-                ownership_lifecycle
-                and not ownership_lifecycle.stale
-            ),
-            runtime_health_valid=bool(
-                is_scheduler_thread_alive()
-            ),
-        ),
-    )
-    runtime_authority_state = project_runtime_authority_state(
-        authority_valid=runtime_authority.valid,
-        authority_reason=runtime_authority.reason,
-        advisory_session_reason=runtime_authority.advisory_session_reason,
     )
 
     return {
@@ -227,20 +161,20 @@ def get_runtime_status(
             "ownership_operator_attention_required": ownership_lifecycle.operator_attention_required if ownership_lifecycle else True,
             "ownership_reason": ownership_lifecycle.reason if ownership_lifecycle else "scheduler_runtime_state_missing",
 
-            "local_runtime_owner_id": local_runtime_identity.runtime_owner_id,
-            "local_runtime_instance_id": local_runtime_identity.runtime_instance_id,
-            "local_identity_matches": local_identity_matches,
-            "local_runtime_generation": local_runtime_state.runtime_generation,
+            "local_runtime_owner_id": runtime_authority_snapshot.local_runtime_identity.runtime_owner_id,
+            "local_runtime_instance_id": runtime_authority_snapshot.local_runtime_identity.runtime_instance_id,
+            "local_identity_matches": runtime_authority_snapshot.local_identity_matches,
+            "local_runtime_generation": runtime_authority_snapshot.local_runtime_state.runtime_generation,
             "durable_runtime_generation": scheduler_state.runtime_generation if scheduler_state else None,
-            "generation_matches": generation_matches,
-            "generation_reconciliation_reason": generation_reconciliation.reason,
-            "advisory_session_valid": advisory_session.valid,
-            "advisory_session_reason": advisory_session.reason,
+            "generation_matches": runtime_authority_snapshot.generation_matches,
+            "generation_reconciliation_reason": runtime_authority_snapshot.generation_reconciliation.reason,
+            "advisory_session_valid": runtime_authority_snapshot.advisory_session_valid,
+            "advisory_session_reason": runtime_authority_snapshot.advisory_session_reason,
 
-            "session_authority_valid": runtime_authority.valid,
-            "session_authority_reason": runtime_authority.reason,
-            "runtime_authority_state": runtime_authority_state.state.value,
-            "runtime_authority_operator_attention_required": runtime_authority_state.operator_attention_required,
+            "session_authority_valid": runtime_authority_snapshot.runtime_authority.valid,
+            "session_authority_reason": runtime_authority_snapshot.runtime_authority.reason,
+            "runtime_authority_state": runtime_authority_snapshot.runtime_authority_state.state.value,
+            "runtime_authority_operator_attention_required": runtime_authority_snapshot.runtime_authority_state.operator_attention_required,
 
             **scheduler_staleness,
         },
