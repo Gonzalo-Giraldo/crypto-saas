@@ -17,6 +17,7 @@ class RuntimeTickOnceDependencies:
     legacy_auto_pick_tick: object
     legacy_learning_tick: object
     global_shadow_tick: object
+    authority_observer: object | None = None
     print_fn: object = print
 
 
@@ -35,19 +36,26 @@ def run_runtime_tick_once(
     scheduler_dry_run = bool(deps.settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN)
 
     try:
-        flow_result = deps.execute_runtime_adapter(
-            db=db,
-            scheduler_name=scheduler_name,
-            started_at=started_at,
-            started_at_wall=started_at_wall,
-            scheduler_dry_run=scheduler_dry_run,
-            trading_enabled=deps.get_trading_enabled(db),
-            legacy_exit_tick=deps.legacy_exit_tick,
-            legacy_market_monitor_tick=deps.legacy_market_monitor_tick,
-            legacy_auto_pick_tick=deps.legacy_auto_pick_tick,
-            legacy_learning_tick=deps.legacy_learning_tick,
-            global_shadow_tick=deps.global_shadow_tick,
-        )
+        def _execute_tick():
+            return deps.execute_runtime_adapter(
+                db=db,
+                scheduler_name=scheduler_name,
+                started_at=started_at,
+                started_at_wall=started_at_wall,
+                scheduler_dry_run=scheduler_dry_run,
+                trading_enabled=deps.get_trading_enabled(db),
+                legacy_exit_tick=deps.legacy_exit_tick,
+                legacy_market_monitor_tick=deps.legacy_market_monitor_tick,
+                legacy_auto_pick_tick=deps.legacy_auto_pick_tick,
+                legacy_learning_tick=deps.legacy_learning_tick,
+                global_shadow_tick=deps.global_shadow_tick,
+            )
+
+        if deps.authority_observer is None:
+            flow_result = _execute_tick()
+        else:
+            observed = deps.authority_observer(fn=_execute_tick)
+            flow_result = observed.result
         db.commit()
 
         deps.print_fn(
