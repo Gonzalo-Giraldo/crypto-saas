@@ -19,6 +19,18 @@ from apps.api.app.services.runtime_scheduler.runtime_dependencies import (
 )
 
 
+def _attach_shadow_payload(
+    *,
+    observation_payload: dict,
+    shadow_out,
+) -> dict:
+    if shadow_out is None:
+        return observation_payload
+
+    observation_payload["shadow"] = shadow_out
+    return observation_payload
+
+
 def execute_scheduler_runtime_flow(
     *,
     db,
@@ -93,8 +105,10 @@ def execute_scheduler_runtime_flow(
 
     shadow_out = dependencies.global_shadow_tick(db=db)
 
-    if shadow_out is not None:
-        observation_payload["shadow"] = shadow_out
+    observation_payload = _attach_shadow_payload(
+        observation_payload=observation_payload,
+        shadow_out=shadow_out,
+    )
 
     tick_details = build_tick_details(
         monitor=monitor,
