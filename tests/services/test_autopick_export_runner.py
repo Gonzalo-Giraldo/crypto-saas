@@ -14,11 +14,6 @@ from apps.api.app.data_runtime.services.autopick_export_runner import (
     compute_autopick_export_checksum,
 )
 
-from apps.api.app.data_runtime.services.autopick_export_service import (
-    apply_export_transition,
-    create_autopick_export_batch,
-)
-
 def test_build_autopick_export_lines_is_deterministic_and_compact():
     engine = create_engine("sqlite:///:memory:")
     TestingSessionLocal = sessionmaker(bind=engine)

@@ -5,7 +5,6 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
 from typing import Iterable
 
 from sqlalchemy import select
