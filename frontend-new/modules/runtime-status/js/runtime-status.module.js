@@ -53,6 +53,36 @@
             <strong id="runtime-protection-alerts">UNKNOWN</strong>
             <p id="runtime-protection-detail">UNKNOWN and cleanup states must block automation.</p>
           </article>
+
+          <article class="runtime-card">
+            <span class="runtime-card-label">Runtime Authority</span>
+            <strong id="runtime-authority-state">UNKNOWN</strong>
+            <p id="runtime-authority-detail">Waiting for authority projection.</p>
+          </article>
+
+          <article class="runtime-card">
+            <span class="runtime-card-label">Advisory Session</span>
+            <strong id="runtime-advisory-state">UNKNOWN</strong>
+            <p id="runtime-advisory-detail">Waiting for advisory state.</p>
+          </article>
+
+          <article class="runtime-card">
+            <span class="runtime-card-label">Ownership</span>
+            <strong id="runtime-ownership-state">UNKNOWN</strong>
+            <p id="runtime-ownership-detail">Waiting for ownership lifecycle.</p>
+          </article>
+
+          <article class="runtime-card">
+            <span class="runtime-card-label">Generation</span>
+            <strong id="runtime-generation-state">UNKNOWN</strong>
+            <p id="runtime-generation-detail">Waiting for generation reconciliation.</p>
+          </article>
+
+          <article class="runtime-card">
+            <span class="runtime-card-label">Operator Attention</span>
+            <strong id="runtime-operator-attention">UNKNOWN</strong>
+            <p id="runtime-operator-attention-detail">Waiting for operational signals.</p>
+          </article>
         </section>
 
         <section class="runtime-panel" aria-label="Runtime raw response">
@@ -85,6 +115,16 @@
     setText('#runtime-environment-detail', view.environmentDetail);
     setText('#runtime-protection-alerts', view.protectionAlerts);
     setText('#runtime-protection-detail', view.protectionDetail);
+    setText('#runtime-authority-state', view.authorityState);
+    setText('#runtime-authority-detail', view.authorityDetail);
+    setText('#runtime-advisory-state', view.advisoryState);
+    setText('#runtime-advisory-detail', view.advisoryDetail);
+    setText('#runtime-ownership-state', view.ownershipState);
+    setText('#runtime-ownership-detail', view.ownershipDetail);
+    setText('#runtime-generation-state', view.generationState);
+    setText('#runtime-generation-detail', view.generationDetail);
+    setText('#runtime-operator-attention', view.operatorAttentionState);
+    setText('#runtime-operator-attention-detail', view.operatorAttentionDetail);
     setOutput(view.loading ? 'Loading runtime status...' : view.rawText, view.isError);
   }
 

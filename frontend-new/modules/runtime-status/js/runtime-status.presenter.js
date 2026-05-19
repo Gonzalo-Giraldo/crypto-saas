@@ -15,6 +15,10 @@
     return payload && payload.protections ? payload.protections : {};
   }
 
+  function getAutopick(payload) {
+    return payload && payload.autopick ? payload.autopick : {};
+  }
+
   function getTradingState(payload) {
     const runtime = getRuntime(payload);
 
@@ -41,6 +45,7 @@
     const schedulerState = getSchedulerState(payload);
     const runtime = getRuntime(payload);
     const protections = getProtections(payload);
+    const autopick = getAutopick(payload);
     const unknownCount = Number(protections.unknown_positions || 0);
     const pendingCleanupCount = Number(protections.pending_cleanup_positions || 0);
 
@@ -65,6 +70,16 @@
       environmentDetail: `Commit: ${runtime.commit || 'unknown'}`,
       protectionAlerts: unknownCount > 0 || pendingCleanupCount > 0 ? 'ATTENTION' : 'CLEAR',
       protectionDetail: `UNKNOWN: ${unknownCount} | Pending cleanup: ${pendingCleanupCount} | Active protected: ${protections.active_protected_positions || 0}`,
+      authorityState: autopick.runtime_authority_state || 'UNKNOWN',
+      authorityDetail: `Session valid: ${String(autopick.session_authority_valid)} | Reason: ${autopick.session_authority_reason || 'none'}`,
+      advisoryState: autopick.advisory_session_valid === true ? 'VALID' : 'INVALID',
+      advisoryDetail: `Reason: ${autopick.advisory_session_reason || 'none'}`,
+      ownershipState: autopick.ownership_valid === true && autopick.ownership_stale !== true ? 'VALID' : 'ATTENTION',
+      ownershipDetail: `Lifecycle: ${autopick.ownership_lifecycle_state || 'UNKNOWN'} | Reason: ${autopick.ownership_reason || 'none'}`,
+      generationState: autopick.generation_matches === true ? 'MATCHED' : 'MISMATCH',
+      generationDetail: `Local: ${autopick.local_runtime_generation ?? 'none'} | Durable: ${autopick.durable_runtime_generation ?? 'none'} | Reason: ${autopick.generation_reconciliation_reason || 'none'}`,
+      operatorAttentionState: autopick.runtime_authority_operator_attention_required === true || autopick.ownership_operator_attention_required === true ? 'REQUIRED' : 'CLEAR',
+      operatorAttentionDetail: `Authority attention: ${String(autopick.runtime_authority_operator_attention_required)} | Ownership attention: ${String(autopick.ownership_operator_attention_required)}`,
       rawText: runtimeStatus && runtimeStatus.error
         ? runtimeStatus.error
         : formatJson(payload),
