@@ -532,6 +532,37 @@ class DiskAutopickExportStorage:
             "path": str(final_path),
         }
 
+def validate_s3_export_configuration(
+    *,
+    bucket: str,
+    prefix: str,
+    region: str,
+    encryption: str,
+) -> dict:
+    bucket_value = str(bucket or "").strip()
+    prefix_value = str(prefix or "").strip().strip("/")
+    region_value = str(region or "").strip()
+    encryption_value = str(encryption or "").strip()
+
+    if not bucket_value:
+        raise ValueError("s3_export_bucket_required")
+
+    if not region_value:
+        raise ValueError("s3_export_region_required")
+
+    if not prefix_value:
+        raise ValueError("s3_export_prefix_required")
+
+    if encryption_value != "AES256":
+        raise ValueError("unsupported_s3_export_encryption")
+
+    return {
+        "bucket": bucket_value,
+        "prefix": prefix_value,
+        "region": region_value,
+        "encryption": encryption_value,
+    }
+
 class S3AutopickExportStorage:
     def __init__(
         self,
@@ -542,17 +573,17 @@ class S3AutopickExportStorage:
         encryption: str = "AES256",
         client=None,
     ):
-        if not bucket:
-            raise ValueError("s3_export_bucket_required")
-        if not region:
-            raise ValueError("s3_export_region_required")
-        if encryption != "AES256":
-            raise ValueError("unsupported_s3_export_encryption")
+        config = validate_s3_export_configuration(
+            bucket=bucket,
+            prefix=prefix,
+            region=region,
+            encryption=encryption,
+        )
 
-        self.bucket = bucket
-        self.prefix = prefix.strip("/")
-        self.region = region
-        self.encryption = encryption
+        self.bucket = config["bucket"]
+        self.prefix = config["prefix"]
+        self.region = config["region"]
+        self.encryption = config["encryption"]
         self.client = client
 
         if self.client is None:
@@ -591,15 +622,13 @@ class S3AutopickExportStorage:
             Metadata=metadata,
         )
 
-        head = self.client.head_object(Bucket=self.bucket, Key=key)
-        remote_size = int(head.get("ContentLength", -1))
-        remote_metadata = head.get("Metadata") or {}
-
-        if remote_size != len(body):
-            raise ValueError("s3_export_remote_size_mismatch")
-
-        if remote_metadata.get("sha256") != checksum:
-            raise ValueError("s3_export_remote_checksum_mismatch")
+        verify_remote_autopick_export_artifact(
+            client=self.client,
+            bucket=self.bucket,
+            key=key,
+            expected_checksum=checksum,
+            expected_bytes=len(body),
+        )
 
         return {
             "path": f"s3://{self.bucket}/{key}",
@@ -608,6 +637,49 @@ class S3AutopickExportStorage:
             "checksum": checksum,
             "bytes": len(body),
         }
+
+def verify_remote_autopick_export_artifact(
+    *,
+    client,
+    bucket: str,
+    key: str,
+    expected_checksum: str,
+    expected_bytes: int | None = None,
+) -> dict:
+    bucket_value = str(bucket or "").strip()
+    key_value = str(key or "").strip()
+    checksum_value = str(expected_checksum or "").strip()
+
+    if not bucket_value:
+        raise ValueError("s3_export_bucket_required")
+
+    if not key_value:
+        raise ValueError("s3_export_key_required")
+
+    if not checksum_value:
+        raise ValueError("s3_export_expected_checksum_required")
+
+    head = client.head_object(Bucket=bucket_value, Key=key_value)
+
+    remote_size = int(head.get("ContentLength", -1))
+    remote_metadata = head.get("Metadata") or {}
+    remote_checksum = str(remote_metadata.get("sha256") or "").strip()
+
+    if expected_bytes is not None and remote_size != int(expected_bytes):
+        raise ValueError("s3_export_remote_size_mismatch")
+
+    if not remote_checksum:
+        raise ValueError("s3_export_remote_checksum_missing")
+
+    if remote_checksum != checksum_value:
+        raise ValueError("s3_export_remote_checksum_mismatch")
+
+    return {
+        "bucket": bucket_value,
+        "key": key_value,
+        "checksum": remote_checksum,
+        "bytes": remote_size,
+    }
 
 def get_autopick_export_storage(
     *,
@@ -632,4 +704,3 @@ def get_autopick_export_storage(
         )
 
     raise ValueError("unsupported_export_destination_kind")
-

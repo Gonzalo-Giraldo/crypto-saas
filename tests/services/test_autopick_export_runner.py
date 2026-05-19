@@ -623,3 +623,185 @@ def test_run_autopick_export_batch_writes_artifact_and_manifest_to_s3(monkeypatc
     assert row.destination_kind == "s3"
     assert row.destination_path_or_uri == result["path"]
     assert row.checksum == result["checksum"]
+
+def test_verify_remote_autopick_export_artifact_accepts_matching_s3_head():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        verify_remote_autopick_export_artifact,
+    )
+
+    fake = FakeS3Client()
+    fake.put_object(
+        Bucket="crypto-saas-data-ap",
+        Key="autopick/exports/export-verify-1.jsonl",
+        Body=b"hello\n",
+        ServerSideEncryption="AES256",
+        Metadata={
+            "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        },
+    )
+
+    result = verify_remote_autopick_export_artifact(
+        client=fake,
+        bucket="crypto-saas-data-ap",
+        key="autopick/exports/export-verify-1.jsonl",
+        expected_checksum="5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        expected_bytes=6,
+    )
+
+    assert result == {
+        "bucket": "crypto-saas-data-ap",
+        "key": "autopick/exports/export-verify-1.jsonl",
+        "checksum": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        "bytes": 6,
+    }
+
+
+def test_verify_remote_autopick_export_artifact_rejects_checksum_mismatch():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        verify_remote_autopick_export_artifact,
+    )
+
+    fake = FakeS3Client()
+    fake.put_object(
+        Bucket="crypto-saas-data-ap",
+        Key="autopick/exports/export-verify-2.jsonl",
+        Body=b"hello\n",
+        ServerSideEncryption="AES256",
+        Metadata={"sha256": "remote-checksum"},
+    )
+
+    try:
+        verify_remote_autopick_export_artifact(
+            client=fake,
+            bucket="crypto-saas-data-ap",
+            key="autopick/exports/export-verify-2.jsonl",
+            expected_checksum="expected-checksum",
+            expected_bytes=6,
+        )
+    except ValueError as exc:
+        assert "s3_export_remote_checksum_mismatch" in str(exc)
+        return
+
+    raise AssertionError("checksum mismatch must fail closed")
+
+
+def test_verify_remote_autopick_export_artifact_rejects_missing_checksum_metadata():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        verify_remote_autopick_export_artifact,
+    )
+
+    fake = FakeS3Client()
+    fake.put_object(
+        Bucket="crypto-saas-data-ap",
+        Key="autopick/exports/export-verify-3.jsonl",
+        Body=b"hello\n",
+        ServerSideEncryption="AES256",
+        Metadata={},
+    )
+
+    try:
+        verify_remote_autopick_export_artifact(
+            client=fake,
+            bucket="crypto-saas-data-ap",
+            key="autopick/exports/export-verify-3.jsonl",
+            expected_checksum="expected-checksum",
+            expected_bytes=6,
+        )
+    except ValueError as exc:
+        assert "s3_export_remote_checksum_missing" in str(exc)
+        return
+
+    raise AssertionError("missing checksum metadata must fail closed")
+
+def test_validate_s3_export_configuration_accepts_expected_prod_contract():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_s3_export_configuration,
+    )
+
+    assert validate_s3_export_configuration(
+        bucket="crypto-saas-data-ap",
+        prefix="autopick/exports",
+        region="sa-east-1",
+        encryption="AES256",
+    ) == {
+        "bucket": "crypto-saas-data-ap",
+        "prefix": "autopick/exports",
+        "region": "sa-east-1",
+        "encryption": "AES256",
+    }
+
+
+def test_validate_s3_export_configuration_rejects_missing_bucket():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_s3_export_configuration,
+    )
+
+    try:
+        validate_s3_export_configuration(
+            bucket="",
+            prefix="autopick/exports",
+            region="sa-east-1",
+            encryption="AES256",
+        )
+    except ValueError as exc:
+        assert "s3_export_bucket_required" in str(exc)
+        return
+
+    raise AssertionError("missing S3 bucket must fail closed")
+
+
+def test_validate_s3_export_configuration_rejects_missing_region():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_s3_export_configuration,
+    )
+
+    try:
+        validate_s3_export_configuration(
+            bucket="crypto-saas-data-ap",
+            prefix="autopick/exports",
+            region="",
+            encryption="AES256",
+        )
+    except ValueError as exc:
+        assert "s3_export_region_required" in str(exc)
+        return
+
+    raise AssertionError("missing S3 region must fail closed")
+
+
+def test_validate_s3_export_configuration_rejects_missing_prefix():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_s3_export_configuration,
+    )
+
+    try:
+        validate_s3_export_configuration(
+            bucket="crypto-saas-data-ap",
+            prefix="",
+            region="sa-east-1",
+            encryption="AES256",
+        )
+    except ValueError as exc:
+        assert "s3_export_prefix_required" in str(exc)
+        return
+
+    raise AssertionError("missing S3 prefix must fail closed")
+
+
+def test_validate_s3_export_configuration_rejects_unsupported_encryption():
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        validate_s3_export_configuration,
+    )
+
+    try:
+        validate_s3_export_configuration(
+            bucket="crypto-saas-data-ap",
+            prefix="autopick/exports",
+            region="sa-east-1",
+            encryption="aws:kms",
+        )
+    except ValueError as exc:
+        assert "unsupported_s3_export_encryption" in str(exc)
+        return
+
+    raise AssertionError("unsupported S3 encryption must fail closed")
