@@ -348,3 +348,122 @@ def test_touch_scheduler_runtime_heartbeat_owned_requires_timezone_aware_heartbe
         assert str(exc) == "runtime_heartbeat_at_must_be_timezone_aware"
     else:
         raise AssertionError("Expected runtime_heartbeat_at_must_be_timezone_aware")
+
+
+def test_clear_scheduler_runtime_ownership_owned_requires_matching_owner_identity_and_generation():
+    from datetime import datetime, timezone
+
+    from apps.api.app.models.scheduler_runtime_state import SchedulerRuntimeState
+    from apps.api.app.services.scheduler_runtime_state_service import (
+        clear_scheduler_runtime_ownership_owned,
+    )
+
+    db = _build_db()
+    heartbeat_at = datetime.now(timezone.utc)
+
+    row = SchedulerRuntimeState(
+        scheduler_name="auto_pick_internal",
+        runtime_owner_id="owner-owned",
+        runtime_instance_id="instance-owned",
+        runtime_generation=9,
+        runtime_started_at=heartbeat_at,
+        runtime_heartbeat_at=heartbeat_at,
+    )
+    db.add(row)
+    db.commit()
+
+    cleared = clear_scheduler_runtime_ownership_owned(
+        db,
+        scheduler_name="auto_pick_internal",
+        runtime_owner_id="owner-owned",
+        runtime_instance_id="instance-owned",
+        runtime_generation=9,
+    )
+
+    assert cleared.runtime_owner_id is None
+    assert cleared.runtime_instance_id is None
+    assert cleared.runtime_generation is None
+    assert cleared.runtime_started_at is None
+    assert cleared.runtime_heartbeat_at is None
+
+
+def test_clear_scheduler_runtime_ownership_owned_fails_closed_on_owner_mismatch():
+    from datetime import datetime, timezone
+
+    from apps.api.app.models.scheduler_runtime_state import SchedulerRuntimeState
+    from apps.api.app.services.scheduler_runtime_state_service import (
+        clear_scheduler_runtime_ownership_owned,
+    )
+
+    db = _build_db()
+    heartbeat_at = datetime.now(timezone.utc)
+
+    row = SchedulerRuntimeState(
+        scheduler_name="auto_pick_internal",
+        runtime_owner_id="owner-real",
+        runtime_instance_id="instance-real",
+        runtime_generation=10,
+        runtime_started_at=heartbeat_at,
+        runtime_heartbeat_at=heartbeat_at,
+    )
+    db.add(row)
+    db.commit()
+
+    try:
+        clear_scheduler_runtime_ownership_owned(
+            db,
+            scheduler_name="auto_pick_internal",
+            runtime_owner_id="wrong-owner",
+            runtime_instance_id="instance-real",
+            runtime_generation=10,
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_ownership_owner_mismatch"
+    else:
+        raise AssertionError("Expected runtime_ownership_owner_mismatch")
+
+    persisted = db.get(SchedulerRuntimeState, "auto_pick_internal")
+    assert persisted.runtime_owner_id == "owner-real"
+    assert persisted.runtime_instance_id == "instance-real"
+    assert persisted.runtime_generation == 10
+
+
+def test_clear_scheduler_runtime_ownership_owned_fails_closed_on_generation_mismatch():
+    from datetime import datetime, timezone
+
+    from apps.api.app.models.scheduler_runtime_state import SchedulerRuntimeState
+    from apps.api.app.services.scheduler_runtime_state_service import (
+        clear_scheduler_runtime_ownership_owned,
+    )
+
+    db = _build_db()
+    heartbeat_at = datetime.now(timezone.utc)
+
+    row = SchedulerRuntimeState(
+        scheduler_name="auto_pick_internal",
+        runtime_owner_id="owner-gen",
+        runtime_instance_id="instance-gen",
+        runtime_generation=11,
+        runtime_started_at=heartbeat_at,
+        runtime_heartbeat_at=heartbeat_at,
+    )
+    db.add(row)
+    db.commit()
+
+    try:
+        clear_scheduler_runtime_ownership_owned(
+            db,
+            scheduler_name="auto_pick_internal",
+            runtime_owner_id="owner-gen",
+            runtime_instance_id="instance-gen",
+            runtime_generation=12,
+        )
+    except ValueError as exc:
+        assert str(exc) == "runtime_ownership_owner_mismatch"
+    else:
+        raise AssertionError("Expected runtime_ownership_owner_mismatch")
+
+    persisted = db.get(SchedulerRuntimeState, "auto_pick_internal")
+    assert persisted.runtime_owner_id == "owner-gen"
+    assert persisted.runtime_instance_id == "instance-gen"
+    assert persisted.runtime_generation == 11
