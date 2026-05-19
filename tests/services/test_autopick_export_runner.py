@@ -467,3 +467,42 @@ def test_validate_autopick_export_destination_rejects_unknown_kind():
         return
 
     raise AssertionError("unknown destination kind must fail closed")
+
+def test_get_autopick_export_storage_returns_disk_storage(tmp_path):
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        get_autopick_export_storage,
+    )
+
+    storage = get_autopick_export_storage(
+        destination_kind="disk",
+        export_root=tmp_path,
+    )
+
+    result = storage.write_text_artifact(
+        export_id="export-1",
+        suffix=".txt",
+        content="hello\n",
+    )
+
+    path = Path(result["path"])
+
+    assert path.exists()
+    assert path.name == "export-1.txt"
+    assert path.read_text(encoding="utf-8") == "hello\n"
+
+
+def test_get_autopick_export_storage_rejects_s3_until_adapter_exists(tmp_path):
+    from apps.api.app.data_runtime.services.autopick_export_runner import (
+        get_autopick_export_storage,
+    )
+
+    try:
+        get_autopick_export_storage(
+            destination_kind="s3",
+            export_root=tmp_path,
+        )
+    except ValueError as exc:
+        assert "s3_export_storage_not_implemented" in str(exc)
+        return
+
+    raise AssertionError("s3 storage must fail closed until implemented")

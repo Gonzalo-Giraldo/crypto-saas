@@ -453,3 +453,70 @@ def validate_autopick_export_destination(
         "destination_kind": kind,
         "destination_path_or_uri": uri,
     }
+
+class DiskAutopickExportStorage:
+    """
+    Local disk Auto-pick export storage adapter.
+
+    DATA-plane only:
+    - no runtime DB access
+    - no broker access
+    - no AWS SDK
+    """
+
+    def __init__(self, *, export_root):
+        self.export_root = Path(export_root)
+
+    def write_text_artifact(
+        self,
+        *,
+        export_id: str,
+        suffix: str,
+        content: str,
+    ) -> dict:
+        safe_export_id = str(export_id).strip()
+        safe_suffix = str(suffix).strip()
+
+        if not safe_export_id:
+            raise ValueError("export_id_required")
+
+        if "/" in safe_export_id or "\\" in safe_export_id:
+            raise ValueError("export_id_must_be_filename_safe")
+
+        if not safe_suffix.startswith("."):
+            raise ValueError("artifact_suffix_must_start_with_dot")
+
+        if "/" in safe_suffix or "\\" in safe_suffix:
+            raise ValueError("artifact_suffix_must_be_filename_safe")
+
+        self.export_root.mkdir(parents=True, exist_ok=True)
+
+        final_path = self.export_root / f"{safe_export_id}{safe_suffix}"
+        tmp_path = self.export_root / f"{safe_export_id}{safe_suffix}.tmp"
+
+        with tmp_path.open("w", encoding="utf-8") as fh:
+            fh.write(str(content))
+            fh.flush()
+            os.fsync(fh.fileno())
+
+        os.replace(tmp_path, final_path)
+
+        return {
+            "path": str(final_path),
+        }
+
+
+def get_autopick_export_storage(
+    *,
+    destination_kind: str,
+    export_root,
+):
+    kind = str(destination_kind or "").strip().lower()
+
+    if kind == "disk":
+        return DiskAutopickExportStorage(export_root=export_root)
+
+    if kind == "s3":
+        raise ValueError("s3_export_storage_not_implemented")
+
+    raise ValueError("unsupported_export_destination_kind")
