@@ -308,3 +308,59 @@ controlled operationalization
 
 antes de cualquier scheduler o automatización.
 
+## Real Proof Result
+
+Date:
+- 2026-05-19
+
+Environment:
+- AWS EC2
+- IAM Role credentials
+- Region: sa-east-1
+
+Validated Components:
+- EC2 metadata service
+- IAM role attachment
+- STS temporary credentials
+- boto3 runtime
+- S3 bucket access
+- AES256 server-side encryption
+- Auto-pick DATA export S3 adapter
+
+Validated Runtime:
+- S3AutopickExportStorage.write_text_artifact()
+
+Validated Bucket:
+- crypto-saas-data-ap-081711905667-sa-east-1-an
+
+Validated Prefix:
+- autopick/exports/connectivity-proof/
+
+Execution Result:
+- AWS real connectivity proof successful
+
+Validated Artifact:
+- JSONL upload completed successfully
+- S3 object HEAD verification completed successfully
+- Checksum metadata persisted successfully
+
+Validated Security Properties:
+- No static AWS credentials used
+- IAM Role temporary credentials only
+- Bucket public access blocked
+- AES256 encryption enforced
+- Prefix-scoped policy isolation enforced
+
+Validated Operational Properties:
+- DATA-plane only
+- No runtime trading mutation
+- No broker access
+- No risk mutation
+- No intent mutation
+- No position mutation
+- Fail-closed behavior preserved
+
+Operational Conclusion:
+- Auto-pick DATA S3 export connectivity successfully validated against real AWS infrastructure.
+- Storage adapter architecture validated end-to-end.
+- Runtime ready for controlled export scheduler integration.
