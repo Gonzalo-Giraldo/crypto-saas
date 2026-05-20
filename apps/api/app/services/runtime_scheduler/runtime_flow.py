@@ -20,7 +20,9 @@ from apps.api.app.services.runtime_scheduler.autopick_shadow_comparison import (
 from apps.api.app.services.runtime_scheduler.runtime_dependencies import (
     SchedulerRuntimeDependencies,
 )
-
+from apps.api.app.data_runtime.services.autopick_observation_ingest import (
+    persist_autopick_observation_report_to_data_db,
+)
 
 def _attach_shadow_payload(
     *,
@@ -114,7 +116,22 @@ def execute_scheduler_runtime_flow(
         top_n=int(settings.AUTO_PICK_INTERNAL_SCHEDULER_TOP_N),
     )
 
+    data_persistence = {"attempted": True, "ok": False}
+
+    try:
+        data_persistence = persist_autopick_observation_report_to_data_db(
+            observation_report
+        )
+        data_persistence["ok"] = True
+    except Exception as exc:
+        data_persistence = {
+            "attempted": True,
+            "ok": False,
+            "error": exc.__class__.__name__,
+        }
+
     observation_payload = observation_report.to_dict()
+    observation_payload["data_persistence"] = data_persistence
 
     shadow_out = dependencies.global_shadow_tick(db=db)
 

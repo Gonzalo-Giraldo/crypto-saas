@@ -100,3 +100,30 @@ def persist_autopick_observation_candidates(
         rows.append(row)
 
     return rows
+
+
+def persist_autopick_rejected_candidates(
+    *,
+    db: Session,
+    snapshot_id: str,
+    rejected_candidates: list,
+) -> list[AutopickObservationCandidate]:
+    rows: list[AutopickObservationCandidate] = []
+
+    for idx, candidate in enumerate(rejected_candidates, start=1):
+        row = AutopickObservationCandidate(
+            snapshot_id=snapshot_id,
+            rank=idx,
+            symbol=candidate.get("symbol"),
+            side=None,
+            valid=False,
+            reason=candidate.get("reason"),
+            final_score=None,
+            selected=False,
+            entry_price_reference=None,
+            features_json="{}",
+        )
+        db.add(row)
+        rows.append(row)
+
+    return rows

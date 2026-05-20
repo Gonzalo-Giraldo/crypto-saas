@@ -40,13 +40,13 @@ def _safe_float(value: Any) -> float | None:
     except Exception:
         return None
 
-
 def _empty_report(
     *,
     status: str,
     reason: str,
     top_n: int,
     started_at: str,
+    rejected_candidates: list[dict[str, Any]] | None = None,
 ) -> AutoPickObservationReport:
     return AutoPickObservationReport(
         decision_status=status,
@@ -59,6 +59,7 @@ def _empty_report(
         ranked_count=0,
         top_n=int(top_n),
         candidates=[],
+        rejected_candidates=list(rejected_candidates or []),
         started_at=started_at,
         finished_at=_utc_now_iso(),
         production_priority=True,
@@ -142,16 +143,32 @@ def run_binance_auto_pick_observation(
             )
 
         evaluations: List[dict[str, Any]] = []
+        rejected_candidates: List[dict[str, Any]] = []
 
         for symbol in symbols:
             ticker = next((r for r in ticker_rows if r.get("symbol") == symbol), None)
             if not ticker:
+                rejected_candidates.append({
+                    "symbol": symbol,
+                    "reason": "missing_ticker",
+                })
                 continue
 
             klines_1h = fetch_1h_klines(symbol)
             klines_15m = fetch_15m_klines(symbol)
 
-            if not klines_1h or not klines_15m:
+            if not klines_1h:
+                rejected_candidates.append({
+                    "symbol": symbol,
+                    "reason": "missing_1h_klines",
+                })
+                continue
+
+            if not klines_15m:
+                rejected_candidates.append({
+                    "symbol": symbol,
+                    "reason": "missing_15m_klines",
+                })
                 continue
 
             try:
@@ -162,16 +179,34 @@ def run_binance_auto_pick_observation(
                     ticker_24h=ticker,
                 )
                 evaluation = compute_final_score(candidate)
+
+                if not evaluation.get("valid"):
+                    rejected_candidates.append({
+                        "symbol": symbol,
+                        "reason": "invalid_evaluation",
+                    })
+                    continue
+
             except Exception:
+                rejected_candidates.append({
+                    "symbol": symbol,
+                    "reason": "candidate_build_failed",
+                })
                 continue
 
-            if evaluation.get("valid"):
-                evaluation["_candidate"] = candidate
-                side = str(evaluation.get("side") or "").upper().strip()
-                if side not in {"BUY", "SELL"}:
-                    continue
-                evaluation["side"] = side
-                evaluations.append(evaluation)
+            evaluation["_candidate"] = candidate
+
+            side = str(evaluation.get("side") or "").upper().strip()
+
+            if side not in {"BUY", "SELL"}:
+                rejected_candidates.append({
+                    "symbol": symbol,
+                    "reason": "invalid_side",
+                })
+                continue
+
+            evaluation["side"] = side
+            evaluations.append(evaluation)
 
         if not evaluations:
             return _empty_report(
@@ -179,6 +214,7 @@ def run_binance_auto_pick_observation(
                 reason="no_valid_candidates",
                 top_n=top_n,
                 started_at=started_at,
+                rejected_candidates=rejected_candidates,
             )
 
         ranked = sorted(
@@ -210,6 +246,7 @@ def run_binance_auto_pick_observation(
             ranked_count=len(ranked),
             top_n=int(top_n),
             candidates=projected_candidates,
+            rejected_candidates=rejected_candidates,
             started_at=started_at,
             finished_at=_utc_now_iso(),
             production_priority=True,
