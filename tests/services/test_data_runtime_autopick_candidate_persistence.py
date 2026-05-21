@@ -94,3 +94,61 @@ def test_persist_rejected_candidates_as_data_candidates():
     assert rows[0].valid is False
     assert rows[0].selected is False
     assert rows[0].reason == "missing_1h_klines"
+
+
+def test_observation_ingest_does_not_persist_snapshot_without_selected_symbol(monkeypatch):
+    from dataclasses import dataclass
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func
+
+    from apps.api.app.data_runtime.models.autopick_observation_snapshot import (
+        AutopickObservationSnapshot,
+    )
+    from apps.api.app.data_runtime.services import autopick_observation_ingest
+
+    engine = create_engine("sqlite:///:memory:")
+    TestingSessionLocal = sessionmaker(bind=engine)
+    DataBase.metadata.create_all(bind=engine)
+
+    monkeypatch.setattr(
+        autopick_observation_ingest,
+        "get_data_session_local",
+        lambda: TestingSessionLocal,
+    )
+
+    @dataclass(frozen=True)
+    class Report:
+        started_at: datetime
+        finished_at: datetime
+        decision_status: str
+        selected_symbol: str | None
+        ranked_count: int
+        candidates: tuple
+        rejected_candidates: tuple
+
+    report = Report(
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        decision_status="NO_SELECTION",
+        selected_symbol=None,
+        ranked_count=0,
+        candidates=(),
+        rejected_candidates=({"symbol": "BTCUSDT", "reason": "missing_1h_klines"},),
+    )
+
+    result = autopick_observation_ingest.persist_autopick_observation_report_to_data_db(
+        report
+    )
+
+    with TestingSessionLocal() as db:
+        snapshot_count = db.execute(
+            select(func.count()).select_from(AutopickObservationSnapshot)
+        ).scalar_one()
+        candidate_count = db.execute(
+            select(func.count()).select_from(AutopickObservationCandidate)
+        ).scalar_one()
+
+    assert result["persisted"] is True
+    assert snapshot_count == 0
+    assert candidate_count == 1
