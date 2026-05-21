@@ -143,6 +143,7 @@ def run_binance_auto_pick_observation(
             )
 
         evaluations: List[dict[str, Any]] = []
+        observational_evaluations: List[dict[str, Any]] = []
         rejected_candidates: List[dict[str, Any]] = []
 
         for symbol in symbols:
@@ -179,11 +180,13 @@ def run_binance_auto_pick_observation(
                     ticker_24h=ticker,
                 )
                 evaluation = compute_final_score(candidate)
+                evaluation["_candidate"] = candidate
+                observational_evaluations.append(evaluation)
 
                 if not evaluation.get("valid"):
                     rejected_candidates.append({
                         "symbol": symbol,
-                        "reason": "invalid_evaluation",
+                        "reason": str(evaluation.get("reason") or "invalid_evaluation"),
                     })
                     continue
 
@@ -201,8 +204,6 @@ def run_binance_auto_pick_observation(
                 })
                 continue
 
-            evaluation["_candidate"] = candidate
-
             side = str(evaluation.get("side") or "").upper().strip()
 
             if side not in {"BUY", "SELL"}:
@@ -215,13 +216,39 @@ def run_binance_auto_pick_observation(
             evaluation["side"] = side
             evaluations.append(evaluation)
 
+        top_limit = max(1, int(top_n))
+
         if not evaluations:
-            return _empty_report(
-                status="NO_SELECTION",
+            ranked_observational = sorted(
+                observational_evaluations,
+                key=lambda row: row.get("final_score", 0),
+                reverse=True,
+            )
+
+            projected_candidates = [
+                _candidate_projection(
+                    evaluation=row,
+                    rank=idx + 1,
+                    selected=False,
+                )
+                for idx, row in enumerate(ranked_observational[:top_limit])
+            ]
+
+            return AutoPickObservationReport(
+                decision_status="NO_SELECTION",
+                broker="BINANCE",
                 reason="no_valid_candidates",
-                top_n=top_n,
-                started_at=started_at,
+                no_selection_reason="no_valid_candidates",
+                selected=None,
+                selected_symbol=None,
+                selected_rank=None,
+                ranked_count=len(ranked_observational),
+                top_n=int(top_n),
+                candidates=projected_candidates,
                 rejected_candidates=rejected_candidates,
+                started_at=started_at,
+                finished_at=_utc_now_iso(),
+                production_priority=True,
             )
 
         ranked = sorted(
@@ -230,7 +257,6 @@ def run_binance_auto_pick_observation(
             reverse=True,
         )
 
-        top_limit = max(1, int(top_n))
         projected_candidates = [
             _candidate_projection(
                 evaluation=row,
