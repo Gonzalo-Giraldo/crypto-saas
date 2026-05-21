@@ -121,7 +121,12 @@ def persist_autopick_rejected_candidates(
             final_score=None,
             selected=False,
             entry_price_reference=None,
-            features_json="{}",
+            features_json=json.dumps(
+                dict(candidate.get("details") or {}),
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
         )
         db.add(row)
         rows.append(row)

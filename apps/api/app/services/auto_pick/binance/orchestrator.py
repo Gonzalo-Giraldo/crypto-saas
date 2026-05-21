@@ -187,10 +187,17 @@ def run_binance_auto_pick_observation(
                     })
                     continue
 
-            except Exception:
+            except Exception as exc:
                 rejected_candidates.append({
                     "symbol": symbol,
                     "reason": "candidate_build_failed",
+                    "details": {
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                        "ticker_24h": ticker,
+                        "klines_1h_count": len(klines_1h or []),
+                        "klines_15m_count": len(klines_15m or []),
+                    },
                 })
                 continue
 
