@@ -4,8 +4,8 @@
   const config = {
     currentEnvironment: 'local',
     environments: {
-      local: 'http://localhost:8000',
-      docker: 'http://localhost:8000'
+      local: 'http://127.0.0.1:8010',
+      ec2: 'http://127.0.0.1:8010'
     },
     getBaseUrl() {
       return this.environments[this.currentEnvironment] || '';

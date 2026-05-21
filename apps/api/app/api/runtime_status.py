@@ -214,3 +214,120 @@ def get_runtime_status(
         ],
         "mutations": [],
     }
+
+@router.get("/public-status")
+def get_public_runtime_status(
+    db: Session = Depends(get_db),
+):
+    scheduler_state = get_scheduler_runtime_state(
+        db,
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+    )
+
+    scheduler_interval_minutes = int(
+        settings.AUTO_PICK_INTERNAL_SCHEDULER_INTERVAL_MINUTES
+    )
+
+    scheduler_staleness = _derive_scheduler_staleness(
+        last_tick_at=scheduler_state.last_tick_at if scheduler_state else None,
+        interval_minutes=scheduler_interval_minutes,
+    )
+
+    recent_ticks = load_recent_scheduler_tick_journal(
+        db,
+        scheduler_name=AUTO_PICK_SCHEDULER_NAME,
+        limit=10,
+    )
+
+    return {
+        "runtime": {
+            "environment": str(
+                os.getenv("ENVIRONMENT")
+                or os.getenv("APP_ENV")
+                or "unknown"
+            ),
+            "scheduler_enabled": bool(
+                settings.AUTO_PICK_INTERNAL_SCHEDULER_ENABLED
+            ),
+            "scheduler_interval_minutes": scheduler_interval_minutes,
+            "scheduler_dry_run": bool(
+                settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN
+            ),
+        },
+        "autopick": {
+            "last_tick_at": (
+                scheduler_state.last_tick_at.isoformat()
+                if scheduler_state and scheduler_state.last_tick_at
+                else None
+            ),
+            "last_tick_status": (
+                scheduler_state.last_tick_status
+                if scheduler_state
+                else "UNKNOWN"
+            ),
+            "last_tick_duration_ms": (
+                scheduler_state.last_tick_duration_ms
+                if scheduler_state
+                else None
+            ),
+            "last_error": (
+                scheduler_state.last_error
+                if scheduler_state
+                else None
+            ),
+            "overlap_blocked": bool(
+                scheduler_state.overlap_blocked
+            ) if scheduler_state else False,
+            "runtime_locked": bool(
+                scheduler_state.runtime_locked
+            ) if scheduler_state else False,
+            "dry_run": bool(
+                scheduler_state.dry_run
+            ) if scheduler_state else bool(
+                settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN
+            ),
+            "last_candidate_symbol": (
+                scheduler_state.last_candidate_symbol
+                if scheduler_state
+                else None
+            ),
+            "last_candidate_score": (
+                scheduler_state.last_candidate_score
+                if scheduler_state
+                else None
+            ),
+            "last_execution_mode": (
+                scheduler_state.last_execution_mode
+                if scheduler_state
+                else None
+            ),
+            **scheduler_staleness,
+        },
+        "scheduler_tick_journal": [
+            {
+                "started_at": (
+                    row.started_at.isoformat()
+                    if row.started_at
+                    else None
+                ),
+                "finished_at": (
+                    row.finished_at.isoformat()
+                    if row.finished_at
+                    else None
+                ),
+                "duration_ms": row.duration_ms,
+                "status": row.status,
+                "candidate_symbol": row.candidate_symbol,
+                "candidate_score": row.candidate_score,
+                "decision_status": row.decision_status,
+                "selected_rank": row.selected_rank,
+                "ranked_count": row.ranked_count,
+                "top_n": row.top_n,
+                "analytics_exported": bool(
+                    row.analytics_exported
+                ),
+                "error": row.error,
+            }
+            for row in recent_ticks
+        ],
+    }

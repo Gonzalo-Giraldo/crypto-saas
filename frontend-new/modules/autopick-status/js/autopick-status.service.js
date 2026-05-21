@@ -1,5 +1,5 @@
 (function () {
-  const runtimeStatusEndpoint = '/api/runtime/status';
+  const runtimeStatusEndpoint = '/api/runtime/public-status';
 
   async function fetchAutopickStatus() {
     if (!window.SharedApiClient || !window.SharedApiClient.executeHttpRequest) {
