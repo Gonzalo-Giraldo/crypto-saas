@@ -60,7 +60,7 @@ def persist_autopick_observation_report_to_data_db(observation_report) -> dict:
         rejected = persist_autopick_rejected_candidates(
             db=data_db,
             snapshot_id=snapshot.snapshot_id,
-            rejected_candidates=list(getattr(observation_report, "rejected_candidates", []) or []),
+            rejected_candidates=list(getattr(observation_report, "rejected_candidates", []) or [])[:10],
         )
         data_db.commit()
 
