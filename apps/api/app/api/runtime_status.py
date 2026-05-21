@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 from apps.api.app.api.deps import require_role
 from apps.api.app.core.config import settings
 from apps.api.app.db.session import get_db
+from apps.api.app.data_runtime.session import get_data_db
+from apps.api.app.data_runtime.models.autopick_observation_snapshot import (
+    AutopickObservationCandidate,
+    AutopickObservationSnapshot,
+)
 from apps.api.app.models.binance_exit_protection import BinanceExitProtection
 from apps.api.app.models.user import User
 from apps.api.app.services.trading_controls import get_trading_enabled
@@ -331,3 +336,154 @@ def get_public_runtime_status(
             for row in recent_ticks
         ],
     }
+
+@router.get("/autopick-observation-status")
+def get_autopick_observation_status(
+    data_db: Session = Depends(get_data_db),
+):
+    latest_candidate = (
+        data_db.query(AutopickObservationCandidate)
+        .order_by(AutopickObservationCandidate.created_at.desc())
+        .first()
+    )
+
+    latest_snapshot = (
+        data_db.query(AutopickObservationSnapshot)
+        .order_by(AutopickObservationSnapshot.created_at.desc())
+        .first()
+    )
+
+    latest_snapshot_id = latest_candidate.snapshot_id if latest_candidate else None
+
+    candidate_rows = []
+    if latest_snapshot_id:
+        candidates = (
+            data_db.query(AutopickObservationCandidate)
+            .filter(AutopickObservationCandidate.snapshot_id == latest_snapshot_id)
+            .order_by(AutopickObservationCandidate.rank.asc())
+            .limit(10)
+            .all()
+        )
+
+        candidate_rows = [
+            {
+                "rank": row.rank,
+                "symbol": row.symbol,
+                "side": row.side,
+                "valid": bool(row.valid),
+                "reason": row.reason,
+                "final_score": row.final_score,
+                "selected": bool(row.selected),
+                "entry_price_reference": row.entry_price_reference,
+                "features": (
+                    json.loads(row.features_json)
+                    if row.features_json
+                    else {}
+                ),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in candidates
+        ]
+
+    return {
+        "runtime": {
+            "environment": str(
+                os.getenv("ENVIRONMENT")
+                or os.getenv("APP_ENV")
+                or "unknown"
+            ),
+            "scheduler_dry_run": bool(
+                settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN
+            ),
+        },
+        "autopick": {
+            "source": "data_observation_db",
+            "last_observation_at": (
+                latest_candidate.created_at.isoformat()
+                if latest_candidate and latest_candidate.created_at
+                else None
+            ),
+            "last_tick_at": (
+                latest_candidate.created_at.isoformat()
+                if latest_candidate and latest_candidate.created_at
+                else None
+            ),
+            "last_tick_status": "OK" if latest_candidate else "NO_DATA",
+            "dry_run": bool(settings.AUTO_PICK_INTERNAL_SCHEDULER_DRY_RUN),
+            "last_candidate_symbol": (
+                candidate_rows[0]["symbol"] if candidate_rows else None
+            ),
+            "last_candidate_score": (
+                candidate_rows[0]["final_score"] if candidate_rows else None
+            ),
+            "last_execution_mode": "observation_only",
+            "scheduler_stale": False if latest_candidate else True,
+            "operator_attention_required": False if latest_candidate else True,
+            "stale_reason": None if latest_candidate else "no_data_observation",
+        },
+        "observation": {
+            "snapshot_id": latest_snapshot_id,
+            "decision_status": (
+                latest_snapshot.decision_status if latest_snapshot else "NO_SELECTION"
+            ),
+            "selected_symbol": (
+                latest_snapshot.selected_symbol if latest_snapshot else None
+            ),
+            "selected_rank": (
+                latest_snapshot.selected_rank if latest_snapshot else None
+            ),
+            "ranked_count": (
+                latest_snapshot.ranked_count if latest_snapshot else 0
+            ),
+            "top_n": len(candidate_rows),
+            "candidate_count": len(candidate_rows),
+            "candidates": candidate_rows,
+        },
+        "scheduler_tick_journal": [
+            {
+                "started_at": (
+                    latest_candidate.created_at.isoformat()
+                    if latest_candidate and latest_candidate.created_at
+                    else None
+                ),
+                "finished_at": (
+                    latest_candidate.created_at.isoformat()
+                    if latest_candidate and latest_candidate.created_at
+                    else None
+                ),
+                "duration_ms": None,
+                "status": "OK" if latest_candidate else "NO_DATA",
+                "candidate_symbol": (
+                    candidate_rows[0]["symbol"] if candidate_rows else None
+                ),
+                "candidate_score": (
+                    candidate_rows[0]["final_score"] if candidate_rows else None
+                ),
+                "decision_status": (
+                    latest_snapshot.decision_status if latest_snapshot else "NO_SELECTION"
+                ),
+                "selected_rank": (
+                    latest_snapshot.selected_rank if latest_snapshot else None
+                ),
+                "ranked_count": len(candidate_rows),
+                "top_n": len(candidate_rows),
+                "analytics_exported": False,
+                "observation_payload": {
+                    "decision_status": (
+                        latest_snapshot.decision_status if latest_snapshot else "NO_SELECTION"
+                    ),
+                    "selected_symbol": (
+                        latest_snapshot.selected_symbol if latest_snapshot else None
+                    ),
+                    "selected_rank": (
+                        latest_snapshot.selected_rank if latest_snapshot else None
+                    ),
+                    "ranked_count": len(candidate_rows),
+                    "top_n": len(candidate_rows),
+                    "candidates": candidate_rows,
+                },
+                "error": None,
+            }
+        ],
+    }
+

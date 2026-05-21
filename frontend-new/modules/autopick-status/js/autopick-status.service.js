@@ -1,5 +1,5 @@
 (function () {
-  const runtimeStatusEndpoint = '/api/runtime/public-status';
+  const runtimeStatusEndpoint = '/api/runtime/autopick-observation-status';
 
   async function fetchAutopickStatus() {
     if (!window.SharedApiClient || !window.SharedApiClient.executeHttpRequest) {
