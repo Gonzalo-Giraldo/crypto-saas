@@ -45,7 +45,7 @@
 
   function formatAverageScore(candidates) {
     const scores = candidates
-      .map((candidate) => Number(candidate.final_score))
+      .map((candidate) => candidate.final_score === null || candidate.final_score === undefined ? NaN : Number(candidate.final_score))
       .filter((score) => Number.isFinite(score));
 
     if (scores.length === 0) {
@@ -99,7 +99,7 @@
       selectedRank: valueOrFallback(latestJournal.selected_rank || observation.selected_rank, 'N/A'),
       rankedCount: valueOrFallback(latestJournal.ranked_count || observation.ranked_count, 'N/A'),
       topN: valueOrFallback(latestJournal.top_n || observation.top_n, 'N/A'),
-      selectedSymbol: valueOrFallback(observation.selected_symbol || selected.symbol || latestJournal.candidate_symbol, 'NONE'),
+      selectedSymbol: valueOrFallback(observation.selected_symbol || selected.symbol, 'NONE'),
       selectedScore: valueOrFallback(selected.final_score || latestJournal.candidate_score, 'N/A'),
     };
   }
@@ -116,7 +116,7 @@
 
     return [
       {
-        label: '1. Scheduler authority',
+        label: '1. DATA observation',
         value: effectiveState,
         detail: `desired=${desiredState} | enabled=${runtime.scheduler_enabled === true ? 'yes' : runtime.scheduler_enabled === false ? 'no' : 'unknown'}`
       },
@@ -131,7 +131,7 @@
         detail: `runtime_locked=${Boolean(autopick.runtime_locked)} | overlap_blocked=${Boolean(autopick.overlap_blocked)}`
       },
       {
-        label: '4. Candidate selected',
+        label: '4. Top observed candidate',
         value: candidate,
         detail: `score=${score} | mode=${executionMode}`
       },

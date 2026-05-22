@@ -20,12 +20,6 @@
       return;
     }
 
-    render({
-      loading: true,
-      payload: null,
-      error: null,
-    });
-
     const status = await refreshAutopickStatus();
 
     render({
