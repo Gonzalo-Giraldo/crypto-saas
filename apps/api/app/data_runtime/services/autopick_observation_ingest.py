@@ -47,14 +47,11 @@ def persist_autopick_observation_report_to_data_db(observation_report) -> dict:
     SessionLocal = get_data_session_local()
 
     with SessionLocal() as data_db:
-        selected_symbol = getattr(observation_report, "selected_symbol", None)
-
-        if selected_symbol:
-            persist_autopick_observation_snapshot(
-                db=data_db,
-                snapshot=snapshot,
-                report=observation_report,
-            )
+        persist_autopick_observation_snapshot(
+            db=data_db,
+            snapshot=snapshot,
+            report=observation_report,
+        )
 
         candidates = persist_autopick_observation_candidates(
             db=data_db,

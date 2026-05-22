@@ -96,7 +96,7 @@ def test_persist_rejected_candidates_as_data_candidates():
     assert rows[0].reason == "missing_1h_klines"
 
 
-def test_observation_ingest_does_not_persist_snapshot_without_selected_symbol(monkeypatch):
+def test_observation_ingest_persists_snapshot_without_selected_symbol(monkeypatch):
     from dataclasses import dataclass
     from datetime import datetime, timezone
 
@@ -126,6 +126,10 @@ def test_observation_ingest_does_not_persist_snapshot_without_selected_symbol(mo
         ranked_count: int
         candidates: tuple
         rejected_candidates: tuple
+        selected: object | None = None
+        selected_rank: int | None = None
+        top_n: int = 0
+        model_version: str = "test_model_v1"
 
     report = Report(
         started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -150,5 +154,5 @@ def test_observation_ingest_does_not_persist_snapshot_without_selected_symbol(mo
         ).scalar_one()
 
     assert result["persisted"] is True
-    assert snapshot_count == 0
+    assert snapshot_count == 1
     assert candidate_count == 1
